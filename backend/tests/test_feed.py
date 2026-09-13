@@ -799,3 +799,13 @@ class DiaryBackfillTests(unittest.TestCase):
             " WHERE diary_backfilled_at IS NULL AND diary_synced_at IS NOT NULL;",
             self.schema,
         )
+
+    def test_a_script_runs_from_either_invocation(self):
+        """Depo kökünden `python -m backend.scripts.<ad>` de çalışmalı.
+
+        Yaşandı: komut `ModuleNotFoundError: No module named 'app'` ile öldü.
+        O biçimde sys.path'e depo kökü giriyor, `app` ise backend/ altında.
+        """
+        init = (ROOT / "scripts" / "__init__.py").read_text()
+        self.assertIn("sys.path.insert(0, _BACKEND)", init)
+        self.assertIn("parents[1]", init)
