@@ -22,14 +22,15 @@ anahtarı yoksa son adım yerel benzerlik sıralamasına düşer.
 | Alan | Ne yapar |
 |------|----------|
 | **Akış** | Film notları, cevaplar, beğeni, spoiler etiketi, film bazlı filtre. Ana ekran. |
-| **Günce aktarımı** | Üyelerin Letterboxd RSS'inden **yalnızca yorumlu** izleme kayıtları akışa düşer; izlendiği günün tarihiyle. |
+| **Günce aktarımı** | Üyenin Letterboxd'daki **yalnızca yorumlu** izleme kayıtlarının tamamı çekilir; akışta izlendiği günün tarihiyle yer alır. |
 | **Film sayfası** | Poster, kaç üyenin izlediği, topluluk ortalaması, o filme dair bütün notlar, "bu hafta perdede mi". |
 | **Ne izlesem?** | İzleme listesinden zevke göre sıralı öneri, gerekçesiyle. Sınırsız rastgele mod ayrı havuzdan çalışır. |
 | **Sinefil Sineması** | Zevk örtüşmesine göre sıralanmış üye kartları; Fav 4 ve eşleşme notu. |
 | **Blend** | İki üyenin karşılıklı onayıyla hesaplanan 0–100 uyum skoru ve ortak izleme listesi. |
 | **Mektuplar** | Üyeler arası uzun biçimli yazışma; günde bir gönderim. |
-| **Sinema bülteni** | Haftalık vizyon ajandası: izleme listesindekiler, 4+ verdiği dönenler, zevkine uyan yeni çıkanlar. |
+| **Sinema bülteni** | Haftalık vizyon ajandası; perdedeki her film, üyeyle olan bağın gücüne göre sıralı. |
 | **Bildirimler** | Takip, takip isteği, not cevabı, beğeni, mektup, Blend ve "bu hafta perdede" olayları. Web push desteklidir. |
+| **Kurulum çağrısı** | Ana ekrana ekleme daveti; iOS'ta paylaş menüsü adımlarıyla. |
 
 ## Depo düzeni
 
@@ -43,7 +44,7 @@ movie-box/
 │   │   ├── database.py      Supabase service-role istemcisi
 │   │   ├── cache.py         katmanlı SQLite/Supabase anahtar-değer önbelleği
 │   │   ├── rate_limit.py    IP başına bütçeler (auth / ağır uçlar / silme)
-│   │   ├── scraper.py       katman 1 — profil, izleme listesi, günce RSS
+│   │   ├── scraper.py       katman 1 — profil, izleme listesi, yorumlu günce
 │   │   ├── enrich.py        katman 2 — TMDb zenginleştirme
 │   │   ├── recommender.py   katman 3 — puan farkındalı benzerlik sıralaması
 │   │   ├── taste_profile.py kalıcı zevk özeti ve güven skoru
@@ -73,8 +74,10 @@ movie-box/
 └── .env.example
 ```
 
-Python paketleri `backend/` kökünden içe aktarılıyor, bu yüzden depo kökünden
-çalıştıran her komut `PYTHONPATH=backend` istiyor. `frontend/` dizini `/static`
+Python paketleri `backend/` kökünden içe aktarılıyor, bu yüzden sunucuyu depo
+kökünden çalıştırmak `PYTHONPATH=backend` istiyor. Bakım betikleri kendi kökünü
+bulduğu için iki biçimde de çalışıyor: `PYTHONPATH=backend python -m
+scripts.<ad>` veya `python -m backend.scripts.<ad>`. `frontend/` dizini `/static`
 URL öneki altında servis edilir — **önek değiştirilemez**: sürümlenmiş her
 varlığın adresini bozar ve bir yıllık `immutable` önbelleği ıskartaya çıkarır.
 
@@ -172,8 +175,8 @@ yüzden sınır üyede: `DIARY_SCAN_MEMBERS_PER_RUN` (20) koş başına istek sa
 sayıyor ve eşiği ikiye katlıyor (`DIARY_SCAN_MIN_HOURS` 1 saatten
 `DIARY_SCAN_MAX_HOURS` 24 saate kadar), ilk yeni kayıtta tabana dönüyor. Yazan
 üye her saat, yıllardır yazmayan üye günde bir taranıyor. Bütçe yetmediğinde tek
-sonuç kaydın biraz geç düşmesi; akış penceresi yedi gün olduğu için görünürlüğü
-etkilemiyor.
+sonuç kaydın biraz geç düşmesi; akış penceresi en dar yerde yedi gün olduğu için
+görünürlüğü etkilemiyor.
 
 Üye başına yalnız üç kayıt okumanın bir bedeli var: bir üye aynı saat içinde
 üçten fazla yorum yazarsa fazlası o taramada atlanıyor ve bir daha bakılmıyor.
@@ -182,8 +185,9 @@ Sayıyı büyütmek fazladan istek getirmiyor, `DIARY_SCAN_ENTRIES` yeterli.
 
 **Yeni üyenin arşivi.** Kayıt sırasında değil, üye uygulamaya girdikten sonra
 taranıyor: akış açıldığında arka planda bir iş tetikleniyor ve koş başına
-`DIARY_BACKFILL_PAGES_PER_RUN` (3) sayfa ilerliyor — yaklaşık 36 kayıt, yeniden
-eskiye doğru, profil doldukça görünerek. Onboarding'e bağlanmamasının sebebi:
+`DIARY_BACKFILL_MEMBERS_PER_RUN` (2) üye × `DIARY_BACKFILL_PAGES_PER_RUN` (3)
+sayfa ilerliyor — üye başına yaklaşık 36 kayıt, yeniden eskiye doğru, profil
+doldukça görünerek. Onboarding'e bağlanmamasının sebebi:
 yüzlerce sayfalık bir tarama kayıt akışını bekletemez.
 
 Nerede kalındığı `users.diary_backfill_page` içinde, dolayısıyla süreç yeniden
@@ -200,8 +204,8 @@ PYTHONPATH=backend python -m scripts.import_diary --apply --limit 5 --pause 5
 
 Dört kural içe aktarmanın kendisinde:
 
-- **Bir kez düşer.** Kaydın kimliği RSS guid'i; `posts.source_key` üzerindeki
-  tekil indeks aynı kaydı ikinci kez eklemiyor.
+- **Bir kez düşer.** Kaydın kimliği sayfadaki `viewing:<id>`; `posts.source_key`
+  üzerindeki tekil indeks aynı kaydı ikinci kez eklemiyor.
 - **Silinen geri gelmez.** Silme yumuşak olduğu için satır ve anahtarı duruyor;
   tekrar çalıştırmak onu diriltmiyor.
 - **Sıra izlenme günü.** Kayıt, akışta izlendiği günün tarihiyle yer alıyor.
@@ -211,10 +215,10 @@ Dört kural içe aktarmanın kendisinde:
 Takip grafiği de aynı şekilde bir kez tohumlanır:
 `PYTHONPATH=backend python -m scripts.seed_follows --apply`.
 
-### Akıştaki haftalık pencere
+### Akıştaki pencere
 
-Arşivin tamamı içeri giriyor ama keşif akışlarında yalnızca son yedi günün
-kayıtları görünüyor (`FEED_DIARY_WINDOW_DAYS`). Pencere `created_at` üzerinden,
+Arşivin tamamı içeri giriyor ama keşif akışlarının bir ufku var
+(`FEED_DIARY_WINDOW_DAYS`, `FEED_FOLLOWING_WINDOW_DAYS`). Pencere `created_at` üzerinden,
 o alan içe aktarımda **izlenme günü** oluyor — kaydın kendi tarihi, çekildiği an
 değil.
 
@@ -229,8 +233,11 @@ bütün üyelerden "bu hafta ne konuşuluyor"u gösteriyor, takip ettiklerin ise
 seçilmiş birkaç kişiyi — orada bir hafta çoğu zaman boş bir sayfa demek.
 
 Pencere yalnızca `source = 'letterboxd'` satırlarına işliyor; uygulamada
-yazılan not eskise de akışta kalıyor. Bir haftadan sonra kaybolan bir not,
-üyenin uygulamaya yazdığı yazıyı silmek gibi okunurdu.
+yazılan not eskise de akışta kalıyor. Bir hafta sonra kaybolan bir not, üyenin
+uygulamaya yazdığı yazıyı silmek gibi okunurdu.
+
+Pencere **gizliyor, silmiyor**: eski kayıtları temizleyen bir iş yok, satırlar
+veritabanında duruyor ve profil ile film sayfalarında görünmeye devam ediyor.
 
 Aynı ayrım gövde sınırında da var: uygulamada yazılan not 420 karakter (ürün
 kararı, API katmanı uyguluyor), içe aktarılan yorum 10.000'e kadar. Tek bir 420
@@ -308,6 +315,24 @@ Mektup yollamak için kullanıcının kendi kutusunun da açık olması gerekiyo
 gösterir. Gerekçesi: kapalı bir hesaptan gönderilen mektup, alıcının cevap
 veremediği tek yönlü bir kanal olur. Bu kural gelmeden önce yollamış ve kutusu
 kapalı kalmış hesapları `scripts.fix_letter_senders` listeler, `--apply` açar.
+
+## Kurulum çağrısı
+
+Uygulamayı ana ekrana ekleme daveti, üye uygulamaya girdiğinde çıkıyor;
+onboarding'i yeni bitiren üye de görsün diye `finishOnboarding` sonunda 1,5
+saniye gecikmeyle çağrılıyor (profil ilk kez boyansın, modal üstüne binmesin).
+Onboarding ekrandayken hiç açılmıyor: orası kilitli bir tam ekran akış.
+
+Platforma göre iki hâli var:
+
+| Platform | Davranış |
+|---|---|
+| Chrome / Edge (Android, masaüstü) | `beforeinstallprompt` yakalanıyor, diyalogdaki düğme kurulumu başlatıyor. |
+| iOS (Safari, Chrome, Edge — hepsi WebKit) | Olay hiç gelmiyor ve sayfadan kurulum başlatılamıyor; düğme yerine paylaş menüsü adımları gösteriliyor. |
+
+iOS'ta "kuruldu" sinyali de yok — üye ana ekrana eklese bile Safari'de açtığında
+`navigator.standalone` false. O yüzden kapatma `IOS_INSTALL_HINT_DAYS` (30 gün)
+boyunca hatırlanıyor, yoksa davet her girişte yeniden çıkardı.
 
 ## Gizlilik
 
@@ -441,9 +466,7 @@ okumaz — panel ayarı yine de yapılmalı.
 - Google fontları self-host/subset edilip kritik olanlar preload edilmeli.
 - `criterion-closet-bg.jpg` için AVIF/WebP varyantı üretilmeli
   (`frontend/movienotes-mark.png` de favicon olarak 232 KB — küçültülebilir).
-- RSS + HTML liste parmak iziyle artımlı günce güncellemesi.
 - İki üyeli gerçek Supabase üzerinde RLS/state-machine entegrasyon testi ve
   login → senkron → inbox → Blend kabulü için browser E2E testi.
 - Öneri için golden dataset ve offline eval; eval'lerin CI'a eklenmesi.
 - Letterboxd hesabı olmayan kullanıcı için 10 filmlik swipe onboarding.
-</content>
