@@ -74,7 +74,7 @@ class Settings(BaseSettings):
     # a duplicate watched-list scrape before the checkpointed full sweep.
     provisional_watched_film_limit: int = 0
     watchlist_film_limit: int = 150 # candidate havuzu — en son eklenen N film (varsayılan sıra: en yeni önce)
-    scrape_max_retries: int = 3     # 403/429'da sayfa başına tekrar deneme
+    scrape_max_retries: int = 2     # 403/429'da sayfa başına tekrar deneme
 
     # --- Günce taraması ---
     # Saatlik koşu, üye başına tek istek. Maliyeti belirleyen şey kaydın sayısı

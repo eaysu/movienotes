@@ -72,7 +72,12 @@ class _LetterboxdRequestBudget:
                     self._penalties = min(self._penalties + 1, 5)
                     self._success_streak = 0
                     self.current_limit = 1
-                    cooldown = min(60.0, 3.0 * (2 ** (self._penalties - 1)))
+                    # A block is a signal to checkpoint the crawl, not to keep a
+                    # user waiting for minutes inside one HTTP request.  The sync
+                    # runner resumes from the blocked page on its next attempt.
+                    # Keep the shared circuit short enough to protect Letterboxd
+                    # without multiplying a few 403s into multi-minute waits.
+                    cooldown = min(12.0, 2.0 * (2 ** (self._penalties - 1)))
                     self._blocked_until = max(
                         self._blocked_until, time.monotonic() + cooldown
                     )
@@ -162,24 +167,24 @@ async def _human_pause(base: float) -> None:
 
 
 async def _warmup(session, username: str) -> int | None:
-    """Doğal gezinme taklidi: anasayfa → profil. Cloudflare oturum cookie'leri kurar.
+    """Probe the profile only when a list endpoint needs classification.
 
-    Bir tarayıcı film listesine doğrudan girmez; önce anasayfayı ve profili
-    ziyaret eder. Bu istekler cf_clearance / oturum cookie'lerini set edebilir,
-    sonraki liste isteklerinin engellenme olasılığını düşürür. Hatalar kritik değil.
+    List crawls used to always request the homepage and profile before the first
+    film page.  On Render that added two more opportunities for a 403 before any
+    useful data was read.  A direct list request is both faster and closer to the
+    request a user makes from a profile; the profile probe is now a rare fallback
+    used to distinguish an absent account from a private list.
     """
-    profile_status: int | None = None
-    for index, url in enumerate((f"{BASE_URL}/", f"{BASE_URL}/{username}/")):
-        try:
-            response = await _budgeted_get(
-                session, url, headers=_NAV_HEADERS, timeout=10
-            )
-            if index == 1:
-                profile_status = response.status_code
-            await _human_pause(0.5)
-        except Exception:
-            pass
-    return profile_status
+    try:
+        response = await _budgeted_get(
+            session,
+            f"{BASE_URL}/{username}/",
+            headers=_NAV_HEADERS,
+            timeout=10,
+        )
+        return response.status_code
+    except Exception:
+        return None
 
 
 async def _fetch_with_retry(
@@ -375,6 +380,26 @@ class ScrapedFilm:
 
     def to_dict(self) -> dict:
         return asdict(self)
+
+
+@dataclass
+class ScrapeListResult:
+    """A page-window result with enough state to resume without skipping data.
+
+    It remains unpackable as ``(films, complete)`` for the older call sites,
+    while the full-history sync uses ``next_page`` and ``exhausted`` to persist a
+    precise checkpoint after an upstream block.
+    """
+
+    films: list[ScrapedFilm]
+    complete: bool
+    next_page: int
+    exhausted: bool
+    pages_fetched: int
+
+    def __iter__(self):
+        yield self.films
+        yield self.complete
 
 
 @dataclass
@@ -705,19 +730,20 @@ async def _scrape_list(
     start_page: int = 1,
     film_limit: int | None = None,
     max_retries: int = 3,
-) -> tuple[list[ScrapedFilm], bool]:
+) -> ScrapeListResult:
     """Generic paginated scraper for any Letterboxd film grid.
 
     Strateji (ücretsiz ve doğrudan):
-      1. Tek bir oturumda doğal warm-up (anasayfa → profil) ile cookie kur.
+      1. İlk film sayfasına doğrudan git; normal akışta gereksiz warm-up yapma.
       2. Her sayfayı curl-cffi ile getir; humanize edilmiş jitter'lı gecikmeler.
-      3. 403/429 gelirse backoff + parmak izi rotasyonu ile birkaç kez tekrar dene.
+      3. 403/429 gelirse kısa backoff + parmak izi rotasyonu ile tekrar dene.
 
     start_page: bu sayfadan başlar (resume edilebilir pencereli crawl için);
     en fazla `max_pages` sayfa daha çeker.
     film_limit: toplam bu sayıya ulaşınca durur (None = sınırsız).
-    Döner: (films, complete). complete=False → tarama bir blok/hata ile yarıda
-    kaldı (eksik olabilir); cache'lenmemeli. complete=True → doğal son / limit.
+    ``complete=False`` means the crawl stopped at ``next_page`` because of an
+    upstream block or network error.  Callers that persist a full history must
+    resume exactly there rather than advancing to the next fixed-size window.
     """
     username = username.strip().lstrip("@").lower()
     if not username:
@@ -726,16 +752,12 @@ async def _scrape_list(
     films: list[ScrapedFilm] = []
     seen_slugs: set[str] = set()
     complete = True  # blok/hata ile yarıda kalırsa False'a çekilir
+    exhausted = False
     started = time.perf_counter()
     pages_fetched = 0
+    next_page = start_page
 
     async with AsyncSession(impersonate=_DEFAULT_IMPERSONATE) as session:
-        profile_status = await _warmup(session, username)
-        if profile_status == 404:
-            raise ProfileNotFoundError(
-                f"Letterboxd kullanıcısı '@{username}' bulunamadı.", status=404
-            )
-
         for page in range(start_page, start_page + max_pages):
             direct_url = (
                 f"{BASE_URL}/{username}/{list_path}/"
@@ -756,15 +778,23 @@ async def _scrape_list(
 
             # ── Durum kodu değerlendirmesi ─────────────────────────────────────
             if resp is None:
-                if page == 1:
+                if page == start_page:
                     raise ScrapeNetworkError(
                         "Letterboxd'a ağ üzerinden ulaşılamadı. Lütfen tekrar dene."
                     )
                 complete = False  # ağ hatası ile yarıda kaldı
+                next_page = page
                 break
             if status == 404:
                 # 404: bu sayfa yok → liste doğal olarak bitti (eksik değil).
-                if page == 1:
+                if page == start_page:
+                    # A later window can legitimately begin after the final
+                    # page.  Only the first overall page needs account/list
+                    # classification.
+                    if start_page > 1:
+                        exhausted = True
+                        break
+                    profile_status = await _warmup(session, username)
                     if profile_status == 200:
                         raise PrivateListError(
                             f"@{username} profili bulundu ancak bu liste gizli veya erişilemiyor.",
@@ -773,29 +803,34 @@ async def _scrape_list(
                     raise ProfileNotFoundError(
                         f"Letterboxd kullanıcısı '@{username}' bulunamadı.", status=404
                     )
+                exhausted = True
                 break
             if status in (403, 429):
-                if page == 1:
+                if page == start_page:
                     raise AccessBlockedError(
                         f"Letterboxd erişimi engelledi (HTTP {status}). "
                         "Sunucu IP'si geçici olarak bloklu olabilir.",
                         status=status,
                     )
                 complete = False  # bloklandı → kalan sayfalar eksik
+                next_page = page
                 break
             if status != 200:
-                if page == 1:
+                if page == start_page:
                     raise ScrapeError(f"Letterboxd HTTP {status} döndürdü: {direct_url}")
                 complete = False
+                next_page = page
                 break
 
             pages_fetched += 1
+            next_page = page + 1
             page_films = _parse_page(resp.text)
             if not page_films:
-                if page == 1:
+                if page == start_page and start_page == 1:
                     preview = resp.text[:300].replace("\n", " ")
                     log.warning("scraper: page 1 empty (status=%s). HTML preview: %s", status, preview)
                     raise _empty_page_error(username, list_path, resp.text)
+                exhausted = True
                 break  # boş sayfa = pagination doğal sonu
 
             new_count = 0
@@ -807,6 +842,7 @@ async def _scrape_list(
 
             # Sayfa tamamen tekrar (yeni film yok) → pagination bitti, dur.
             if new_count == 0:
+                exhausted = True
                 break
 
             if film_limit and len(films) >= film_limit:
@@ -816,14 +852,22 @@ async def _scrape_list(
             await _human_pause(delay)
 
     log.warning(
-        "scrape_metrics list=%s duration_ms=%d pages=%d films=%d complete=%s",
+        "scrape_metrics list=%s duration_ms=%d pages=%d films=%d complete=%s next_page=%d exhausted=%s",
         list_path,
         round((time.perf_counter() - started) * 1000),
         pages_fetched,
         len(films),
         complete,
+        next_page,
+        exhausted,
     )
-    return films, complete
+    return ScrapeListResult(
+        films=films,
+        complete=complete,
+        next_page=next_page,
+        exhausted=exhausted,
+        pages_fetched=pages_fetched,
+    )
 
 
 async def scrape_watchlist(
@@ -833,7 +877,7 @@ async def scrape_watchlist(
     max_pages: int = 40,
     film_limit: int | None = None,
     max_retries: int = 3,
-) -> tuple[list[ScrapedFilm], bool]:
+) -> ScrapeListResult:
     """Kullanıcının izlemek istediği film listesini çeker. Döner: (films, complete)."""
     normalized = username.strip().lstrip("@").lower()
     key = (normalized, "watchlist", delay, max_pages, film_limit, max_retries)
@@ -857,7 +901,7 @@ async def scrape_diary(
     start_page: int = 1,
     film_limit: int = 250,
     max_retries: int = 3,
-) -> tuple[list[ScrapedFilm], bool]:
+) -> ScrapeListResult:
     """Diary HTML sayfalarından ek film listesi çeker. Döner: (films, complete)."""
     return await _scrape_list(
         username, "films/diary",
@@ -1122,7 +1166,7 @@ async def scrape_films(
     max_pages: int = 10,
     film_limit: int = 5000,
     max_retries: int = 3,
-) -> tuple[list[ScrapedFilm], bool]:
+) -> ScrapeListResult:
     """Tüm izlenen filmler grid'i (`/films/`, 'eklenme' sırası, en yeni önce).
 
     Diary yalnızca tarihli loglanan filmleri kapsar; `/films/` kullanıcının

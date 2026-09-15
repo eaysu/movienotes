@@ -16,6 +16,7 @@ import asyncio
 import contextlib
 import logging
 import uuid
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
 log = logging.getLogger("uvicorn.error")
@@ -34,12 +35,29 @@ MAX_CONCURRENT_JOBS = 1
 LEASE_SECONDS = 360
 # Cooldown after a hard failure before the job is retried.
 FAILURE_BACKOFF = timedelta(minutes=30)
+# A Letterboxd block is expected to be temporary.  Keep the durable checkpoint
+# and retry it soon, instead of treating it like a data/configuration failure.
+SCRAPE_RETRY_BACKOFF = timedelta(minutes=2)
 # Opening the app should be cheap. A completed profile gets at most one
 # opportunistic Letterboxd check per day; explicit refresh remains available.
 INCREMENTAL_MIN_INTERVAL = timedelta(hours=24)
 
 _job_sem = asyncio.Semaphore(MAX_CONCURRENT_JOBS)
 _tasks: dict[int, asyncio.Task] = {}
+
+
+@dataclass
+class ScrapeWindow:
+    """One persisted crawl window and the exact page that follows it."""
+
+    films: list[dict]
+    next_page: int
+    exhausted: bool = False
+    complete: bool = True
+
+
+class IncompleteScrapeError(RuntimeError):
+    """The upstream blocked a crawl after a safe page-level checkpoint."""
 
 
 def _now() -> datetime:
@@ -240,13 +258,18 @@ async def run_job(pipeline, service, account) -> None:
             {"error": type(exc).__name__},
         )
         with contextlib.suppress(Exception):
+            backoff = (
+                SCRAPE_RETRY_BACKOFF
+                if isinstance(exc, IncompleteScrapeError)
+                else FAILURE_BACKOFF
+            )
             await asyncio.to_thread(
                 service.touch_sync_job,
                 uid,
                 owned_by=lease_token,
                 state="failed",
                 last_error=str(exc)[:400],
-                backoff_until=(_now() + FAILURE_BACKOFF).isoformat(),
+                backoff_until=(_now() + backoff).isoformat(),
                 lease_token=None,
                 lease_expires_at=None,
             )
@@ -318,11 +341,27 @@ async def _crawl(pipeline, service, account, *, lease_token: str | None = None) 
     # catalog metadata is hydrated locally; genuine misses are enriched after
     # all Letterboxd pages have been collected.
     while phase == "diary":
-        window = await pipeline.scrape_watched_window(account.username, cursor)
+        raw_window = await pipeline.scrape_watched_window(account.username, cursor)
+        # Keep lightweight test/extension pipelines that return a plain list
+        # compatible, while production uses the resumable page checkpoint.
+        if isinstance(raw_window, ScrapeWindow):
+            window = raw_window.films
+            next_cursor = max(cursor, int(raw_window.next_page or cursor))
+            exhausted = raw_window.exhausted
+            complete = raw_window.complete
+        else:
+            window = raw_window
+            next_cursor = cursor + WATCHED_WINDOW_PAGES
+            exhausted = not window
+            complete = True
         if not window:
-            phase = "enrich"
-            natural_end = True
-            break
+            if exhausted:
+                phase = "enrich"
+                natural_end = True
+                break
+            raise IncompleteScrapeError(
+                f"Letterboxd taraması @{account.username} için sayfa {cursor}'de veri döndürmedi."
+            )
         fresh: list[dict] = []
         known_updates: list[dict] = []
         for index, film in enumerate(window):
@@ -361,7 +400,7 @@ async def _crawl(pipeline, service, account, *, lease_token: str | None = None) 
                 )
             await asyncio.to_thread(service.save_watched_films, uid, enriched)
         processed += len(window)
-        cursor += WATCHED_WINDOW_PAGES
+        cursor = next_cursor
         await _touch(
             service,
             uid,
@@ -370,6 +409,13 @@ async def _crawl(pipeline, service, account, *, lease_token: str | None = None) 
             films_processed=processed,
             films_total=0,
         )
+        if not complete:
+            # The successful pages above are already durable.  Stop here so the
+            # failed page is retried from this exact cursor; never skip a block
+            # by blindly advancing to the next four-page window.
+            raise IncompleteScrapeError(
+                f"Letterboxd taraması @{account.username} için sayfa {cursor}'de engellendi; kaldığı yerden yeniden denenecek."
+            )
         if processed >= FULL_MAX_FILMS:
             phase = "enrich"
 

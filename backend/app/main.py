@@ -2751,26 +2751,33 @@ class _SyncPipeline:
                 )
         return self._enricher_obj
 
-    async def scrape_watched_window(self, username: str, start_page: int) -> list[dict]:
-        films, _complete = await scrape_films(
+    async def scrape_watched_window(
+        self, username: str, start_page: int
+    ) -> profile_sync.ScrapeWindow:
+        result = await scrape_films(
             username,
             start_page=start_page,
             max_pages=self.window_pages,
             film_limit=self.window_pages * 80,
             max_retries=self.settings.scrape_max_retries,
         )
-        return [
-            {
-                "slug": film.slug,
-                "title": film.title,
-                "year": film.year,
-                "user_rating": film.user_rating,
-                "poster_url": film.poster_url,
-                "poster_resolver_url": film.poster_resolver_url,
-            }
-            for film in films
-            if film.slug
-        ]
+        return profile_sync.ScrapeWindow(
+            films=[
+                {
+                    "slug": film.slug,
+                    "title": film.title,
+                    "year": film.year,
+                    "user_rating": film.user_rating,
+                    "poster_url": film.poster_url,
+                    "poster_resolver_url": film.poster_resolver_url,
+                }
+                for film in result.films
+                if film.slug
+            ],
+            next_page=result.next_page,
+            exhausted=result.exhausted,
+            complete=result.complete,
+        )
 
     async def scrape_recent(self, username: str) -> list[dict]:
         films = await scrape_recent_watched(

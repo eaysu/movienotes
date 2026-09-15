@@ -436,6 +436,35 @@ class RunnerTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIn("older", service.films)
 
+    async def test_partial_window_checkpoints_before_the_blocked_page(self):
+        service = FakeService()
+        service.job = {
+            "user_id": 7,
+            "state": "queued",
+            "phase": "diary",
+            "scope": "full",
+            "cursor_page": 1,
+            "films_processed": 0,
+            "sync_run_id": "partial-run",
+        }
+
+        class PartialPipeline(FakePipeline):
+            async def scrape_watched_window(self, username, start_page):
+                self.window_calls.append(start_page)
+                return profile_sync.ScrapeWindow(
+                    films=[{"slug": "saved-page-one", "title": "Saved", "year": 2024}],
+                    next_page=2,
+                    complete=False,
+                )
+
+        await profile_sync.run_job(PartialPipeline(service, {}), service, _account())
+
+        self.assertEqual(service.job["state"], "failed")
+        self.assertEqual(service.job["cursor_page"], 2)
+        self.assertIn("saved-page-one", service.films)
+        self.assertIn("sayfa 2", service.job["last_error"])
+        self.assertTrue(service.job["backoff_until"])
+
     async def test_hard_failure_sets_failed_state_with_backoff(self):
         service = FakeService()
         service.job = {

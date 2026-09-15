@@ -9,6 +9,7 @@ from app.scraper import (
     _fetch_profile_with_fresh_sessions,
     _parse_page,
     _parse_profile_page,
+    _scrape_list,
     _resolve_missing_posters,
 )
 
@@ -72,6 +73,53 @@ class ProfileParserTests(unittest.TestCase):
 
 
 class ProfileRetryTests(unittest.IsolatedAsyncioTestCase):
+    async def test_partial_list_keeps_the_blocked_page_as_next_checkpoint(self):
+        page_one = """
+        <div data-item-slug="perfect-days" data-item-name="Perfect Days (2023)">
+          <img src="https://a.ltrbxd.com/perfect-days.jpg" />
+        </div>
+        """
+
+        class FakeSession:
+            get_calls = 0
+
+            def __init__(self, **_kwargs):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_args):
+                return None
+
+            async def get(self, *_args, **_kwargs):
+                type(self).get_calls += 1
+                raise AssertionError("successful list crawls must not warm up first")
+
+        async def fetch(_session, _url, _referer, **_kwargs):
+            if not hasattr(fetch, "calls"):
+                fetch.calls = 0
+            fetch.calls += 1
+            if fetch.calls == 1:
+                return SimpleNamespace(status_code=200, text=page_one), 200
+            return SimpleNamespace(status_code=403, text="blocked"), 403
+
+        with (
+            patch("app.scraper.AsyncSession", FakeSession),
+            patch("app.scraper._fetch_with_retry", side_effect=fetch),
+            patch("app.scraper._human_pause", new=AsyncMock()),
+        ):
+            result = await _scrape_list(
+                "sample_user", "films", max_pages=4, delay=0, max_retries=1
+            )
+
+        self.assertEqual([film.slug for film in result.films], ["perfect-days"])
+        self.assertFalse(result.complete)
+        self.assertFalse(result.exhausted)
+        self.assertEqual(result.next_page, 2)
+        self.assertEqual(result.pages_fetched, 1)
+        self.assertEqual(FakeSession.get_calls, 0)
+
     async def test_lazy_poster_resolver_prefers_high_resolution_url(self):
         film = _parse_page(
             '''
