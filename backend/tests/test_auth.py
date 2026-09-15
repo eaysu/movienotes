@@ -629,6 +629,46 @@ def test_onboarding_completion_is_persisted_after_reveal_is_ready():
     assert response.json()["completed_at"].startswith("2026-08-31")
 
 
+def test_onboarding_completion_invalidates_the_short_account_cache():
+    """A reload right after finishing onboarding must see the fresh account,
+    not the pre-completion snapshot _require_account cached for 30s."""
+    token = "onboarding-cache-token"
+    account = _account("cache_member")
+    calls = []
+    fake_service = SimpleNamespace(
+        current_account=lambda _token: calls.append(_token) or account,
+        get_sync_job=lambda _uid: {
+            "state": "done", "phase": "done", "scope": "full",
+            "films_processed": 812, "films_total": 812,
+        },
+        complete_onboarding=lambda _account: "2026-08-31T12:00:00+00:00",
+    )
+    main._invalidate_account_cache(token)
+    cookie = {"Cookie": f"mb_access={token}; mb_csrf=csrf-token"}
+    try:
+        with (
+            patch("app.main.get_settings", return_value=_settings()),
+            patch("app.main._auth_service", return_value=fake_service),
+            TestClient(main.app, base_url="https://testserver") as client,
+        ):
+            # A normal page load primes the short-lived account cache.
+            client.get("/api/auth/me", headers=cookie)
+            assert calls == [token]
+
+            response = client.post(
+                "/api/profile/onboarding-complete",
+                headers={**cookie, "X-CSRF-Token": "csrf-token"},
+            )
+            assert response.status_code == 200
+
+            # A reload right after finishing onboarding must re-validate
+            # instead of returning the cached, pre-completion account.
+            client.get("/api/auth/me", headers=cookie)
+            assert calls == [token, token]
+    finally:
+        main._invalidate_account_cache(token)
+
+
 def test_authenticated_delete_removes_auth_identity_and_clears_session():
     account = _account()
     deleted = []

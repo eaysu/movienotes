@@ -1663,6 +1663,10 @@ async def complete_profile_onboarding(request: Request) -> dict:
             detail="Tüm Letterboxd geçmişi henüz taranmadı.",
         )
     completed_at = await asyncio.to_thread(service.complete_onboarding, account)
+    # Without this, a page reload within the 30s account cache window
+    # (_require_account) still serves the pre-completion Account, sending a
+    # user who just finished onboarding straight back into it.
+    _invalidate_account_cache(request.cookies.get(ACCESS_COOKIE, ""))
     await _record_activity_event(
         service, account, "onboarding_completed", {"source": "profile"}
     )
