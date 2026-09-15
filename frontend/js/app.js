@@ -3737,9 +3737,8 @@ function enterApp(account, opts = {}) {
 }
 
 // ── Onboarding reveal ──────────────────────────────────────────────────
-// Tüm izleme geçmişi taraması bitene kadar tek bir bekleme ekranı çalışır
-// (akan sinema bilgileri + ilerleme). Tarama biter bitmez slaytlar sırayla
-// sunulur; kullanıcı ok tuşları / ileri-geri düğmeleriyle gezinebilir.
+// Tüm izleme geçmişi taraması bitene kadar tek bir bekleme ekranı çalışır;
+// tam analiz hazır olduğunda slaytlar sırayla sunulur.
 let _obToken = 0;             // her yeni çalışma bu sayacı artırır — async iptal kontrolü
 let _obSlideTimer = null;     // slayt otomatik ilerleme
 let _obFactTimer = null;      // bilgi kartı rotasyonu
@@ -4090,7 +4089,7 @@ async function startOnboarding() {
   if (!_obLive(token)) return;
   _obStopFacts();
 
-  // ── Tarama bitti — slaytları sırayla sun (ileri/geri gezinilebilir) ──
+  // ── Tarama bitti — slaytları sırayla sun ──
   const profile = readyProfile || _persistedProfile || data;
   const taste = profile.taste || data.taste || {};
   const stats = data.letterboxd_stats || {};
@@ -4123,6 +4122,10 @@ async function startOnboarding() {
 }
 
 async function boot() {
+  // Auth ekranını ağ isteklerine bağlama; mobil ağda session/health yanıtı
+  // gecikse bile ziyaretçi formu hemen görsün.
+  setAuthMode('register');
+  showView('auth');
   // Health ve session birbirinden bağımsızdır. Mobil ağda iki round-trip'i
   // sıraya koymak yerine aynı anda başlatarak giriş/profil açılışını hızlandır.
   const [health, me] = await Promise.all([
@@ -5039,6 +5042,15 @@ function _scrapeWaitReassurance(startText) {
   return () => timers.forEach(clearTimeout);
 }
 
+function _challengeWaitReassurance() {
+  setAuthMessage('Doğrulama kodu hazırlanıyor…');
+  const timers = [
+    setTimeout(() => setAuthMessage('Kod hazırlanıyor, birkaç saniye daha…'), 4000),
+    setTimeout(() => setAuthMessage('Hesap bağlantısı gecikti ama hâlâ çalışıyor…'), 10000),
+  ];
+  return () => timers.forEach(clearTimeout);
+}
+
 async function startRegistration(event) {
   event.preventDefault();
   const password = $('register-password').value;
@@ -5048,7 +5060,7 @@ async function startRegistration(event) {
   }
   const button = $('btn-register');
   button.disabled = true;
-  const clearReassurance = _scrapeWaitReassurance('Letterboxd profili kontrol ediliyor…');
+  const clearReassurance = _challengeWaitReassurance();
   try {
     _verification = await apiJSON('/api/auth/register/start', {
       method: 'POST',
@@ -5085,34 +5097,25 @@ async function verifyRegistration() {
   const clearReassurance = _scrapeWaitReassurance('Letterboxd bio alanı kontrol ediliyor…');
   const username = _verification.username;
   try {
-    await apiJSON('/api/auth/register/verify', {
+    const data = await apiJSON('/api/auth/register/verify', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         username,
         code: _verification.verification_code,
+        ...(_pendingRegPassword ? { password: _pendingRegPassword } : {}),
       }),
     });
     clearReassurance();
     _verification = null;
 
-    // Doğrulama tamam — kullanıcının parolayı tekrar girmesine gerek yok;
-    // oturumu aynı akışta açıp doğrudan onboarding'e geçiyoruz.
-    if (_pendingRegPassword) {
-      try {
-        setAuthMessage('Hesap doğrulandı, giriş yapılıyor…');
-        const data = await apiJSON('/api/auth/login', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ username, password: _pendingRegPassword, remember: true }),
-        });
-        _pendingRegPassword = null;
-        setAuthMessage(null);
-        enterApp(data.account, { fromRegistration: true });
-        return;
-      } catch (_) {
-        // Otomatik giriş tutmadıysa elle girişe düş.
-      }
+    // Doğrulama ve oturum açma artık aynı istekte tamamlanıyor. Eski bir
+    // sunucu yanıtı logged_in döndürmezse manuel giriş ekranına düş.
+    if (data.logged_in) {
+      _pendingRegPassword = null;
+      setAuthMessage(null);
+      enterApp(data.account, { fromRegistration: true });
+      return;
     }
     _pendingRegPassword = null;
     setAuthMode('login');

@@ -279,12 +279,17 @@ def test_register_password_mismatch_stops_before_scraping():
     scrape.assert_not_awaited()
 
 
-def test_registration_maps_letterboxd_block_to_retryable_service_error():
-    scrape = AsyncMock(
-        side_effect=AccessBlockedError("Letterboxd HTTP 403", status=403)
+def test_registration_start_issues_code_without_waiting_for_letterboxd():
+    scrape = AsyncMock(side_effect=AccessBlockedError("Letterboxd HTTP 403", status=403))
+    challenge = SimpleNamespace(
+        username="film_fan",
+        verification_code="MOVIENOTES-ABC123",
+        expires_at="2026-09-15T12:00:00+00:00",
     )
+    fake_service = SimpleNamespace(start_registration=lambda *_args, **_kwargs: challenge)
     with (
         patch("app.main.get_settings", return_value=_settings(scrape_max_retries=3)),
+        patch("app.main._auth_service", return_value=fake_service),
         patch("app.main._enforce_auth_rate_limit", new=AsyncMock()),
         patch("app.main.scrape_profile", new=scrape),
         TestClient(main.app, base_url="https://testserver") as client,
@@ -298,9 +303,46 @@ def test_registration_maps_letterboxd_block_to_retryable_service_error():
             },
         )
 
-    assert response.status_code == 503
-    assert response.headers["retry-after"] == "60"
-    assert "geçici olarak sınırladı" in response.json()["detail"]
+    assert response.status_code == 200
+    assert response.json()["verification_code"] == "MOVIENOTES-ABC123"
+    scrape.assert_not_awaited()
+
+
+def test_registration_verification_can_issue_session_without_second_login_request():
+    account = _account()
+    session = AuthSession(
+        account=account,
+        access_token="access-token",
+        refresh_token="refresh-token",
+        expires_in=3600,
+    )
+    fake_service = SimpleNamespace(
+        verify_ownership=lambda *_args, **_kwargs: account,
+        login=lambda *_args, **_kwargs: session,
+    )
+    scrape = AsyncMock(return_value=SimpleNamespace(bio="MOVIENOTES-ABC123"))
+    with (
+        patch("app.main.get_settings", return_value=_settings(scrape_max_retries=1)),
+        patch("app.main._auth_service", return_value=fake_service),
+        patch("app.main._enforce_auth_rate_limit", new=AsyncMock()),
+        patch("app.main.scrape_profile", new=scrape),
+        TestClient(main.app, base_url="https://testserver") as client,
+    ):
+        response = client.post(
+            "/api/auth/register/verify",
+            json={
+                "username": "film_fan",
+                "code": "MOVIENOTES-ABC123",
+                "password": "long-enough-password",
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.json()["logged_in"] is True
+    assert any(cookie.startswith("mb_access=") for cookie in response.headers.get_list("set-cookie"))
+    scrape.assert_awaited_once_with(
+        "film_fan", max_retries=1, resolve_posters=False
+    )
 
 
 def test_authenticated_user_can_create_consent_based_blend_request():

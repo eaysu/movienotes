@@ -242,15 +242,20 @@ async def _fetch_profile_with_fresh_sessions(
         impersonate = _IMPERSONATE_POOL[attempt % len(_IMPERSONATE_POOL)]
         try:
             async with AsyncSession(impersonate=impersonate) as session:
-                with_home_headers = {**_NAV_HEADERS, "Sec-Fetch-Site": "none"}
-                await _budgeted_get(
-                    session,
-                    f"{BASE_URL}/",
-                    headers=with_home_headers,
-                    timeout=10,
-                    impersonate=impersonate,
-                )
-                await _human_pause(0.35)
+                # A public profile normally works without a warm-up request.
+                # Keep the extra homepage visit as a fallback for a blocked
+                # retry: the common registration path then spends one less
+                # round-trip waiting before the ownership code is returned.
+                if attempt > 0:
+                    with_home_headers = {**_NAV_HEADERS, "Sec-Fetch-Site": "none"}
+                    await _budgeted_get(
+                        session,
+                        f"{BASE_URL}/",
+                        headers=with_home_headers,
+                        timeout=10,
+                        impersonate=impersonate,
+                    )
+                    await _human_pause(0.35)
                 response = await _budgeted_get(
                     session,
                     profile_url,
@@ -627,7 +632,9 @@ def _parse_profile_page(username: str, html: str) -> ScrapedProfile:
     )
 
 
-async def _scrape_profile(username: str, *, max_retries: int) -> ScrapedProfile:
+async def _scrape_profile(
+    username: str, *, max_retries: int, resolve_posters: bool = True
+) -> ScrapedProfile:
     started = time.perf_counter()
     response, status = await _fetch_profile_with_fresh_sessions(
         username, max_retries=max_retries
@@ -652,10 +659,12 @@ async def _scrape_profile(username: str, *, max_retries: int) -> ScrapedProfile:
         )
 
     profile = _parse_profile_page(username, response.text)
-    async with AsyncSession(impersonate=_DEFAULT_IMPERSONATE) as poster_session:
-        poster_count = await _resolve_missing_posters(
-            poster_session, profile.favorite_films
-        )
+    poster_count = 0
+    if resolve_posters:
+        async with AsyncSession(impersonate=_DEFAULT_IMPERSONATE) as poster_session:
+            poster_count = await _resolve_missing_posters(
+                poster_session, profile.favorite_films
+            )
     log.warning(
         "scrape_metrics list=profile duration_ms=%d favorites=%d avatar=%s poster_resolved=%d",
         round((time.perf_counter() - started) * 1000),
@@ -667,15 +676,23 @@ async def _scrape_profile(username: str, *, max_retries: int) -> ScrapedProfile:
 
 
 async def scrape_profile(
-    username: str, *, max_retries: int = 3
+    username: str, *, max_retries: int = 3, resolve_posters: bool = True
 ) -> ScrapedProfile:
-    """Fetch public profile identity, avatar, bio and ordered Favorite films."""
+    """Fetch public profile identity, avatar, bio and ordered Favorite films.
+
+    Auth flows only need identity and bio. They can disable poster resolution to
+    avoid extra Letterboxd requests before the user even reaches the app.
+    """
     normalized = username.strip().lstrip("@").lower()
     if not normalized:
         raise ScrapeError("Empty username.")
     return await _coalesce_scrape(
-        (normalized, "profile", max_retries),
-        lambda: _scrape_profile(normalized, max_retries=max_retries),
+        (normalized, "profile", max_retries, bool(resolve_posters)),
+        lambda: _scrape_profile(
+            normalized,
+            max_retries=max_retries,
+            resolve_posters=resolve_posters,
+        ),
     )
 
 

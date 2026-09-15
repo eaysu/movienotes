@@ -1076,6 +1076,10 @@ class RegisterStartRequest(_UsernameRequest):
 class OwnershipVerifyRequest(_UsernameRequest):
     username: str
     code: str
+    # Registration keeps this in memory in the browser so the verified account
+    # can receive its session in the same request. It is optional to preserve
+    # the manual-login fallback for older clients.
+    password: str | None = None
 
 
 class LoginRequest(_UsernameRequest):
@@ -1398,14 +1402,14 @@ async def register_start(req: RegisterStartRequest, request: Request) -> dict:
     await _enforce_auth_rate_limit(request)
     try:
         validate_password(req.password, req.password_confirm)
-        profile = await scrape_profile(
-            req.username, max_retries=get_settings().scrape_max_retries
-        )
+        # Do not put Letterboxd in the critical path. The ownership check is
+        # performed when the user returns with the bio code; issuing the code
+        # now keeps registration responsive even when Letterboxd is slow.
         challenge = await asyncio.to_thread(
             _auth_service().start_registration,
             req.username,
             req.password,
-            profile,
+            None,
             ip_hash=_ip_hash(request),
         )
     except ValueError as exc:
@@ -1423,11 +1427,18 @@ async def register_start(req: RegisterStartRequest, request: Request) -> dict:
 
 
 @app.post("/api/auth/register/verify")
-async def register_verify(req: OwnershipVerifyRequest, request: Request) -> dict:
+async def register_verify(
+    req: OwnershipVerifyRequest, request: Request, response: Response
+) -> dict:
     await _enforce_auth_rate_limit(request)
+    session = None
     try:
+        if req.password is not None:
+            validate_password(req.password)
         profile = await scrape_profile(
-            req.username, max_retries=get_settings().scrape_max_retries
+            req.username,
+            max_retries=get_settings().scrape_max_retries,
+            resolve_posters=False,
         )
         account = await asyncio.to_thread(
             _auth_service().verify_ownership,
@@ -1436,11 +1447,35 @@ async def register_verify(req: OwnershipVerifyRequest, request: Request) -> dict
             profile,
             ip_hash=_ip_hash(request),
         )
+        if req.password is not None:
+            # The account is already active at this point. Reuse the password
+            # that was supplied at registration so the browser does not need a
+            # second round-trip (and a second Supabase auth handshake).
+            try:
+                session = await asyncio.to_thread(
+                    _auth_service().login,
+                    req.username,
+                    req.password,
+                    ip_hash=_ip_hash(request),
+                )
+            except AuthError:
+                # Ownership is already verified. Keep the old manual-login
+                # fallback if the combined auth handshake has a transient
+                # failure, instead of making the user repeat verification.
+                session = None
     except ScrapeError as exc:
         _raise_scrape_http(exc)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     except AuthError as exc:
         _raise_auth_http(exc)
-    return {"ok": True, "account": account.__dict__}
+    if session is not None:
+        _set_session_cookies(response, session, remember=True)
+    return {
+        "ok": True,
+        "account": account.__dict__,
+        "logged_in": session is not None,
+    }
 
 
 @app.post("/api/auth/login")
@@ -1586,7 +1621,9 @@ async def password_reset_finish(
     try:
         validate_password(req.new_password, req.new_password_confirm)
         profile = await scrape_profile(
-            req.username, max_retries=get_settings().scrape_max_retries
+            req.username,
+            max_retries=get_settings().scrape_max_retries,
+            resolve_posters=False,
         )
         await asyncio.to_thread(
             _auth_service().finish_password_reset,

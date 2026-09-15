@@ -372,7 +372,7 @@ class AuthService:
         self,
         username: str,
         password: str,
-        profile: ScrapedProfile,
+        profile: ScrapedProfile | None = None,
         *,
         ip_hash: str = "",
     ) -> RegistrationChallenge:
@@ -405,12 +405,22 @@ class AuthService:
                 )
                 auth_user_id = str(created.user.id)
                 created_new_auth_user = True
+            display_name = (
+                profile.display_name
+                if profile is not None
+                else (existing.get("display_name") if existing else None)
+            ) or username
+            avatar_url = (
+                profile.avatar_url
+                if profile is not None
+                else (existing.get("avatar_url") if existing else None)
+            ) or None
             account_result = service.table("users").upsert(
                 {
                     "username": username,
                     "auth_user_id": auth_user_id,
-                    "display_name": profile.display_name,
-                    "avatar_url": profile.avatar_url,
+                    "display_name": display_name,
+                    "avatar_url": avatar_url,
                     "account_status": "pending_verification",
                     "profile_sync_status": "pending",
                     "updated_at": datetime.now(timezone.utc).isoformat(),
