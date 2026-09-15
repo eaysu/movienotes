@@ -1,4 +1,6 @@
 import hashlib
+import json
+import subprocess
 from pathlib import Path
 
 
@@ -1014,3 +1016,48 @@ def test_iphone_gets_instructions_because_ios_cannot_install_by_itself():
     assert "IOS_INSTALL_HINT_DAYS = 30" in app_js
     assert "localStorage.setItem(IOS_INSTALL_HINT_KEY" in app_js
     assert "if (ios && iosHintSilenced()) return;" in show
+
+
+def test_a_pydantic_field_validation_error_surfaces_its_real_message():
+    """A bad username (e.g. register/start) fails FastAPI's own request
+    validation before our endpoint code runs, so `detail` comes back as a
+    list of {msg, loc, ...} objects instead of the plain string every other
+    error uses. `apiJSON` used to do `new Error(payload.detail)` on that
+    list, which silently stringifies to "[object Object]" — the real
+    message (e.g. "Letterboxd kullanıcı adı 2–15 karakter olmalı") never
+    reached the register screen, so submitting looked like it did nothing.
+    Runs the actual frontend module under Node with a mocked `fetch`.
+    """
+    api_js = FRONTEND / "js" / "api.js"
+    script = """
+    globalThis.window = { __API_BASE__: '' };
+    globalThis.fetch = async () => ({
+      ok: false,
+      status: 422,
+      headers: { get: () => '' },
+      json: async () => ({
+        detail: [{
+          type: 'value_error',
+          loc: ['body', 'username'],
+          msg: 'Value error, Letterboxd kullan\\u0131c\\u0131 ad\\u0131 2\\u201315 karakter olmal\\u0131',
+        }],
+      }),
+    });
+    const { apiJSON } = await import(%s);
+    try {
+      await apiJSON('/api/auth/register/start', { method: 'POST' });
+      console.log(JSON.stringify({ ok: true }));
+    } catch (error) {
+      console.log(JSON.stringify({ ok: false, message: error.message }));
+    }
+    """ % json.dumps(api_js.resolve().as_uri())
+
+    result = subprocess.run(
+        ["node", "--input-type=module", "-e", script],
+        capture_output=True, text=True, timeout=20,
+    )
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout.strip().splitlines()[-1])
+    assert payload["ok"] is False
+    assert payload["message"] == "Letterboxd kullanıcı adı 2–15 karakter olmalı"
+    assert "[object Object]" not in payload["message"]

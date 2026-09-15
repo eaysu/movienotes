@@ -2,12 +2,29 @@ export const API_BASE = window.__API_BASE__ || '';
 
 let activeRequest = null;
 
+// Most endpoints raise HTTPException with a plain-string detail, but a
+// request-shape error (e.g. a bad username) never reaches our code — FastAPI's
+// own Pydantic validation rejects it first, as a `detail` array of
+// {msg, loc, ...} objects. Without this, `new Error(payload.detail)` on that
+// array silently stringifies to "[object Object]" and the real message —
+// e.g. "Letterboxd kullanıcı adı 2–15 karakter olmalı" — never reaches the user.
+function errorDetailMessage(payload) {
+  const detail = payload?.detail;
+  if (typeof detail === 'string') return detail;
+  if (Array.isArray(detail) && detail.length) {
+    const first = detail[0];
+    const msg = typeof first === 'string' ? first : first?.msg;
+    if (msg) return String(msg).replace(/^Value error,\s*/, '');
+  }
+  return '';
+}
+
 export async function apiJSON(path, options = {}) {
   const response = await fetch(`${API_BASE}${path}`, options);
   let payload = {};
   try { payload = await response.json(); } catch (_) {}
   if (!response.ok) {
-    const error = new Error(payload.detail || `HTTP ${response.status}`);
+    const error = new Error(errorDetailMessage(payload) || `HTTP ${response.status}`);
     error.status = response.status;
     error.code = response.headers.get('X-Error-Code') || payload.code || '';
     throw error;
@@ -53,7 +70,7 @@ export function cancelActiveApiRequest() {
 export async function assertStreamResponse(response) {
   if (!response.ok) {
     let detail = '';
-    try { detail = (await response.json()).detail || ''; } catch (_) {}
+    try { detail = errorDetailMessage(await response.json()); } catch (_) {}
     if (response.status === 429) {
       const retry = Number(response.headers.get('Retry-After') || 0);
       const suffix = retry > 0 ? ` Yaklaşık ${retry} saniye sonra tekrar dene.` : '';
