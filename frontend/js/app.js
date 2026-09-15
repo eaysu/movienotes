@@ -8,7 +8,7 @@ import {
   finishApiRequest,
   scrapeErrorMessage,
   streamErrorMessage,
-} from './api.js?v=20260902.15';
+} from './api.js?v=20260902.16';
 import {
   cookieValue,
   csrfHeaders,
@@ -23,7 +23,7 @@ import { createRecommendationCards } from './recommendations.js?v=20260910.1';
 let _shareCardsModule;
 function loadShareCardsModule() {
   if (!_shareCardsModule) {
-    _shareCardsModule = import('./share-cards.js?v=20260907.40');
+    _shareCardsModule = import('./share-cards.js?v=20260907.41');
   }
   return _shareCardsModule;
 }
@@ -5025,6 +5025,20 @@ async function loginAccount(event) {
   } finally { button.disabled = false; }
 }
 
+// Letterboxd taraması Render'ın barındırma IP'sinden Cloudflare'e sık takılıyor;
+// kod bunu backoff'lu tekrar denemeyle telafi ediyor ama bu bazen 20-30 saniye
+// sürüyor. O süre boyunca ekranda tek bir statik mesaj kalırsa kullanıcı
+// isteğin koptuğunu/donduğunu düşünüp vazgeçiyor. Bekleme uzarsa mesajı
+// güncelleyip hâlâ çalıştığımızı gösteriyoruz.
+function _scrapeWaitReassurance(startText) {
+  setAuthMessage(startText);
+  const timers = [
+    setTimeout(() => setAuthMessage('Letterboxd yanıtı gecikti, hâlâ deniyoruz…'), 6000),
+    setTimeout(() => setAuthMessage('Bu normalden uzun sürüyor ama vazgeçmedik, birkaç saniye daha bekle…'), 16000),
+  ];
+  return () => timers.forEach(clearTimeout);
+}
+
 async function startRegistration(event) {
   event.preventDefault();
   const password = $('register-password').value;
@@ -5034,7 +5048,7 @@ async function startRegistration(event) {
   }
   const button = $('btn-register');
   button.disabled = true;
-  setAuthMessage('Letterboxd profili kontrol ediliyor…');
+  const clearReassurance = _scrapeWaitReassurance('Letterboxd profili kontrol ediliyor…');
   try {
     _verification = await apiJSON('/api/auth/register/start', {
       method: 'POST',
@@ -5058,14 +5072,17 @@ async function startRegistration(event) {
     setAuthMessage('Kod 15 dakika geçerli. Bio’yu kaydettikten sonra kontrol et.');
   } catch (error) {
     setAuthMessage(error.message || 'Hesap oluşturulamadı.', true);
-  } finally { button.disabled = false; }
+  } finally {
+    clearReassurance();
+    button.disabled = false;
+  }
 }
 
 async function verifyRegistration() {
   if (!_verification) return;
   const button = $('btn-verify');
   button.disabled = true;
-  setAuthMessage('Letterboxd bio alanı kontrol ediliyor…');
+  const clearReassurance = _scrapeWaitReassurance('Letterboxd bio alanı kontrol ediliyor…');
   const username = _verification.username;
   try {
     await apiJSON('/api/auth/register/verify', {
@@ -5076,6 +5093,7 @@ async function verifyRegistration() {
         code: _verification.verification_code,
       }),
     });
+    clearReassurance();
     _verification = null;
 
     // Doğrulama tamam — kullanıcının parolayı tekrar girmesine gerek yok;
@@ -5102,7 +5120,10 @@ async function verifyRegistration() {
     setAuthMessage('Hesap doğrulandı. Şimdi parolanla giriş yapabilirsin.');
   } catch (error) {
     setAuthMessage(error.message || 'Bio doğrulanamadı.', true);
-  } finally { button.disabled = false; }
+  } finally {
+    clearReassurance();
+    button.disabled = false;
+  }
 }
 
 async function startPasswordReset() {
