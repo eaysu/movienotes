@@ -153,17 +153,16 @@ _NAV_HEADERS = {
 
 
 async def _human_pause(base: float) -> None:
-    """İnsan benzeri, rastgele gecikme. Sabit aralık yerine jitter + ara sıra mola.
+    """Ardışık sayfalar için küçük, değişken bir tempo koru.
 
-    Düzenli aralıklarla atılan istekler bot imzasıdır; gerçek bir kullanıcı
-    sayfalar arasında değişken sürelerde gezinir, ara sıra durup "okur".
+    İstek bütçesi zaten süreç genelinde eşzamanlılık ve hız sınırı uyguluyor.
+    Buradaki bekleme yalnızca bir sonraki sayfaya geçmeden önceki kısa jitter;
+    eskiden eklenen 1,5--4 saniyelik rastlantısal "okuma molası" ise kullanıcı
+    akışını yavaşlatıyor ve özellikle küçük listelerde hiçbir değer katmıyordu.
     """
     if base <= 0:
         return
-    d = base * random.uniform(0.7, 1.8)
-    if random.random() < 0.12:
-        d += random.uniform(1.5, 4.0)  # ara sıra uzun "okuma" molası
-    await asyncio.sleep(d)
+    await asyncio.sleep(base * random.uniform(0.7, 1.2))
 
 
 async def _warmup(session, username: str) -> int | None:
@@ -247,20 +246,10 @@ async def _fetch_profile_with_fresh_sessions(
         impersonate = _IMPERSONATE_POOL[attempt % len(_IMPERSONATE_POOL)]
         try:
             async with AsyncSession(impersonate=impersonate) as session:
-                # A public profile normally works without a warm-up request.
-                # Keep the extra homepage visit as a fallback for a blocked
-                # retry: the common registration path then spends one less
-                # round-trip waiting before the ownership code is returned.
-                if attempt > 0:
-                    with_home_headers = {**_NAV_HEADERS, "Sec-Fetch-Site": "none"}
-                    await _budgeted_get(
-                        session,
-                        f"{BASE_URL}/",
-                        headers=with_home_headers,
-                        timeout=10,
-                        impersonate=impersonate,
-                    )
-                    await _human_pause(0.35)
+                # A fresh cookie jar and TLS fingerprint are enough for a retry.
+                # A homepage warm-up here used an extra upstream request after a
+                # block, delayed ownership-code delivery, and did not make the
+                # profile request more likely to succeed.
                 response = await _budgeted_get(
                     session,
                     profile_url,
@@ -345,15 +334,10 @@ def _empty_page_error(username: str, list_path: str, html: str) -> ScrapeError:
         return PrivateListError(
             f"@{username} profili veya bu liste gizli; yalnızca herkese açık veriler okunabilir."
         )
-    if any(marker in raw for marker in ("cf-chl-", "challenge-platform")) or any(
-        marker in text for marker in ("just a moment", "attention required")
-    ):
-        return AccessBlockedError(
-            "Letterboxd erişimi geçici olarak engelledi. Birkaç dakika sonra tekrar dene."
-        )
     empty_markers = (
         "watchlist is empty",
         "no films in this watchlist",
+        "no films yet",
         "no diary entries",
         "hasn't logged any films",
         "hasn’t logged any films",
@@ -362,6 +346,15 @@ def _empty_page_error(username: str, list_path: str, html: str) -> ScrapeError:
     if any(marker in text for marker in empty_markers):
         label = "Watchlist" if list_path == "watchlist" else "Film listesi"
         return EmptyListError(f"@{username} için {label.lower()} boş.")
+    # Normal Letterboxd templates can include challenge-related JavaScript, so
+    # check clear empty-list copy first.  Otherwise an actually empty public
+    # watchlist is misreported as a temporary Cloudflare block.
+    if any(marker in raw for marker in ("cf-chl-", "challenge-platform")) or any(
+        marker in text for marker in ("just a moment", "attention required")
+    ):
+        return AccessBlockedError(
+            "Letterboxd erişimi geçici olarak engelledi. Birkaç dakika sonra tekrar dene."
+        )
     return MarkupChangedError(
         "Letterboxd sayfası açıldı ancak film kartları okunamadı; sayfa yapısı değişmiş olabilir."
     )
@@ -545,6 +538,38 @@ def _parse_page(html: str) -> list[ScrapedFilm]:
         if film and film.slug not in seen:
             seen.add(film.slug)
             films.append(film)
+
+    # Diary is a table, not a poster grid.  Letterboxd moved it to
+    # `/<user>/diary/films/`; keep this fallback in the shared parser so the
+    # pagination/checkpoint machinery remains identical for both list shapes.
+    if not films:
+        for row in soup.select("tr.diary-entry-row"):
+            link = row.select_one(
+                ".td-film-details a[href^='/film/'], a[href^='/film/']"
+            )
+            href = link.get("href", "") if link else ""
+            slug_match = re.match(r"^/film/([^/]+)/", href)
+            if not slug_match:
+                continue
+            slug = slug_match.group(1)
+            if slug in seen:
+                continue
+            title = _html.unescape(link.get_text(" ", strip=True)) or _slug_to_title(slug)
+            year = None
+            released = row.select_one(".td-released")
+            if released:
+                year_match = re.search(r"\b(18|19|20)\d{2}\b", released.get_text(" ", strip=True))
+                if year_match:
+                    year = int(year_match.group(0))
+            seen.add(slug)
+            films.append(
+                ScrapedFilm(
+                    title=title,
+                    year=year,
+                    slug=slug,
+                    user_rating=_extract_rating(row),
+                )
+            )
 
     return films
 
@@ -849,7 +874,13 @@ async def _scrape_list(
                 films = films[:film_limit]
                 break
 
-            await _human_pause(delay)
+            # Never sleep after the last requested page.  This is especially
+            # important for the common one-page incremental/fingerprint reads:
+            # the response is already complete, so a tail delay only extends
+            # request latency.  Between pages we retain jittered pacing.
+            has_next_requested_page = page < start_page + max_pages - 1
+            if has_next_requested_page:
+                await _human_pause(delay)
 
     log.warning(
         "scrape_metrics list=%s duration_ms=%d pages=%d films=%d complete=%s next_page=%d exhausted=%s",
@@ -903,10 +934,15 @@ async def scrape_diary(
     max_retries: int = 3,
 ) -> ScrapeListResult:
     """Diary HTML sayfalarından ek film listesi çeker. Döner: (films, complete)."""
-    return await _scrape_list(
-        username, "films/diary",
-        delay=0.6, max_pages=max_pages, start_page=start_page, film_limit=film_limit,
-        max_retries=max_retries,
+    normalized = username.strip().lstrip("@").lower()
+    key = (normalized, "diary", max_pages, start_page, film_limit, max_retries)
+    return await _coalesce_scrape(
+        key,
+        lambda: _scrape_list(
+            normalized, "diary/films",
+            delay=0.6, max_pages=max_pages, start_page=start_page,
+            film_limit=film_limit, max_retries=max_retries,
+        ),
     )
 
 
@@ -1020,6 +1056,8 @@ async def scrape_reviewed_diary(
     seen: set[str] = set()
     last_page = 0
     exhausted = False
+    started = time.perf_counter()
+    full_text_count = 0
     try:
         async with AsyncSession(impersonate=_DEFAULT_IMPERSONATE) as session:
             for page in range(start_page, start_page + max_pages):
@@ -1039,11 +1077,22 @@ async def scrape_reviewed_diary(
                     break
                 fresh = [entry for entry in entries if entry.key not in seen]
                 seen.update(entry.key for entry in fresh)
-                for entry in fresh:
-                    if entry.review.endswith("…"):
-                        entry.review = await _full_review_text(
-                            session, entry.key, entry.review,
-                        )
+                truncated = [entry for entry in fresh if entry.review.endswith("…")]
+                if truncated:
+                    # Review detail endpoints are independent.  Fetch a small
+                    # bounded batch in parallel instead of serially turning a
+                    # page of long reviews into N round trips.  The process-wide
+                    # Letterboxd budget remains the final concurrency guard.
+                    gate = asyncio.Semaphore(2)
+
+                    async def hydrate(entry: DiaryEntry) -> None:
+                        async with gate:
+                            entry.review = await _full_review_text(
+                                session, entry.key, entry.review,
+                            )
+
+                    await asyncio.gather(*(hydrate(entry) for entry in truncated))
+                    full_text_count += len(truncated)
                 out.extend(fresh)
                 if len(entries) < 12:
                     exhausted = True
@@ -1055,6 +1104,14 @@ async def scrape_reviewed_diary(
         return out or None
     if progress is not None:
         progress.update(last_page=last_page, exhausted=exhausted)
+    log.warning(
+        "scrape_metrics list=reviews duration_ms=%d pages=%d entries=%d full_text=%d exhausted=%s",
+        round((time.perf_counter() - started) * 1000),
+        last_page - start_page + 1 if last_page else 0,
+        len(out),
+        full_text_count,
+        exhausted,
+    )
     return out
 
 
@@ -1093,12 +1150,14 @@ async def scrape_following(username: str, *, max_pages: int = 5) -> list[str] | 
         async with AsyncSession(impersonate=_DEFAULT_IMPERSONATE) as session:
             for page in range(1, max(1, max_pages) + 1):
                 path = f"{username}/following/" if page == 1 else f"{username}/following/page/{page}/"
-                response, _ = await _fetch_with_retry(
+                response, status = await _fetch_with_retry(
                     session,
                     f"{BASE_URL}/{path}",
                     f"{BASE_URL}/{username}/",
                     max_retries=2,
                 )
+                if response is None or status != 200:
+                    break
                 first_page_ok = True
                 soup = BeautifulSoup(response.text, "lxml")
                 names = [
@@ -1112,7 +1171,8 @@ async def scrape_following(username: str, *, max_pages: int = 5) -> list[str] | 
                     if name not in seen:
                         seen.add(name)
                         out.append(name)
-                await _human_pause(0.6)
+                if page < max(1, max_pages):
+                    await _human_pause(0.6)
     except Exception as exc:  # noqa: BLE001 - seeding must never break a caller
         log.warning("following scrape failed user=%s: %s", username, exc)
         if not first_page_ok:
@@ -1120,7 +1180,7 @@ async def scrape_following(username: str, *, max_pages: int = 5) -> list[str] | 
     return out
 
 
-async def _scrape_watched_rss(username: str) -> list[ScrapedFilm]:
+async def _fetch_watched_rss(username: str) -> list[ScrapedFilm]:
     """RSS feed'den en son ~50 izlenen filmi çeker (rating dahil).
 
     HTML scrape ile birleştirilerek kapsam genişletilir.
@@ -1159,6 +1219,14 @@ async def _scrape_watched_rss(username: str) -> list[ScrapedFilm]:
     return films
 
 
+async def _scrape_watched_rss(username: str) -> list[ScrapedFilm]:
+    """Coalesce simultaneous RSS reads from recent and taste-profile flows."""
+    normalized = username.strip().lstrip("@").lower()
+    return await _coalesce_scrape(
+        (normalized, "watched-rss"), lambda: _fetch_watched_rss(normalized)
+    )
+
+
 async def scrape_films(
     username: str,
     *,
@@ -1173,14 +1241,19 @@ async def scrape_films(
     izledim işaretlediği her filmi verir ve grid item'larda puanları taşır.
     Döner: (films, complete).
     """
-    return await _scrape_list(
-        username,
-        "films",
-        delay=0.6,
-        max_pages=max_pages,
-        start_page=start_page,
-        film_limit=film_limit,
-        max_retries=max_retries,
+    normalized = username.strip().lstrip("@").lower()
+    key = (normalized, "films", start_page, max_pages, film_limit, max_retries)
+    return await _coalesce_scrape(
+        key,
+        lambda: _scrape_list(
+            normalized,
+            "films",
+            delay=0.6,
+            max_pages=max_pages,
+            start_page=start_page,
+            film_limit=film_limit,
+            max_retries=max_retries,
+        ),
     )
 
 

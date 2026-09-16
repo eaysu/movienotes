@@ -1,16 +1,20 @@
+import asyncio
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from app.scraper import (
+    EmptyListError,
     MarkupChangedError,
     _LetterboxdRequestBudget,
+    _empty_page_error,
     _fetch_profile_with_fresh_sessions,
     _parse_page,
     _parse_profile_page,
     _scrape_list,
     _resolve_missing_posters,
+    scrape_reviewed_diary,
 )
 
 
@@ -35,6 +39,25 @@ class ProfileParserTests(unittest.TestCase):
             "https://letterboxd.com/film/the-queens-gambit/poster/std/230/?k=abc123",
         )
 
+    def test_parses_current_diary_table_rows(self):
+        films = _parse_page(
+            """
+            <table class="diary-table"><tbody>
+              <tr class="diary-entry-row">
+                <td class="td-film-details"><h3><a href="/film/perfect-days/">Perfect Days</a></h3></td>
+                <td class="td-released"><a>2023</a></td>
+                <td><span class="rating rated-8"></span></td>
+              </tr>
+            </tbody></table>
+            """
+        )
+
+        self.assertEqual(len(films), 1)
+        self.assertEqual(films[0].slug, "perfect-days")
+        self.assertEqual(films[0].title, "Perfect Days")
+        self.assertEqual(films[0].year, 2023)
+        self.assertEqual(films[0].user_rating, 4.0)
+
     def test_parses_avatar_identity_bio_and_ordered_favorite_four(self):
         profile = _parse_profile_page("sample_user", FIXTURE.read_text())
 
@@ -56,6 +79,14 @@ class ProfileParserTests(unittest.TestCase):
         with self.assertRaises(MarkupChangedError):
             _parse_profile_page("sample_user", "<main>redesigned profile</main>")
 
+    def test_empty_list_copy_wins_over_template_challenge_script(self):
+        error = _empty_page_error(
+            "sample_user",
+            "watchlist",
+            "<script src='/challenge-platform.js'></script><main>No films yet</main>",
+        )
+        self.assertIsInstance(error, EmptyListError)
+
     def test_parses_public_profile_statistics(self):
         html = """
         <section class="profile-summary">
@@ -73,6 +104,39 @@ class ProfileParserTests(unittest.TestCase):
 
 
 class ProfileRetryTests(unittest.IsolatedAsyncioTestCase):
+    async def test_list_does_not_pause_after_its_final_requested_page(self):
+        page_one = """
+        <div data-item-slug="perfect-days" data-item-name="Perfect Days (2023)">
+          <img src="https://a.ltrbxd.com/perfect-days.jpg" />
+        </div>
+        """
+
+        class FakeSession:
+            def __init__(self, **_kwargs):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_args):
+                return None
+
+        pause = AsyncMock()
+        with (
+            patch("app.scraper.AsyncSession", FakeSession),
+            patch(
+                "app.scraper._fetch_with_retry",
+                return_value=(SimpleNamespace(status_code=200, text=page_one), 200),
+            ),
+            patch("app.scraper._human_pause", new=pause),
+        ):
+            result = await _scrape_list(
+                "sample_user", "films", max_pages=1, delay=0.6
+            )
+
+        self.assertEqual(len(result.films), 1)
+        pause.assert_not_awaited()
+
     async def test_partial_list_keeps_the_blocked_page_as_next_checkpoint(self):
         page_one = """
         <div data-item-slug="perfect-days" data-item-name="Perfect Days (2023)">
@@ -170,6 +234,7 @@ class ProfileRetryTests(unittest.IsolatedAsyncioTestCase):
             def __init__(self, *, impersonate):
                 self.impersonate = impersonate
                 self.profile_status = next(statuses)
+                self.urls = []
                 sessions.append(self)
 
             async def __aenter__(self):
@@ -179,8 +244,8 @@ class ProfileRetryTests(unittest.IsolatedAsyncioTestCase):
                 return None
 
             async def get(self, url, **_kwargs):
-                status = 200 if url == "https://letterboxd.com/" else self.profile_status
-                return SimpleNamespace(status_code=status, text="profile")
+                self.urls.append(url)
+                return SimpleNamespace(status_code=self.profile_status, text="profile")
 
         with (
             patch("app.scraper.AsyncSession", FakeSession),
@@ -195,6 +260,64 @@ class ProfileRetryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.text, "profile")
         self.assertEqual(len(sessions), 2)
         self.assertNotEqual(sessions[0].impersonate, sessions[1].impersonate)
+        self.assertEqual(
+            [url for session in sessions for url in session.urls],
+            [
+                "https://letterboxd.com/sample_user/",
+                "https://letterboxd.com/sample_user/",
+            ],
+        )
+
+    async def test_review_full_text_requests_are_bounded_and_parallel(self):
+        reviews = """
+        <article class="production-viewing" data-object-id="viewing:101">
+          <time class="timestamp" datetime="2026-09-15"></time>
+          <div data-item-slug="first-film" data-item-name="First Film (2024)"></div>
+          <div class="js-review-body">First truncated review…</div>
+        </article>
+        <article class="production-viewing" data-object-id="viewing:102">
+          <time class="timestamp" datetime="2026-09-14"></time>
+          <div data-item-slug="second-film" data-item-name="Second Film (2023)"></div>
+          <div class="js-review-body">Second truncated review…</div>
+        </article>
+        """
+
+        class FakeSession:
+            def __init__(self, **_kwargs):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_args):
+                return None
+
+        active = 0
+        peak = 0
+
+        async def full_text(_session, key, _fallback):
+            nonlocal active, peak
+            active += 1
+            peak = max(peak, active)
+            await asyncio.sleep(0.01)
+            active -= 1
+            return f"complete {key}"
+
+        with (
+            patch("app.scraper.AsyncSession", FakeSession),
+            patch(
+                "app.scraper._budgeted_get",
+                return_value=SimpleNamespace(status_code=200, text=reviews),
+            ),
+            patch("app.scraper._full_review_text", side_effect=full_text),
+        ):
+            entries = await scrape_reviewed_diary("sample_user", max_pages=1)
+
+        self.assertEqual(peak, 2)
+        self.assertEqual(
+            [entry.review for entry in entries],
+            ["complete letterboxd-review-101", "complete letterboxd-review-102"],
+        )
 
 
 if __name__ == "__main__":
