@@ -412,6 +412,10 @@ def _set_session_cookies(response: Response, session, *, remember: bool = True) 
         httponly=True,
         **shared,
     )
+    # Authentication is personal state, never an HTTP-cache candidate. This
+    # matters most in standalone PWAs which resume an old page after a token
+    # rotation while the browser is offline/backgrounded.
+    response.headers["Cache-Control"] = "no-store, private"
     return csrf_token
 
 
@@ -448,6 +452,11 @@ async def _require_account(request: Request) -> Account:
         return cached
     try:
         account = await asyncio.to_thread(service.current_account, access_token)
+    except TransientStorageError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Oturum bağlantısı kısa süreli yanıt vermedi. Lütfen tekrar dene.",
+        ) from exc
     except InvalidCredentialsError as exc:
         raise HTTPException(status_code=401, detail="Oturum geçersiz.") from exc
     _cache_account(service, access_token, account)
@@ -1535,7 +1544,8 @@ if get_settings().dev_login_enabled:  # pragma: no cover - local tooling only
 
 
 @app.get("/api/auth/me")
-async def auth_me(request: Request) -> dict:
+async def auth_me(request: Request, response: Response) -> dict:
+    response.headers["Cache-Control"] = "no-store, private"
     account = await _require_account(request)
     return {"account": account.__dict__}
 
@@ -1571,6 +1581,10 @@ async def refresh_session(request: Request, response: Response) -> dict:
         raise HTTPException(status_code=401, detail="Oturum yenilenemedi.")
     try:
         session = await asyncio.to_thread(_auth_service().refresh, refresh_token)
+    except TransientStorageError as exc:
+        # Do not clear a valid refresh cookie merely because an upstream edge
+        # briefly dropped the request. The PWA will retry this safely.
+        _raise_auth_http(exc)
     except AuthError as exc:
         _clear_session_cookies(response)
         _raise_auth_http(exc)

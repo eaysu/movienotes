@@ -226,7 +226,7 @@ def test_health_and_session_boot_requests_start_in_parallel():
 
     assert "await Promise.all([" in boot
     assert "loadHealth()," in boot
-    assert "apiJSON('/api/auth/me').catch(() => null)" in boot
+    assert "apiJSON('/api/auth/me', { cache: 'no-store' }).catch(() => null)" in boot
     assert "setAuthMode('register');" in boot
 
 
@@ -829,9 +829,9 @@ def test_shell_asset_content_changes_force_a_version_bump():
     files that no longer existed.
     """
     expected = {
-        "js/app.js": "b6125037a1c330834225e1a5224f692a893ec4fd5689d53b0df8a71264e8f7ae",
+        "js/app.js": "f4c1ce1940331ba0689c284bd91b504cb9b9d52d3107b1bed529ff591230f0ad",
         "app.css": "098314bfe07625fe57386a3173bfc470aa8be208840efe90bf74e31ff1950695",
-        "js/share-cards.js": "df31298ff4b0038a60f9586f0075ae84737af17499be95abd7d3b6ec49c8ab34",
+        "js/share-cards.js": "bb48c19bf39b5fd96520b898e260834557b2f651e24b3834b51806b98a3f3cab",
         "site.webmanifest": "7a7de349179ed9f226d38632dfde5a8478edd10305972ea52641b0dc6aa7f405",
         "movienotes-mark.png": "850aa9117aa52768952843f8e2c410c0c17868877d81b2058274290373b4ee1e",
         "movienotes-icon-192.png": "3b04c52ffd23799ce424f1acefd0a1d7c386b8c968b09be9bd5c87b623c6ac12",
@@ -867,14 +867,14 @@ def test_every_app_shell_asset_has_an_explicit_immutable_version():
     source_css = (FRONTEND / "css" / "source.css").read_text()
 
     dependency_version = "v=20260902.15"
-    api_version = "v=20260902.16"
+    api_version = "v=20260916.1"
     css_version = "v=20260910.83"
     assert f"/static/app.css?{css_version}" in html
-    assert "/static/js/app.js?v=20260915.1" in html
+    assert "/static/js/app.js?v=20260916.1" in html
     assert app_js.count(f"?{dependency_version}") == 3
     assert f"./api.js?{api_version}" in app_js
     assert "./recommendations.js?v=20260910.1" in app_js
-    assert "./share-cards.js?v=20260907.41" in app_js
+    assert "./share-cards.js?v=20260916.1" in app_js
     assert "./auth.js?v=20260902.16" in app_js
     assert f"./dom.js?{dependency_version}" in auth_js
     assert f"./dom.js?{dependency_version}" in profile_js
@@ -949,8 +949,18 @@ def test_png_share_renderer_is_lazy_loaded_on_first_share_action():
 
     imports = app_js.split("// ── Cinema facts", 1)[0]
     assert "from './share-cards.js" not in imports
-    assert "import('./share-cards.js?v=20260907.41')" in imports
+    assert "import('./share-cards.js?v=20260916.1')" in imports
     assert "const shareCards = await loadShareCardsModule();" in app_js
+
+
+def test_pwa_requests_share_one_silent_session_refresh_after_access_expiry():
+    api_js = (FRONTEND / "js" / "api.js").read_text()
+
+    assert "let sessionRefreshPromise = null;" in api_js
+    assert "response.status === 401 && !recovered && canRecoverSession(path)" in api_js
+    assert "await refreshExpiredSession();" in api_js
+    assert "credentials: 'same-origin'" in api_js
+    assert "cache: 'no-store'" in api_js
 
 
 def test_sync_progress_polling_does_not_reload_the_full_profile_snapshot():

@@ -631,7 +631,7 @@ class AuthService:
         )
 
     def current_account(self, access_token: str) -> Account:
-        try:
+        def resolve() -> Account:
             response = self._auth_client().auth.get_user(access_token)
             auth_user_id = str(response.user.id)
             service = self._service_client()
@@ -646,9 +646,19 @@ class AuthService:
             if row is None:
                 raise InvalidCredentialsError("Oturum geçersiz.")
             return self._account(row)
-        except InvalidCredentialsError:
+
+        try:
+            # Both Supabase Auth and the account-row lookup are read-only. A
+            # short Render/Supabase transport hiccup is not proof that the
+            # member's token was revoked, so retry and preserve the session.
+            return self._retry_storage_read(resolve)
+        except (InvalidCredentialsError, TransientStorageError):
             raise
         except Exception as exc:
+            if self._is_transient_storage_error(exc):
+                raise TransientStorageError(
+                    "Oturum bağlantısı kısa süreli yanıt vermedi."
+                ) from exc
             raise InvalidCredentialsError("Oturum geçersiz.") from exc
 
     def refresh(self, refresh_token: str) -> AuthSession:
@@ -663,9 +673,13 @@ class AuthService:
                 refresh_token=response.session.refresh_token,
                 expires_in=int(response.session.expires_in or 3600),
             )
-        except InvalidCredentialsError:
+        except (InvalidCredentialsError, TransientStorageError):
             raise
         except Exception as exc:
+            if self._is_transient_storage_error(exc):
+                raise TransientStorageError(
+                    "Oturum yenileme bağlantısı kısa süreli yanıt vermedi."
+                ) from exc
             raise InvalidCredentialsError("Oturum yenilenemedi.") from exc
 
     def revoke(self, access_token: str, refresh_token: str) -> None:

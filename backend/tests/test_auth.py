@@ -100,6 +100,36 @@ def test_short_account_cache_avoids_repeat_validation_and_can_be_invalidated():
     main._invalidate_account_cache(token)
 
 
+def test_temporary_auth_lookup_failure_is_not_reported_as_an_invalid_session():
+    """A Render/Supabase disconnect must retain the member's refresh cookie."""
+    fake_service = SimpleNamespace(
+        current_account=lambda _token: (_ for _ in ()).throw(
+            TransientStorageError("Oturum bağlantısı kısa süreli yanıt vermedi.")
+        ),
+        refresh=lambda _token: (_ for _ in ()).throw(
+            TransientStorageError("Oturum yenileme bağlantısı kısa süreli yanıt vermedi.")
+        ),
+    )
+    with (
+        patch("app.main.get_settings", return_value=_settings()),
+        patch("app.main._auth_service", return_value=fake_service),
+        TestClient(main.app, base_url="https://testserver") as client,
+    ):
+        me = client.get("/api/auth/me", headers={"Cookie": "mb_access=transient-access-token"})
+        refreshed = client.post(
+            "/api/auth/refresh",
+            headers={
+                "Cookie": "mb_refresh=refresh-token; mb_csrf=csrf-token",
+                "X-CSRF-Token": "csrf-token",
+            },
+        )
+
+    assert me.status_code == 503
+    assert "Oturum bağlantısı" in me.json()["detail"]
+    assert refreshed.status_code == 503
+    assert not refreshed.headers.get_list("set-cookie")
+
+
 def test_full_history_sync_schema_is_service_role_only():
     schema = (Path(__file__).parents[1] / "supabase" / "schema.sql").read_text()
     assert "CREATE TABLE IF NOT EXISTS public.user_watched_films (" in schema

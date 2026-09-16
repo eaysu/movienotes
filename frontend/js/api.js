@@ -1,6 +1,13 @@
 export const API_BASE = window.__API_BASE__ || '';
 
 let activeRequest = null;
+let sessionRefreshPromise = null;
+
+function csrfToken() {
+  const prefix = 'mb_csrf=';
+  const item = document.cookie.split('; ').find(part => part.startsWith(prefix));
+  return item ? decodeURIComponent(item.slice(prefix.length)) : '';
+}
 
 // Most endpoints raise HTTPException with a plain-string detail, but a
 // request-shape error (e.g. a bad username) never reaches our code — FastAPI's
@@ -19,15 +26,91 @@ function errorDetailMessage(payload) {
   return '';
 }
 
-export async function apiJSON(path, options = {}) {
-  const response = await fetch(`${API_BASE}${path}`, options);
+function apiError(response, payload) {
+  const error = new Error(errorDetailMessage(payload) || `HTTP ${response.status}`);
+  error.status = response.status;
+  error.code = response.headers.get('X-Error-Code') || payload.code || '';
+  return error;
+}
+
+function canRecoverSession(path) {
+  // A refresh request must never recursively refresh itself.  All normal API
+  // calls — including /auth/me — may have met an access cookie that expired
+  // while an installed app sat in the background.
+  return path !== '/api/auth/refresh' && path !== '/api/auth/login';
+}
+
+function withCurrentCsrf(options) {
+  const headers = new Headers(options.headers || {});
+  if (headers.has('X-CSRF-Token')) {
+    const token = csrfToken();
+    if (token) headers.set('X-CSRF-Token', token);
+  }
+  return { ...options, headers };
+}
+
+async function refreshExpiredSession() {
+  if (sessionRefreshPromise) return sessionRefreshPromise;
+  const token = csrfToken();
+  if (!token) throw new Error('Oturum yenilenemedi.');
+  sessionRefreshPromise = (async () => {
+    const response = await fetch(`${API_BASE}/api/auth/refresh`, {
+      method: 'POST',
+      credentials: 'same-origin',
+      cache: 'no-store',
+      headers: { 'X-CSRF-Token': token },
+    });
+    let payload = {};
+    try { payload = await response.json(); } catch (_) {}
+    if (!response.ok) throw apiError(response, payload);
+    return payload;
+  })();
+  try {
+    return await sessionRefreshPromise;
+  } finally {
+    sessionRefreshPromise = null;
+  }
+}
+
+function isSafeRetry(options) {
+  return String(options.method || 'GET').toUpperCase() === 'GET';
+}
+
+export async function apiJSON(path, options = {}, attempt = 0, recovered = false) {
+  let response;
+  try {
+    response = await fetch(`${API_BASE}${path}`, {
+      credentials: 'same-origin',
+      // Auth answers must never be revived from an HTTP cache after a login,
+      // logout or a refresh-token rotation.
+      cache: path.startsWith('/api/auth/') ? 'no-store' : options.cache,
+      ...options,
+    });
+  } catch (error) {
+    // A waking PWA can beat Render's first live connection by a few hundred
+    // milliseconds. Retrying only safe reads avoids duplicating writes.
+    if (attempt === 0 && isSafeRetry(options)) {
+      await new Promise(resolve => setTimeout(resolve, 350));
+      return apiJSON(path, options, 1, recovered);
+    }
+    throw error;
+  }
   let payload = {};
   try { payload = await response.json(); } catch (_) {}
   if (!response.ok) {
-    const error = new Error(errorDetailMessage(payload) || `HTTP ${response.status}`);
-    error.status = response.status;
-    error.code = response.headers.get('X-Error-Code') || payload.code || '';
-    throw error;
+    // One expired access token used to make every background poll surface
+    // "Oturum geçersiz" until the member manually reloaded the installed app.
+    // Share one refresh across that whole burst, then replay the original
+    // request with the CSRF cookie that the refresh just rotated.
+    if (response.status === 401 && !recovered && canRecoverSession(path)) {
+      await refreshExpiredSession();
+      return apiJSON(path, withCurrentCsrf(options), attempt, true);
+    }
+    if (attempt === 0 && isSafeRetry(options) && response.status >= 500) {
+      await new Promise(resolve => setTimeout(resolve, 350));
+      return apiJSON(path, options, 1, recovered);
+    }
+    throw apiError(response, payload);
   }
   return payload;
 }

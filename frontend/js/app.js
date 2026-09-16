@@ -8,7 +8,7 @@ import {
   finishApiRequest,
   scrapeErrorMessage,
   streamErrorMessage,
-} from './api.js?v=20260902.16';
+} from './api.js?v=20260916.1';
 import {
   cookieValue,
   csrfHeaders,
@@ -23,7 +23,7 @@ import { createRecommendationCards } from './recommendations.js?v=20260910.1';
 let _shareCardsModule;
 function loadShareCardsModule() {
   if (!_shareCardsModule) {
-    _shareCardsModule = import('./share-cards.js?v=20260907.41');
+    _shareCardsModule = import('./share-cards.js?v=20260916.1');
   }
   return _shareCardsModule;
 }
@@ -4130,7 +4130,7 @@ async function boot() {
   // sıraya koymak yerine aynı anda başlatarak giriş/profil açılışını hızlandır.
   const [health, me] = await Promise.all([
     loadHealth(),
-    apiJSON('/api/auth/me').catch(() => null),
+    apiJSON('/api/auth/me', { cache: 'no-store' }).catch(() => null),
   ]);
   _authEnabled = Boolean(health?.auth_enabled);
   if (!_authEnabled) { showView('idle'); loadPublicStats(); return; }
@@ -4138,6 +4138,8 @@ async function boot() {
     enterApp(me.account);
     return;
   }
+  // apiJSON normally repairs an expired access token itself. Keep this small
+  // fallback for a browser that loaded an older shell just before it updated.
   if (cookieValue('mb_csrf')) {
     try {
       const refreshed = await apiJSON('/api/auth/refresh', {

@@ -1,4 +1,4 @@
-import { API_BASE } from './api.js?v=20260902.16';
+import { API_BASE } from './api.js?v=20260916.1';
 
 const WIDTH = 1080;
 const HEIGHT = 1350;
