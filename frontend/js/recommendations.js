@@ -1,4 +1,5 @@
 import { escapeHTML, safeImageURL, letterboxdFilmURL } from './dom.js?v=20260902.15';
+import { t } from './i18n.js?v=20260918.2';
 
 export function createRecommendationCards() {
 // Make a poster clickable through to its Letterboxd page.
@@ -20,7 +21,7 @@ function whyBlock(film) {
   if (!film.reason) return '';
   return `<div class="mobile-flat mobile-flat--tight rounded-xl border border-primary-container/25 bg-primary-container/[0.07] p-4">
       <p class="flex items-center gap-2 font-label-sm text-label-sm uppercase tracking-[.18em] text-primary-container mb-1.5">
-        <span class="material-symbols-outlined text-[15px]" style="font-variation-settings:'FILL' 1">auto_awesome</span>Sana neden önerdik?
+        <span class="material-symbols-outlined text-[15px]" style="font-variation-settings:'FILL' 1">auto_awesome</span>${t('Sana neden önerdik?')}
       </p>
       <p class="font-body-md text-body-md text-on-surface leading-relaxed">${escapeHTML(film.reason)}</p>
     </div>`;
@@ -83,7 +84,7 @@ function buildAltCard(film, idx) {
   const shortOverview = '';
   const shortReason = film.reason
     ? `<div class="mt-1 rounded-lg border border-primary-container/20 bg-primary-container/[0.06] p-2.5">
-         <p class="font-label-sm text-[9px] uppercase tracking-[.14em] text-primary-container mb-1">Sana neden önerdik?</p>
+         <p class="font-label-sm text-[9px] uppercase tracking-[.14em] text-primary-container mb-1">${t('Sana neden önerdik?')}</p>
          <p class="font-label-sm text-label-sm text-on-surface-variant leading-relaxed line-clamp-4">${escapeHTML(film.reason)}</p>
        </div>`
     : '';

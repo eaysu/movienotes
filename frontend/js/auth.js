@@ -1,4 +1,5 @@
 import { $ } from './dom.js?v=20260902.15';
+import { t } from './i18n.js?v=20260918.2';
 
 export function cookieValue(name) {
   const prefix = `${name}=`;
@@ -23,7 +24,7 @@ export function setPasswordVisibility(button, visible) {
   if (!input) return;
   input.type = visible ? 'text' : 'password';
   button.setAttribute('aria-pressed', String(visible));
-  button.setAttribute('aria-label', visible ? 'Şifreyi gizle' : 'Şifreyi göster');
+  button.setAttribute('aria-label', t(visible ? 'Şifreyi gizle' : 'Şifreyi göster'));
   // Eye state mirrors the field: open eye = password shown, slashed eye = hidden.
   button.querySelector('.material-symbols-outlined').textContent = visible
     ? 'visibility'
@@ -40,7 +41,7 @@ export function setAuthMode(mode) {
   resetPasswordVisibility();
   const login = mode === 'login';
   const title = $('auth-title');
-  if (title) title.textContent = login ? 'Movienotes’a giriş yap' : 'Movienotes’da hesap oluştur';
+  if (title) title.textContent = t(login ? 'Movienotes’a giriş yap' : 'Movienotes’da hesap oluştur');
   $('login-form').classList.toggle('hidden', !login);
   $('register-form').classList.toggle('hidden', login);
   $('register-form').classList.toggle('flex', !login);

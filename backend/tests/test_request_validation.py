@@ -4,7 +4,13 @@ from unittest.mock import patch
 
 from pydantic import ValidationError
 
-from app.main import BlendRequest, RandomRequest, RecommendRequest, _load_user_films
+from app.main import (
+    BlendRequest,
+    LocalePreferenceRequest,
+    RandomRequest,
+    RecommendRequest,
+    _load_user_films,
+)
 from app.scraper import (
     AccessBlockedError,
     EmptyListError,
@@ -41,6 +47,14 @@ class UsernameValidationTests(unittest.TestCase):
         ):
             with self.subTest(username=username), self.assertRaises(ValidationError):
                 RecommendRequest(username=username)
+
+
+class LocaleValidationTests(unittest.TestCase):
+    def test_accepts_supported_locale_preferences_only(self):
+        self.assertEqual(LocalePreferenceRequest(locale="EN").locale, "en")
+        self.assertEqual(LocalePreferenceRequest(locale="auto").locale, "auto")
+        with self.assertRaises(ValidationError):
+            LocalePreferenceRequest(locale="de")
 
 
 class ScraperParserTests(unittest.TestCase):

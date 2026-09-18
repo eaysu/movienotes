@@ -39,6 +39,9 @@ ALTER TABLE public.users ALTER COLUMN letter_receiving_enabled SET DEFAULT TRUE;
 -- Kilitli hesaplar Sinefil Sineması'nda kart olarak görünür; notları ve
 -- ayrıntılı profilleri ancak kabul edilmiş takipçilerine açılır.
 ALTER TABLE public.users ADD COLUMN IF NOT EXISTS private_account BOOLEAN NOT NULL DEFAULT FALSE;
+-- UI language: `auto` follows the device language; an explicit value follows
+-- the account across devices.
+ALTER TABLE public.users ADD COLUMN IF NOT EXISTS preferred_locale TEXT NOT NULL DEFAULT 'auto';
 -- Var olan hesaplar bir kereliğine `scripts.open_letterboxes` ile açıldı.
 -- Toplu UPDATE bilerek burada değil: şema her uygulandığında çalışır ve
 -- kutusunu kapatanların tercihini sessizce geri alırdı.
@@ -62,6 +65,12 @@ END $$;
 DO $$ BEGIN
   ALTER TABLE public.users ADD CONSTRAINT users_profile_sync_status_check
     CHECK (profile_sync_status IN ('pending', 'syncing', 'ready', 'stale', 'failed'));
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+DO $$ BEGIN
+  ALTER TABLE public.users ADD CONSTRAINT users_preferred_locale_check
+    CHECK (preferred_locale IN ('auto', 'tr', 'en'));
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
 

@@ -1,4 +1,5 @@
-import { API_BASE } from './api.js?v=20260916.1';
+import { API_BASE } from './api.js?v=20260918.1';
+import { t } from './i18n.js?v=20260918.2';
 
 const WIDTH = 1080;
 const HEIGHT = 1350;
@@ -124,7 +125,7 @@ function drawBrand(ctx, width = WIDTH) {
   font(ctx, 20, 600);
   ctx.fillStyle = 'rgba(224,226,230,.45)';
   ctx.textAlign = 'right';
-  ctx.fillText('SİNEFİL PROFİL KARTI', width - 74, 78);
+  ctx.fillText(t('SİNEFİL PROFİL KARTI'), width - 74, 78);
 }
 
 function drawFooter(ctx, label, width = WIDTH, height = HEIGHT) {
@@ -351,13 +352,13 @@ async function drawBlendUsers(ctx, data, user1, user2) {
 }
 
 export async function renderBlendShareCard(data, mode = 'watched') {
-  if (!data) throw new Error('Blend sonucu bulunamadı.');
+  if (!data) throw new Error(t('Blend sonucu bulunamadı.'));
   if (document.fonts?.ready) await document.fonts.ready;
   const isWatchlist = mode === 'watchlist';
   const films = isWatchlist
     ? ((data.common_watchlist_films?.length ? data.common_watchlist_films : data.bridge_films) || [])
     : (data.films || []);
-  if (!films.length) throw new Error('Paylaşılacak film bulunamadı.');
+  if (!films.length) throw new Error(t('Paylaşılacak film bulunamadı.'));
   const accent = isWatchlist ? '#40bcf4' : '#00e054';
   const canvas = makeCanvas();
   const ctx = canvas.getContext('2d');
@@ -365,12 +366,12 @@ export async function renderBlendShareCard(data, mode = 'watched') {
   drawBrand(ctx);
 
   font(ctx, 18, 700);
-  drawLines(ctx, [isWatchlist ? 'ORTAK İZLEME LİSTESİ' : 'ORTAK İZLENENLER'], 72, 152, 22, accent);
+  drawLines(ctx, [t(isWatchlist ? 'ORTAK İZLEME LİSTESİ' : 'ORTAK İZLENENLER')], 72, 152, 22, accent);
   font(ctx, 50, 700);
-  drawLines(ctx, [isWatchlist ? 'Sıradaki filmlerimiz' : 'Aynı filmlerde buluştuk'], 72, 188, 60, '#e0e2e6');
+  drawLines(ctx, [t(isWatchlist ? 'Sıradaki filmlerimiz' : 'Aynı filmlerde buluştuk')], 72, 188, 60, '#e0e2e6');
 
-  const user1 = `@${clean(data.username1 || 'kullanıcı')}`;
-  const user2 = `@${clean(data.username2 || 'kullanıcı')}`;
+  const user1 = `@${clean(data.username1 || t('kullanıcı'))}`;
+  const user2 = `@${clean(data.username2 || t('kullanıcı'))}`;
   await drawBlendUsers(ctx, data, user1, user2);
 
   fillRounded(ctx, 72, 390, 286, 230, 28, 'rgba(29,32,35,.9)');
@@ -380,13 +381,13 @@ export async function renderBlendShareCard(data, mode = 'watched') {
   ctx.strokeStyle = accent; ctx.lineWidth = 16; ctx.lineCap = 'round'; ctx.stroke();
   font(ctx, 52, 700); ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = '#e0e2e6';
   ctx.fillText(String(Number(data.score) || 0), 215, 475);
-  font(ctx, 17, 700); ctx.fillStyle = 'rgba(186,203,182,.65)'; ctx.fillText('% UYUM', 215, 584);
+  font(ctx, 17, 700); ctx.fillStyle = 'rgba(186,203,182,.65)'; ctx.fillText(t('% UYUM'), 215, 584);
 
   const scanned = (Number(data.watched_count1) || 0) + (Number(data.watched_count2) || 0);
-  metric(ctx, 386, 390, 300, 'Taranan film', scanned, '#e0e2e6');
-  metric(ctx, 708, 390, 300, isWatchlist ? 'Listede buluşan' : 'Ortak film', isWatchlist ? films.length : (data.common_count || films.length), accent);
+  metric(ctx, 386, 390, 300, t('Taranan film'), scanned, '#e0e2e6');
+  metric(ctx, 708, 390, 300, t(isWatchlist ? 'Listede buluşan' : 'Ortak film'), isWatchlist ? films.length : (data.common_count || films.length), accent);
   font(ctx, 18, 700);
-  drawLines(ctx, [isWatchlist ? (data.common_watchlist_films?.length ? 'İKİMİZİN DE İZLEMEK İSTEDİĞİ' : 'İKİ ZEVKİ BULUŞTURACAK') : 'ÖNE ÇIKAN ORTAK FİLMLER'], 72, 652, 22, accent);
+  drawLines(ctx, [t(isWatchlist ? (data.common_watchlist_films?.length ? 'İKİMİZİN DE İZLEMEK İSTEDİĞİ' : 'İKİ ZEVKİ BULUŞTURACAK') : 'ÖNE ÇIKAN ORTAK FİLMLER')], 72, 652, 22, accent);
   if (!isWatchlist && films.length > 5) {
     await drawCompactPosterGrid(ctx, films, 690, accent);
   } else {
@@ -397,8 +398,8 @@ export async function renderBlendShareCard(data, mode = 'watched') {
   return {
     blob: await canvasBlob(canvas),
     filename: `movienotes-${isWatchlist ? 'ortak-watchlist' : 'ortak-filmler'}-${clean(data.username1)}-${clean(data.username2)}.png`,
-    title: isWatchlist ? 'Ortak izleme listemiz' : 'Ortak izlediğimiz filmler',
-    text: `${user1} ve ${user2} · %${Number(data.score) || 0} uyum · ${scanned} film tarandı`,
+    title: t(isWatchlist ? 'Ortak izleme listemiz' : 'Ortak izlediğimiz filmler'),
+    text: t('{user1} ve {user2} · %{score} uyum · {count} film tarandı', { user1, user2, score: Number(data.score) || 0, count: scanned }),
   };
 }
 
@@ -406,7 +407,7 @@ export async function renderProfileShareCard(profile) {
   const favorites = (profile?.favorite_films || []).slice(0, 4);
   const taste = profile?.taste || {};
   const summary = clean([taste.summary, ...(taste.analysis || [])].filter(Boolean).slice(0, 4).join(' '));
-  if (favorites.length < 4 || !summary) throw new Error('Profil kartı için Fav 4 ve hesap özeti henüz hazır değil.');
+  if (favorites.length < 4 || !summary) throw new Error(t('Profil kartı için Fav 4 ve hesap özeti henüz hazır değil.'));
   if (document.fonts?.ready) await document.fonts.ready;
   const accent = '#ff8000';
   const canvas = makeCanvas();
@@ -414,31 +415,31 @@ export async function renderProfileShareCard(profile) {
   drawBackground(ctx, accent);
   drawBrand(ctx);
   const account = profile?.account || {};
-  const username = clean(account.username || 'kullanıcı');
+  const username = clean(account.username || t('kullanıcı'));
   const name = clean(account.display_name || username);
   const genres = (taste.top_genres || []).filter(Boolean).slice(0, 3);
   const director = clean(taste.favorite_director || taste.top_directors?.[0] || taste.top_directors_detail?.[0]?.name);
   const yearCount = Number(profile?.stats?.this_year) || 0;
 
   font(ctx, 18, 700);
-  drawLines(ctx, ['SİNEFİL HESAP ÖZETİ'], 72, 152, 22, accent);
+  drawLines(ctx, [t('SİNEFİL HESAP ÖZETİ')], 72, 152, 22, accent);
   font(ctx, 48, 700);
   drawLines(ctx, [fitText(ctx, name, 700)], 72, 188, 58, '#e0e2e6');
   font(ctx, 22, 600);
   drawLines(ctx, [`@${username}`], 72, 248, 28, 'rgba(186,203,182,.7)');
 
-  metric(ctx, 72, 302, 292, 'İzlenen film', taste.sample_size || 0, '#e0e2e6');
-  metric(ctx, 394, 302, 292, 'Puanlanan film', taste.rated_count || 0, '#40bcf4');
-  metric(ctx, 716, 302, 292, 'Bu yıl izlenen', yearCount || '—', accent);
+  metric(ctx, 72, 302, 292, t('İzlenen film'), taste.sample_size || 0, '#e0e2e6');
+  metric(ctx, 394, 302, 292, t('Puanlanan film'), taste.rated_count || 0, '#40bcf4');
+  metric(ctx, 716, 302, 292, t('Bu yıl izlenen'), yearCount || '—', accent);
 
   font(ctx, 17, 700);
-  drawLines(ctx, ['EN ÇOK DÖNDÜĞÜ TÜR'], 72, 456, 22, '#00e054');
+  drawLines(ctx, [t('EN ÇOK DÖNDÜĞÜ TÜR')], 72, 456, 22, '#00e054');
   font(ctx, 22, 700);
-  drawLines(ctx, [genres.length ? genres.join(' · ') : 'Tür sinyali oluşuyor'], 72, 486, 28, '#e0e2e6');
+  drawLines(ctx, [genres.length ? genres.join(' · ') : t('Tür sinyali oluşuyor')], 72, 486, 28, '#e0e2e6');
   font(ctx, 17, 700);
-  drawLines(ctx, ['FAVORİ YÖNETMEN'], 72, 530, 22, '#40bcf4');
+  drawLines(ctx, [t('FAVORİ YÖNETMEN')], 72, 530, 22, '#40bcf4');
   font(ctx, 22, 700);
-  drawLines(ctx, [director || 'Henüz belirleniyor'], 72, 560, 28, '#e0e2e6');
+  drawLines(ctx, [director || t('Henüz belirleniyor')], 72, 560, 28, '#e0e2e6');
 
   font(ctx, 17, 700);
   drawLines(ctx, ['FAV 4'], 72, 612, 22, accent);
@@ -446,17 +447,17 @@ export async function renderProfileShareCard(profile) {
 
   fillRounded(ctx, 72, 970, 936, 232, 30, 'rgba(29,32,35,.9)');
   font(ctx, 17, 700);
-  drawLines(ctx, ['HESABININ SÖYLEDİĞİ'], 112, 1008, 22, accent);
+  drawLines(ctx, [t('HESABININ SÖYLEDİĞİ')], 112, 1008, 22, accent);
   const fitted = fitWrappedBlock(ctx, summary, 856, 122, { maxSize: 25, minSize: 18, weight: 600 });
   font(ctx, fitted.size, 600);
   drawLines(ctx, fitted.lines, 112, 1046, fitted.lineHeight, '#e0e2e6');
-  drawFooter(ctx, `@${username} · Movienotes profil kartı`);
+  drawFooter(ctx, t('@{username} · Movienotes profil kartı', { username }));
 
   return {
     blob: await canvasBlob(canvas),
     filename: `movienotes-profil-${username}.png`,
-    title: 'Sinefil profil kartım',
-    text: `@${username} · izleme geçmişim, Fav 4'üm ve hesap özetim`,
+    title: t('Sinefil profil kartım'),
+    text: t('@{username} · izleme geçmişim, Fav 4’üm ve hesap özetim', { username }),
   };
 }
 
@@ -470,19 +471,19 @@ const WIDE_HEIGHT = 1080;
 
 export async function renderRecentFilmsShareCard(films, profile) {
   const visible = (films || []).filter(Boolean).slice(0, 10);
-  if (!visible.length) throw new Error('Son izlenen film listesi henüz hazır değil.');
+  if (!visible.length) throw new Error(t('Son izlenen film listesi henüz hazır değil.'));
   if (document.fonts?.ready) await document.fonts.ready;
   const accent = '#6ccdff';
   const canvas = makeCanvas(WIDE_WIDTH, WIDE_HEIGHT);
   const ctx = canvas.getContext('2d');
   drawBackground(ctx, accent, WIDE_WIDTH, WIDE_HEIGHT);
   drawBrand(ctx, WIDE_WIDTH);
-  const username = clean(profile?.account?.username || profile?.username || 'kullanıcı');
+  const username = clean(profile?.account?.username || profile?.username || t('kullanıcı'));
 
   font(ctx, 18, 700);
-  drawLines(ctx, ['GÜNCE · SON İZLENENLER'], 72, 118, 22, accent);
+  drawLines(ctx, [t('GÜNCE · SON İZLENENLER')], 72, 118, 22, accent);
   font(ctx, 46, 700);
-  drawLines(ctx, [`Son ${visible.length} film`], 72, 150, 56, '#e0e2e6');
+  drawLines(ctx, [t('Son {count} film', { count: visible.length })], 72, 150, 56, '#e0e2e6');
   font(ctx, 22, 600);
   drawLines(ctx, [`@${username}`], 72, 206, 26, 'rgba(186,203,182,.7)');
 
@@ -547,15 +548,15 @@ export async function renderRecentFilmsShareCard(films, profile) {
     }
   });
 
-  drawFooter(ctx, `@${username} · Letterboxd güncesi`, WIDE_WIDTH, WIDE_HEIGHT);
+  drawFooter(ctx, t('@{username} · Letterboxd güncesi', { username }), WIDE_WIDTH, WIDE_HEIGHT);
 
   return {
     blob: await canvasBlob(canvas),
     width: WIDE_WIDTH,
     height: WIDE_HEIGHT,
-    filename: `movienotes-son-filmler-${username}.png`,
-    title: 'Son izlediğim filmler',
-    text: `@${username} · son izlediğim ${visible.length} film`,
+    filename: `movienotes-recent-films-${username}.png`,
+    title: t('Son izlediğim filmler'),
+    text: t('@{username} · son izlediğim {count} film', { username, count: visible.length }),
   };
 }
 
@@ -577,13 +578,13 @@ export function openShareCardPreview(card) {
   const status = document.getElementById('png-share-status');
   const nativeButton = document.getElementById('png-share-native');
   const downloadButton = document.getElementById('png-share-download');
-  if (!dialog || !image) throw new Error('Paylaşım önizlemesi açılamadı.');
+  if (!dialog || !image) throw new Error(t('Paylaşım önizlemesi açılamadı.'));
   if (previewObjectURL) URL.revokeObjectURL(previewObjectURL);
   previewObjectURL = URL.createObjectURL(card.blob);
   image.src = previewObjectURL;
   image.alt = card.title;
   title.textContent = card.title;
-  status.textContent = `${card.width || WIDTH} × ${card.height || HEIGHT} PNG hazır`;
+  status.textContent = t('{width} × {height} PNG hazır', { width: card.width || WIDTH, height: card.height || HEIGHT });
   const file = typeof File === 'function'
     ? new File([card.blob], card.filename, { type: 'image/png' })
     : null;
@@ -597,7 +598,7 @@ export function openShareCardPreview(card) {
       await navigator.share({ title: card.title, text: card.text, files: [file] });
       dialog.close();
     } catch (error) {
-      if (error?.name !== 'AbortError') status.textContent = 'Sistem paylaşımı açılamadı; PNG olarak indirebilirsin.';
+      if (error?.name !== 'AbortError') status.textContent = t('Sistem paylaşımı açılamadı; PNG olarak indirebilirsin.');
     }
   };
   downloadButton.onclick = () => downloadBlob(card.blob, card.filename);

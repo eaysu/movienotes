@@ -1,3 +1,5 @@
+import { t } from './i18n.js?v=20260918.2';
+
 export const API_BASE = window.__API_BASE__ || '';
 
 let activeRequest = null;
@@ -27,7 +29,7 @@ function errorDetailMessage(payload) {
 }
 
 function apiError(response, payload) {
-  const error = new Error(errorDetailMessage(payload) || `HTTP ${response.status}`);
+  const error = new Error(t(errorDetailMessage(payload) || `HTTP ${response.status}`));
   error.status = response.status;
   error.code = response.headers.get('X-Error-Code') || payload.code || '';
   return error;

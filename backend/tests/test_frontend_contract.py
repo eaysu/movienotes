@@ -240,12 +240,12 @@ def test_public_registration_count_is_rendered_without_exposing_user_records():
     assert 'directed by:' in html
     assert 'href="https://twitter.com/caddebogasi"' in html
     assert 'id="auth-title"' in html
-    assert "title.textContent = login ? 'Movienotes’a giriş yap' : 'Movienotes’da hesap oluştur'" in (FRONTEND / "js" / "auth.js").read_text()
+    assert "title.textContent = t(login ? 'Movienotes’a giriş yap' : 'Movienotes’da hesap oluştur')" in (FRONTEND / "js" / "auth.js").read_text()
     auth = html.split('id="view-auth"', 1)[1].split('id="view-idle"', 1)[0]
     assert auth.index('data-public-user-count') < auth.index('<main')
     assert "apiJSON('/api/public/stats')" in app_js
     assert "data?.registered_users" in app_js
-    assert "count.toLocaleString('tr-TR')" in app_js
+    assert "count.toLocaleString(uiLocale())" in app_js
 
 
 def test_sinefil_area_opens_a_profile_page_from_the_card():
@@ -829,9 +829,10 @@ def test_shell_asset_content_changes_force_a_version_bump():
     files that no longer existed.
     """
     expected = {
-        "js/app.js": "f4c1ce1940331ba0689c284bd91b504cb9b9d52d3107b1bed529ff591230f0ad",
+        "js/app.js": "1c485f2a223a6d5e1128575f7cb35123452ae194e31783f06119123c33fdd0aa",
         "app.css": "098314bfe07625fe57386a3173bfc470aa8be208840efe90bf74e31ff1950695",
-        "js/share-cards.js": "bb48c19bf39b5fd96520b898e260834557b2f651e24b3834b51806b98a3f3cab",
+        "js/share-cards.js": "ca3a27550a3ed6407dc9fcabb46a6c3e8b8bba67921362491af75fd46d0389de",
+        "js/i18n.js": "7d3d3d1b338cfb7dc9e819732035f3f7343c2cd8a0fccdc7064c26a8edfbaa97",
         "site.webmanifest": "7a7de349179ed9f226d38632dfde5a8478edd10305972ea52641b0dc6aa7f405",
         "movienotes-mark.png": "850aa9117aa52768952843f8e2c410c0c17868877d81b2058274290373b4ee1e",
         "movienotes-icon-192.png": "3b04c52ffd23799ce424f1acefd0a1d7c386b8c968b09be9bd5c87b623c6ac12",
@@ -867,19 +868,24 @@ def test_every_app_shell_asset_has_an_explicit_immutable_version():
     source_css = (FRONTEND / "css" / "source.css").read_text()
 
     dependency_version = "v=20260902.15"
-    api_version = "v=20260916.1"
+    api_version = "v=20260918.1"
     css_version = "v=20260910.83"
     assert f"/static/app.css?{css_version}" in html
-    assert "/static/js/app.js?v=20260916.1" in html
-    assert app_js.count(f"?{dependency_version}") == 3
+    assert "/static/js/app.js?v=20260918.2" in html
+    assert "./i18n.js?v=20260918.2" in app_js
+    assert app_js.count(f"?{dependency_version}") == 2
     assert f"./api.js?{api_version}" in app_js
-    assert "./recommendations.js?v=20260910.1" in app_js
-    assert "./share-cards.js?v=20260916.1" in app_js
-    assert "./auth.js?v=20260902.16" in app_js
+    assert "./recommendations.js?v=20260918.2" in app_js
+    assert "./share-cards.js?v=20260918.2" in app_js
+    assert "./auth.js?v=20260918.2" in app_js
     assert f"./dom.js?{dependency_version}" in auth_js
+    assert "./i18n.js?v=20260918.2" in auth_js
     assert f"./dom.js?{dependency_version}" in profile_js
+    assert "./i18n.js?v=20260918.2" in profile_js
     assert f"./dom.js?{dependency_version}" in recommendations_js
+    assert "./i18n.js?v=20260918.2" in recommendations_js
     assert f"./api.js?{api_version}" in share_js
+    assert "./i18n.js?v=20260918.2" in share_js
     assert f"criterion-closet-bg.jpg?{dependency_version}" in source_css
 
 
@@ -949,7 +955,7 @@ def test_png_share_renderer_is_lazy_loaded_on_first_share_action():
 
     imports = app_js.split("// ── Cinema facts", 1)[0]
     assert "from './share-cards.js" not in imports
-    assert "import('./share-cards.js?v=20260916.1')" in imports
+    assert "import('./share-cards.js?v=20260918.2')" in imports
     assert "const shareCards = await loadShareCardsModule();" in app_js
 
 

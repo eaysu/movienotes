@@ -796,6 +796,7 @@ def _recommendation_cache_key(
     favorite_directors: list[str] | None = None,
     favorite_slugs: list[str] | None = None,
     favorite_four_slugs: list[str] | None = None,
+    locale: str = "tr",
 ) -> str:
     """Content-address a recommendation so profile changes invalidate it."""
     payload = {
@@ -808,11 +809,20 @@ def _recommendation_cache_key(
         "favorite_directors": (favorite_directors or [])[:3],
         "favorite_slugs": (favorite_slugs or [])[:10],
         "favorite_four_slugs": (favorite_four_slugs or [])[:4],
+        "locale": locale,
     }
     digest = hashlib.sha256(
         json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
     ).hexdigest()
     return digest
+
+
+def _response_locale(account: Account | None, request: Request) -> str:
+    """Resolve account preference, otherwise use the requesting device locale."""
+    preferred = getattr(account, "preferred_locale", "auto")
+    if preferred in {"tr", "en"}:
+        return preferred
+    return "en" if request.headers.get("accept-language", "").lower().startswith("en") else "tr"
 
 
 _film_load_flights: dict[tuple[str, str], asyncio.Task] = {}
@@ -1156,6 +1166,18 @@ class DiscoveryVisibilityRequest(BaseModel):
 
 class AccountPrivacyRequest(BaseModel):
     private: bool
+
+
+class LocalePreferenceRequest(BaseModel):
+    locale: str
+
+    @field_validator("locale", mode="before")
+    @classmethod
+    def validate_locale(cls, value: str) -> str:
+        locale = str(value or "").strip().lower()
+        if locale not in {"auto", "tr", "en"}:
+            raise ValueError("Language must be auto, tr, or en.")
+        return locale
 
 
 class FollowRequestDecision(BaseModel):
@@ -1764,6 +1786,34 @@ async def update_account_privacy(
         _auth_service(), account, "account_privacy_changed", {"private": private}
     )
     return {"ok": True, "private_account": private}
+
+
+@app.post("/api/profile/locale")
+async def update_profile_locale(
+    req: LocalePreferenceRequest, request: Request
+) -> dict:
+    """Save the UI language preference selected from profile settings."""
+    _require_csrf(request)
+    account = await _require_account(request)
+    try:
+        locale = await asyncio.to_thread(
+            _auth_service().set_preferred_locale, account, req.locale
+        )
+        await asyncio.to_thread(_auth_service().clear_taste_narrative, account)
+    except Exception as exc:
+        log.warning("locale preference update failed account=%s", account.id, exc_info=True)
+        raise HTTPException(
+            status_code=503,
+            detail="Language preference could not be saved.",
+        ) from exc
+    account.preferred_locale = locale
+    # Rebuild prose from the already-saved film catalogue. This avoids a new
+    # Letterboxd crawl solely because the member changed app language.
+    asyncio.create_task(_refresh_locale_taste(account))
+    await _record_activity_event(
+        _auth_service(), account, "locale_changed", {"locale": locale}
+    )
+    return {"ok": True, "locale": locale}
 
 
 @app.post("/api/letters/receiving")
@@ -2961,6 +3011,7 @@ class _SyncPipeline:
         *,
         use_llm: bool = True,
         repair_all: bool = True,
+        force_analysis: bool = False,
     ) -> int:
         service = _auth_service()
         rows = await asyncio.to_thread(service.get_watched_films, account.id)
@@ -3110,6 +3161,17 @@ class _SyncPipeline:
             ]
         await _resolve_favorite_posters(favorites, rows, service, enricher)
         taste = build_taste_profile(watched)
+        if account.preferred_locale == "en":
+            genres = ", ".join(taste.top_genres[:2])
+            director = taste.favorite_director
+            if genres and director:
+                taste.summary = f"A taste profile drawn to {genres}, with a clear affinity for {director}."
+            elif genres:
+                taste.summary = f"A viewing profile with a clear pull toward {genres}."
+            elif director:
+                taste.summary = f"A viewing profile with a clear affinity for {director}."
+            else:
+                taste.summary = "Your viewing history is saved; your taste profile will become richer as film details are completed."
         taste.source_fingerprint = taste_source_fingerprint(profile, watched)
         taste.personality = personality_from_favorites(favorites)
         await _apply_director_photos(taste, enricher, service)
@@ -3125,23 +3187,41 @@ class _SyncPipeline:
 
         # A full first snapshot gets an LLM pass. Later passes only refresh the
         # profile prose when its source changes; merely opening the app does not.
-        should_analyze = source_changed or (
+        should_analyze = force_analysis or source_changed or (
             use_llm and not stored_taste.get("analysis")
         )
         refresh_personality = _personality_refresh_needed(stored_snapshot, favorites)
         if should_analyze:
             with contextlib.suppress(Exception):
-                extra = await analyze_taste(self.settings, watched, favorites)
+                extra = await analyze_taste(
+                    self.settings,
+                    watched,
+                    favorites,
+                    locale="en" if account.preferred_locale == "en" else "tr",
+                )
                 if extra.get("analysis"):
                     taste.analysis = extra["analysis"]
-                if refresh_personality and extra.get("personality"):
+                if (refresh_personality or force_analysis) and extra.get("personality"):
                     taste.personality = extra["personality"]
-        if not refresh_personality and stored_taste.get("personality"):
+        if not refresh_personality and not force_analysis and stored_taste.get("personality"):
             taste.personality = stored_taste["personality"]
         await asyncio.to_thread(
             service.save_profile_snapshot, account, profile, favorites, taste
         )
         return len(watched)
+
+
+async def _refresh_locale_taste(account: Account) -> None:
+    """Regenerate only account prose after a language change, off-request."""
+    try:
+        await _SyncPipeline(get_settings(), use_stored_profile=True).rebuild_snapshot(
+            account,
+            use_llm=True,
+            repair_all=False,
+            force_analysis=True,
+        )
+    except Exception:  # noqa: BLE001 - the existing data remains usable
+        log.warning("locale taste refresh failed account=%s", account.id, exc_info=True)
 
 
 async def _refresh_profile_watchlist(account: Account, settings, service) -> int:
@@ -4545,6 +4625,7 @@ async def recommend(req: RecommendRequest, request: Request):
     account = await _enforce_account_username(request, req.username)
     await _enforce_heavy_rate_limit(request)
     service = _auth_service() if account is not None else None
+    response_locale = _response_locale(account, request)
 
     async def generate():
         global _q_waiting, _q_active
@@ -4698,6 +4779,7 @@ async def recommend(req: RecommendRequest, request: Request):
                     favorite_directors=favorite_directors,
                     favorite_slugs=favorite_slugs,
                     favorite_four_slugs=favorite_four_slugs,
+                    locale=response_locale,
                 )
                 stage = "cache_lookup"
                 cached_recommendation = await asyncio.to_thread(
@@ -4781,6 +4863,7 @@ async def recommend(req: RecommendRequest, request: Request):
                     director_boost=getattr(settings, "favorite_director_boost", 0.08),
                     favorite_slugs=favorite_slugs,
                     favorite_four_slugs=favorite_four_slugs,
+                    locale=response_locale,
                 )
                 if enricher is not None:
                     await enricher.ensure_details(director_pool)
@@ -4806,6 +4889,7 @@ async def recommend(req: RecommendRequest, request: Request):
                     candidates,
                     favorite_slugs=favorite_slugs,
                     favorite_four_slugs=favorite_four_slugs,
+                    locale=response_locale,
                 )
                 llm_ms = round((time.perf_counter() - t4) * 1000)
                 cacheable_result = result.get("llm_used", False) or not settings.has_openai

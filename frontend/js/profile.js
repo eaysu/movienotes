@@ -1,4 +1,5 @@
 import { escapeHTML, safeImageURL, letterboxdFilmURL } from './dom.js?v=20260902.15';
+import { t } from './i18n.js?v=20260918.2';
 
 export function directorFilmTile(film) {
   const poster = safeImageURL(film.poster_url);
@@ -23,7 +24,7 @@ export function directorFilmTile(film) {
 export function directorFilmGrid(films, id, hidden, hasMore = false) {
   return `<div id="${id}" data-full-loaded="${hasMore ? 'false' : 'true'}" class="collapse-y${hidden ? '' : ' open'} mt-3"><div class="collapse-inner">
     <div class="grid grid-cols-3 sm:grid-cols-4 gap-2">${films.map(directorFilmTile).join('')}</div>
-    ${hasMore ? '<p data-director-loading class="mt-3 text-center font-label-sm text-label-sm text-on-surface-variant/50">Açıldığında tüm filmler yüklenir</p>' : ''}
+    ${hasMore ? `<p data-director-loading class="mt-3 text-center font-label-sm text-label-sm text-on-surface-variant/50">${t('Açıldığında tüm filmler yüklenir')}</p>` : ''}
   </div></div>`;
 }
 

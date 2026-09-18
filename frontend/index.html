@@ -426,6 +426,15 @@
           <span class="material-symbols-outlined text-[18px]">settings</span>
         </button>
         <div id="profile-settings-menu" class="hidden absolute right-0 top-12 z-30 w-64 overflow-hidden rounded-2xl border border-outline-variant/30 bg-surface-container shadow-2xl py-1 text-left">
+          <label class="flex items-center gap-3 px-4 py-3 text-sm text-on-surface-variant hover:bg-surface-variant">
+            <span class="material-symbols-outlined text-[18px]">language</span>
+            <span class="min-w-0 flex-1">Dil</span>
+            <select id="profile-language-select" class="max-w-[142px] rounded-lg border border-outline-variant/35 bg-surface px-2 py-1 text-xs text-on-surface outline-none focus:border-primary-container">
+              <option value="auto">Otomatik (telefon dili)</option>
+              <option value="tr">Türkçe</option>
+              <option value="en">İngilizce</option>
+            </select>
+          </label>
           <button id="profile-theme-toggle" type="button" class="w-full px-4 py-3 flex items-center gap-3 text-left text-on-surface-variant hover:text-primary hover:bg-surface-variant text-sm"><span class="material-symbols-outlined text-[18px]">contrast</span><span id="profile-theme-label">Görünüm: Koyu</span></button>
           <button id="profile-private-toggle" type="button" class="w-full px-4 py-3 flex items-center gap-3 text-left text-on-surface-variant hover:text-primary hover:bg-surface-variant text-sm"><span class="material-symbols-outlined text-[18px]">lock</span><span id="profile-private-label">Kilitli hesap: Kapalı</span></button>
           <button id="profile-letter-toggle" type="button" aria-pressed="false" class="w-full px-4 py-3 flex items-center gap-3 text-left text-on-surface-variant hover:text-[#ffb56f] hover:bg-surface-variant text-sm"><span id="profile-letter-icon" class="material-symbols-outlined text-[18px]">mail_lock</span><span>Mektuplar: <span id="profile-letter-label">Kapalı</span></span></button>
@@ -1361,6 +1370,6 @@
   </div>
 </footer>
 
-<script type="module" src="/static/js/app.js?v=20260916.1"></script>
+<script type="module" src="/static/js/app.js?v=20260918.2"></script>
 </body>
 </html>

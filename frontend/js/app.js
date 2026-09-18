@@ -8,22 +8,33 @@ import {
   finishApiRequest,
   scrapeErrorMessage,
   streamErrorMessage,
-} from './api.js?v=20260916.1';
+} from './api.js?v=20260918.1';
 import {
   cookieValue,
   csrfHeaders,
   setAuthMessage,
   setAuthMode,
   setPasswordVisibility,
-} from './auth.js?v=20260902.16';
-import { directorAvatar, directorFilmGrid, directorFilmTile } from './profile.js?v=20260902.15';
+} from './auth.js?v=20260918.2';
+import { directorAvatar, directorFilmGrid, directorFilmTile } from './profile.js?v=20260918.2';
 import { animateScore, getScoreInfo } from './blend.js?v=20260902.15';
-import { createRecommendationCards } from './recommendations.js?v=20260910.1';
+import { createRecommendationCards } from './recommendations.js?v=20260918.2';
+import {
+  getLocale,
+  initI18n,
+  localePreference,
+  setLocalePreference,
+  t,
+} from './i18n.js?v=20260918.2';
+
+initI18n();
+
+const uiLocale = () => (getLocale() === 'en' ? 'en-US' : 'tr-TR');
 
 let _shareCardsModule;
 function loadShareCardsModule() {
   if (!_shareCardsModule) {
-    _shareCardsModule = import('./share-cards.js?v=20260916.1');
+    _shareCardsModule = import('./share-cards.js?v=20260918.2');
   }
   return _shareCardsModule;
 }
@@ -1194,7 +1205,7 @@ async function loadPublicStats() {
           el.classList.add('hidden');
           return;
         }
-        value.textContent = count.toLocaleString('tr-TR');
+        value.textContent = count.toLocaleString(uiLocale());
         el.classList.remove('hidden');
       });
       return data;
@@ -1220,6 +1231,39 @@ let _resetChallenge = null;
 let _pendingRegPassword = null;
 let _registrationAccount = null;
 
+function syncLanguageControl() {
+  const select = $('profile-language-select');
+  if (select) select.value = localePreference();
+}
+
+function applyStoredAccountLocale(account) {
+  const saved = account?.preferred_locale;
+  if (saved !== 'tr' && saved !== 'en') return false;
+  if (localePreference() === saved && getLocale() === saved) return false;
+  setLocalePreference(saved);
+  window.location.reload();
+  return true;
+}
+
+async function changeProfileLanguage(event) {
+  const preference = event.currentTarget.value;
+  setLocalePreference(preference);
+  if (_account) {
+    try {
+      await apiJSON('/api/profile/locale', {
+        method: 'POST',
+        headers: csrfHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({ locale: preference }),
+      });
+      _account.preferred_locale = preference;
+    } catch (_) {
+      // The selected device remains localized even if an older database has
+      // not yet received the optional preference column.
+    }
+  }
+  window.location.reload();
+}
+
 function setImage(img, fallback, value, alt) {
   try {
     const url = new URL(String(value || ''));
@@ -1237,6 +1281,7 @@ function setImage(img, fallback, value, alt) {
 
 function applyAccount(account) {
   _account = account;
+  syncLanguageControl();
   paintAvatarButtons();
   $('username-input').value = account.username;
   $('primary-username-field').classList.add('hidden');
@@ -1247,7 +1292,7 @@ function applyAccount(account) {
   $('btn-delete-data').classList.add('hidden');
   $('btn-mode-blend').disabled = false;
   $('btn-mode-blend').classList.remove('opacity-40', 'cursor-not-allowed');
-  $('btn-mode-blend').title = 'Kayıtlı bir kullanıcıya onay isteği gönder.';
+  $('btn-mode-blend').title = t('Kayıtlı bir kullanıcıya onay isteği gönder.');
   renderProfileLetterSettings(Boolean(account.letter_receiving_enabled));
   renderPrivateAccount(Boolean(account.private_account));
   loadProfileSocialStats();
@@ -1347,6 +1392,7 @@ function accountSummaryFromTaste(taste) {
 
 function renderPersistedProfile(data) {
   if (!data) return;
+  if (applyStoredAccountLocale(data.account)) return;
   _persistedProfile = data;
   if (data.account) applyAccount(data.account);
   const taste = data.taste;
@@ -1383,7 +1429,7 @@ function renderPersistedProfile(data) {
 
     const syncedAt = taste.updated_at || taste.generated_at;
     if (syncedAt) {
-      $('profile-last-sync').innerHTML = `<span class="material-symbols-outlined text-[16px]">schedule</span>Son güncelleme · ${escapeHTML(new Date(syncedAt).toLocaleString('tr-TR'))}`;
+      $('profile-last-sync').innerHTML = `<span class="material-symbols-outlined text-[16px]">schedule</span>${t('Son güncelleme')} · ${escapeHTML(new Date(syncedAt).toLocaleString(uiLocale()))}`;
     }
   } else {
     unregisterProfileCarousel('profile-directors');
@@ -1501,7 +1547,7 @@ function feedRelativeTime(value) {
   if (minutes < 60) return `${minutes} dk`;
   if (minutes < 1440) return `${Math.floor(minutes / 60)} sa`;
   const days = Math.floor(minutes / 1440);
-  return days < 7 ? `${days} g` : new Date(then).toLocaleDateString('tr-TR', { day: '2-digit', month: 'short' });
+  return days < 7 ? `${days} ${t('g')}` : new Date(then).toLocaleDateString(uiLocale(), { day: '2-digit', month: 'short' });
 }
 
 // Uzun bir yorum kartı kilitliyor: 220 karakterden sonrası "devamını oku"nun
@@ -2275,7 +2321,7 @@ function openBulletinVenues(key) {
   $('bulletin-venues-title').textContent = film.title || 'Film';
   $('bulletin-venues-list').innerHTML = (film.venues || []).map(venue => {
     const when = venue.starts_at
-      ? ` · ${escapeHTML(new Date(venue.starts_at).toLocaleString('tr-TR', {
+      ? ` · ${escapeHTML(new Date(venue.starts_at).toLocaleString(uiLocale(), {
         weekday: 'short', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit',
       }))}`
       : '';
@@ -2651,7 +2697,7 @@ async function loadProfileStats() {
     const data = await apiJSON('/api/profile/stats');
     _statsLoaded = true;
     if (typeof data.this_year === 'number') {
-      $('profile-year-count').textContent = data.this_year.toLocaleString('tr-TR');
+      $('profile-year-count').textContent = data.this_year.toLocaleString(uiLocale());
       if (_persistedProfile) {
         _persistedProfile.stats = { ...(_persistedProfile.stats || {}), this_year: data.this_year };
       }
@@ -2763,7 +2809,7 @@ function applySyncJob(job) {
 
   if (job && job.state === 'done' && job.scope === 'full') {
     $('profile-scope-badge-text').textContent = job.total
-      ? `Tüm geçmiş · ${job.total.toLocaleString('tr-TR')} film`
+      ? `${t('Tüm geçmiş')} · ${job.total.toLocaleString(uiLocale())} ${t('film')}`
       : 'Tüm geçmiş analiz edildi';
     badge.classList.remove('hidden');
     badge.classList.add('inline-flex');
@@ -2776,8 +2822,8 @@ function applySyncJob(job) {
     strip.classList.remove('hidden');
     $('profile-sweep-label').textContent = _SWEEP_PHASE_LABEL[job.phase] || 'Tüm izleme geçmişin analiz ediliyor';
     $('profile-sweep-count').textContent = job.total
-      ? `${job.processed.toLocaleString('tr-TR')} / ${job.total.toLocaleString('tr-TR')} film`
-      : `${(job.processed || 0).toLocaleString('tr-TR')} film`;
+      ? `${job.processed.toLocaleString(uiLocale())} / ${job.total.toLocaleString(uiLocale())} ${t('film')}`
+      : `${(job.processed || 0).toLocaleString(uiLocale())} ${t('film')}`;
     const progressBar = $('profile-sweep-bar');
     progressBar.classList.toggle('is-indeterminate', !job.total);
     progressBar.style.width = job.total ? `${Math.max(4, job.percent || 0)}%` : '38%';
@@ -2952,8 +2998,8 @@ function letterCard(item, payload) {
         ? 'Bu mektup eski cihaz-anahtarlı biçimde yazılmıştı ve artık açılamıyor.'
         : 'Mektup içeriği okunamadı.'),
   );
-  const date = new Date(item.created_at).toLocaleDateString('tr-TR', { day: '2-digit', month: 'short', year: 'numeric' });
-  const seen = item.read_at ? new Date(item.read_at).toLocaleString('tr-TR', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '';
+  const date = new Date(item.created_at).toLocaleDateString(uiLocale(), { day: '2-digit', month: 'short', year: 'numeric' });
+  const seen = item.read_at ? new Date(item.read_at).toLocaleString(uiLocale(), { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '';
   const attachment = payload?.film ? `<div class="mt-3 rounded-xl border border-tertiary-container/25 bg-tertiary-container/10 p-3 text-sm text-tertiary-container"><span class="mb-2 block text-[10px] font-bold uppercase tracking-wide">Film hediyesi</span>${letterFilmMarkup(payload.film)}</div>` : '';
   return `<article class="rounded-2xl border border-outline-variant/25 bg-surface-container p-4 shadow-lg"><div class="flex items-center gap-3">${peerAvatar(author)}<div class="min-w-0 flex-1"><strong class="block truncate text-on-surface">${title}</strong><span class="text-xs text-on-surface-variant">@${username} · ${date}</span></div><span class="rounded-full border border-tertiary-container/25 px-2 py-1 text-[10px] uppercase tracking-wide text-tertiary-container">${incoming ? 'Gelen' : 'Gönderilen'}</span></div><p class="mt-4 whitespace-pre-wrap break-words text-sm leading-relaxed text-on-surface-variant">${body}</p>${attachment}<div class="mt-4 flex flex-wrap gap-2"><button data-letter-action="report" data-peer-username="${peerUsername}" class="rounded-lg border border-outline-variant/25 px-3 py-2 text-xs text-on-surface-variant">Bildir</button><button data-letter-action="block" data-peer-username="${peerUsername}" class="rounded-lg border border-outline-variant/25 px-3 py-2 text-xs text-on-surface-variant hover:text-error">Engelle</button>${!incoming ? `<button data-letter-action="delete" data-letter-id="${escapeHTML(item.id)}" class="rounded-lg border border-outline-variant/25 px-3 py-2 text-xs text-on-surface-variant hover:text-error">İki taraftan sil</button>` : ''}${!incoming && seen ? `<span class="self-center text-xs text-primary-container">Görüldü · ${seen}</span>` : ''}</div></article>`;
 }
@@ -3246,7 +3292,7 @@ function blendMyCard(item) {
     ? `<img src="${poster}" alt="${name}" class="w-14 h-14 rounded-full object-cover border border-outline-variant/30"/>`
     : `<div class="w-14 h-14 rounded-full bg-surface-container flex items-center justify-center text-primary-container text-xl font-bold">${name[0] || '?'}</div>`;
   const dateValue = result?.result?.generated_at || result?.created_at || item.decided_at || item.created_at;
-  const dateLabel = dateValue ? new Date(dateValue).toLocaleDateString('tr-TR') : '';
+  const dateLabel = dateValue ? new Date(dateValue).toLocaleDateString(uiLocale()) : '';
   const scoreBlock = hasResult
     ? `<div class="text-right leading-none shrink-0"><div class="text-3xl font-bold text-primary-container">${score}</div><div class="font-label-sm text-label-sm uppercase tracking-wide text-on-surface-variant/60 mt-1">% uyum</div></div>`
     : `<span class="shrink-0 font-label-sm text-label-sm uppercase tracking-wide text-on-surface-variant/50">hazır değil</span>`;
@@ -3830,11 +3876,11 @@ function _obDots(active, total) {
 }
 
 function _countUp(el, target, ms = 1100) {
-  if (_reduceMotion) { el.textContent = target.toLocaleString('tr-TR'); return; }
+  if (_reduceMotion) { el.textContent = target.toLocaleString(uiLocale()); return; }
   const start = performance.now();
   const step = (now) => {
     const p = Math.min((now - start) / ms, 1);
-    el.textContent = Math.round((1 - Math.pow(1 - p, 3)) * target).toLocaleString('tr-TR');
+    el.textContent = Math.round((1 - Math.pow(1 - p, 3)) * target).toLocaleString(uiLocale());
     if (p < 1) requestAnimationFrame(step);
   };
   requestAnimationFrame(step);
@@ -5668,6 +5714,7 @@ $('profile-settings-btn').addEventListener('click', event => {
   toggleProfileMenu();
 });
 $('profile-settings-menu').addEventListener('click', event => event.stopPropagation());
+$('profile-language-select').addEventListener('change', changeProfileLanguage);
 $('profile-theme-toggle').addEventListener('click', () => {
   toggleProfileMenu(false);
   toggleProfileTheme();

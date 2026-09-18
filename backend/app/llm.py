@@ -58,6 +58,7 @@ def _build_prompt(
     n: int,
     favorite_slugs: list[str] | None = None,
     favorite_four_slugs: list[str] | None = None,
+    locale: str = "tr",
 ) -> str:
     references, reference_mode = _taste_references(watched)
     watched_block = "; ".join(_film_label(f) for f in references)
@@ -88,7 +89,7 @@ def _build_prompt(
         _film_label(film) for film in watched if film.slug in favorite_four_set
     ) or "(seçim yapılmamış)"
 
-    return (
+    prompt = (
         "Sen deneyimli bir film öneri uzmanısın.\n\n"
         f"{reference_heading}:\n{watched_block}\n\n"
         f"Kullanıcının kendi seçtiği favori 10 film:\n{top_ten_block}\n\n"
@@ -108,22 +109,32 @@ def _build_prompt(
         '{"taste_summary": "...", '
         '"picks": [{"index": <yukarıdaki liste numarası>, "reason": "..."}]}'
     )
+    if locale == "en":
+        prompt += (
+            "\n\nOUTPUT LANGUAGE OVERRIDE: Return every value in the JSON, including "
+            "taste_summary and reason, in natural English. Keep film titles and "
+            "proper names in their original form."
+        )
+    return prompt
 
 
-def _fallback(candidates: list[EnrichedFilm], n: int) -> dict:
+def _fallback(candidates: list[EnrichedFilm], n: int, *, locale: str = "tr") -> dict:
     """LLM yokken benzerlik sıralamasını döndür."""
     picks = []
     for c in candidates[:n]:
         picks.append({
             **c.to_dict(),
             "reason": c.reason or (
+                "It stands out because it is close to the themes and storytelling styles in the films you love."
+                if locale == "en" else
                 "Sevdiğin filmlerdeki temalara ve anlatım tarzına yakın olduğu için öne çıktı."
             ),
         })
     return {
         "taste_summary": (
-            "Seçimleri sevdiğin temalara, yönetmenlere ve son izlediklerine "
-            "yakınlıklarına göre sıraladım."
+            "I ranked these picks by their proximity to the themes, directors, and recent films you enjoy."
+            if locale == "en" else
+            "Seçimleri sevdiğin temalara, yönetmenlere ve son izlediklerine yakınlıklarına göre sıraladım."
         ),
         "recommendations": picks,
         "llm_used": False,
@@ -137,6 +148,7 @@ async def rank_candidates(
     *,
     favorite_slugs: list[str] | None = None,
     favorite_four_slugs: list[str] | None = None,
+    locale: str = "tr",
 ) -> dict:
     """Aday watchlist filmlerini LLM ile sırala ve gerekçelendir."""
     n = settings.num_recommendations
@@ -144,7 +156,7 @@ async def rank_candidates(
         return {"taste_summary": "", "recommendations": [], "llm_used": False}
 
     if not settings.has_openai:
-        return _fallback(candidates, n)
+        return _fallback(candidates, n, locale=locale)
 
     try:
         from openai import AsyncOpenAI
@@ -173,6 +185,7 @@ async def rank_candidates(
                     n,
                     favorite_slugs=favorite_slugs,
                     favorite_four_slugs=favorite_four_slugs,
+                    locale=locale,
                 ),
             }],
         )
@@ -190,14 +203,15 @@ async def rank_candidates(
 
         return {
             "taste_summary": parsed.get("taste_summary", ""),
-            "recommendations": recommendations or _fallback(candidates, n)["recommendations"],
+            "recommendations": recommendations or _fallback(candidates, n, locale=locale)["recommendations"],
             "llm_used": True,
         }
     except Exception as exc:  # noqa: BLE001
-        result = _fallback(candidates, n)
+        result = _fallback(candidates, n, locale=locale)
         result["taste_summary"] = (
-            "Bu kez seçimleri doğrudan sevdiğin temalara ve yönetmenlere "
-            "yakınlıklarına göre sıraladım."
+            "This time I ranked the picks directly by their proximity to the themes and directors you enjoy."
+            if locale == "en" else
+            "Bu kez seçimleri doğrudan sevdiğin temalara ve yönetmenlere yakınlıklarına göre sıraladım."
         )
         return result
 
@@ -228,7 +242,7 @@ def _decade_histogram(films: list[EnrichedFilm]) -> str:
 
 
 def _taste_analysis_prompt(
-    watched: list[EnrichedFilm], favorites: list[EnrichedFilm]
+    watched: list[EnrichedFilm], favorites: list[EnrichedFilm], locale: str = "tr"
 ) -> str:
     liked, _mode = _taste_references(watched, limit=45)
     sample = liked or watched[:30]
@@ -242,7 +256,7 @@ def _taste_analysis_prompt(
         if rated
         else "puan verisi az"
     )
-    return (
+    prompt = (
         "Bir sinefilin izleme verisinden analiz üret. Türkçe, akıcı, doğal bir dille "
         "yaz — madde işareti gibi kesik cümleler değil, birbirine bağlanan cümleler. "
         "KLİŞE YASAK: 'sinema tutkunu', 'geniş bir yelpaze', 'her türden hoşlanıyor', "
@@ -264,12 +278,17 @@ def _taste_analysis_prompt(
         'ortak ne söylediğini insana dair bir okumaya çevir."\n'
         '}'
     )
+    if locale == "en":
+        prompt += "\n\nOUTPUT LANGUAGE OVERRIDE: Write every JSON value in natural English."
+    return prompt
 
 
 async def analyze_taste(
     settings: Settings,
     watched: list[EnrichedFilm],
     favorites: list[EnrichedFilm] | None = None,
+    *,
+    locale: str = "tr",
 ) -> dict:
     """LLM ile ayrıntılı zevk analizi + Fav 4 kişilik okuması.
 
@@ -294,7 +313,7 @@ async def analyze_taste(
             messages=[
                 {
                     "role": "user",
-                    "content": _taste_analysis_prompt(watched, favorites or []),
+                    "content": _taste_analysis_prompt(watched, favorites or [], locale),
                 }
             ],
         )

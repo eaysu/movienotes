@@ -109,6 +109,8 @@ class Account:
     discoverable: bool = True
     letter_receiving_enabled: bool = False
     private_account: bool = False
+    # `auto` follows the device locale; explicit values travel with the account.
+    preferred_locale: str = "auto"
 
 
 @dataclass
@@ -288,6 +290,7 @@ class AuthService:
             discoverable=bool(row.get("discoverable", True)),
             letter_receiving_enabled=bool(row.get("letter_receiving_enabled", False)),
             private_account=bool(row.get("private_account", False)),
+            preferred_locale=(row.get("preferred_locale") or "auto").lower(),
         )
 
     @staticmethod
@@ -645,7 +648,19 @@ class AuthService:
             row = self._first(result)
             if row is None:
                 raise InvalidCredentialsError("Oturum geçersiz.")
-            return self._account(row)
+            account = self._account(row)
+            # Keep the new preference optional during the schema rollout.
+            try:
+                locale_row = self._first(
+                    service.table("users").select("preferred_locale").eq(
+                        "id", account.id
+                    ).limit(1).execute()
+                ) or {}
+                locale = str(locale_row.get("preferred_locale") or "auto").lower()
+                account.preferred_locale = locale if locale in {"auto", "tr", "en"} else "auto"
+            except Exception:
+                pass
+            return account
 
         try:
             # Both Supabase Auth and the account-row lookup are read-only. A
@@ -772,6 +787,17 @@ class AuthService:
             account_data["private_account"] = bool(visibility.get("private_account", False))
         except Exception:
             pass
+        # The language column was introduced after authentication.  Keep this
+        # separate from the social-preference query so a not-yet-migrated
+        # database never prevents a member from opening their profile.
+        try:
+            language = self._first(
+                service.table("users").select("preferred_locale").eq("id", account.id).limit(1).execute()
+            ) or {}
+            locale = str(language.get("preferred_locale") or "auto").lower()
+            account_data["preferred_locale"] = locale if locale in {"auto", "tr", "en"} else "auto"
+        except Exception:
+            pass
         return {
             "account": account_data,
             "taste": taste,
@@ -787,6 +813,21 @@ class AuthService:
             }
         ).eq("id", account.id).execute()
         return bool(visible)
+
+    def set_preferred_locale(self, account: Account, locale: str) -> str:
+        """Persist an explicit UI language or the device-driven `auto` mode."""
+        if locale not in {"auto", "tr", "en"}:
+            raise ValueError("Unsupported locale.")
+        self._service_client().table("users").update(
+            {"preferred_locale": locale, "updated_at": datetime.now(timezone.utc).isoformat()}
+        ).eq("id", account.id).execute()
+        return locale
+
+    def clear_taste_narrative(self, account: Account) -> None:
+        """Remove prose written in the former UI language before regenerating it."""
+        self._service_client().table("taste_profiles").update(
+            {"analysis": [], "personality": ""}
+        ).eq("user_id", account.id).execute()
 
     def set_private_account(self, account: Account, private: bool) -> bool:
         """Tek anahtar: "kilitli hesap".
