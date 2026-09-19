@@ -1779,13 +1779,14 @@ async def complete_profile_onboarding(request: Request) -> dict:
     _require_csrf(request)
     account = await _require_account(request)
     service = _auth_service()
-    job = await asyncio.to_thread(service.get_sync_job, account.id)
-    progress = profile_sync.progress_of(job)
-    if not progress or not progress.get("onboarding_ready"):
-        raise HTTPException(
-            status_code=409,
-            detail="Tüm Letterboxd geçmişi henüz taranmadı.",
-        )
+    # The first four favourites are enough to make the onboarding useful.
+    # A full crawl remains a background task; keeping a new member trapped on
+    # this endpoint until that crawl finishes made the signup time depend on
+    # the size (and current availability) of Letterboxd's archive.
+    #
+    # Still read the job here: it deliberately resumes an interrupted full
+    # import before the member enters the app, but it is no longer a gate.
+    await _profile_sync_status(account, service)
     completed_at = await asyncio.to_thread(service.complete_onboarding, account)
     # Without this, a page reload within the 30s account cache window
     # (_require_account) still serves the pre-completion Account, sending a
@@ -2681,7 +2682,11 @@ async def _provisional_profile_sync(
             service,
             enricher,
         )
-        taste = build_taste_profile(watched)
+        # The bootstrap analysis is intentionally based on the four explicit
+        # favourites, not on an empty watched list.  This makes genre, theme
+        # and director signals available in the first onboarding seconds;
+        # _SyncPipeline replaces it with the full-history snapshot later.
+        taste = build_taste_profile(favorites)
         taste.source_fingerprint = source_fingerprint
         taste.personality = personality_from_favorites(favorites)
         if stored_taste.get("personality"):

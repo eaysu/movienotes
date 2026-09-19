@@ -768,7 +768,7 @@ def test_password_reset_mismatch_stops_before_profile_scrape():
     scrape.assert_not_awaited()
 
 
-def test_onboarding_completion_requires_full_crawl_milestone():
+def test_onboarding_completion_allows_the_full_crawl_to_continue_in_background():
     account = _account()
     completed = []
     fake_service = SimpleNamespace(
@@ -792,8 +792,8 @@ def test_onboarding_completion_requires_full_crawl_milestone():
             },
         )
 
-    assert response.status_code == 409
-    assert completed == []
+    assert response.status_code == 200
+    assert completed == [account.id]
 
 
 def test_sync_status_returns_progress_without_loading_profile_snapshot():

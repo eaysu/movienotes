@@ -8,24 +8,24 @@ import {
   finishApiRequest,
   scrapeErrorMessage,
   streamErrorMessage,
-} from './api.js?v=20260919.2';
+} from './api.js?v=20260920.1';
 import {
   cookieValue,
   csrfHeaders,
   setAuthMessage,
   setAuthMode,
   setPasswordVisibility,
-} from './auth.js?v=20260919.2';
-import { directorAvatar, directorFilmGrid, directorFilmTile } from './profile.js?v=20260919.2';
+} from './auth.js?v=20260920.1';
+import { directorAvatar, directorFilmGrid, directorFilmTile } from './profile.js?v=20260920.1';
 import { animateScore, getScoreInfo } from './blend.js?v=20260902.15';
-import { createRecommendationCards } from './recommendations.js?v=20260919.2';
+import { createRecommendationCards } from './recommendations.js?v=20260920.1';
 import {
   getLocale,
   initI18n,
   localePreference,
   setLocalePreference,
   t,
-} from './i18n.js?v=20260919.3';
+} from './i18n.js?v=20260920.1';
 
 initI18n();
 
@@ -34,7 +34,7 @@ const uiLocale = () => (getLocale() === 'en' ? 'en-US' : 'tr-TR');
 let _shareCardsModule;
 function loadShareCardsModule() {
   if (!_shareCardsModule) {
-    _shareCardsModule = import('./share-cards.js?v=20260919.2');
+    _shareCardsModule = import('./share-cards.js?v=20260920.1');
   }
   return _shareCardsModule;
 }
@@ -875,7 +875,7 @@ function showView(name) {
     _shownView = name;
     window.scrollTo(0, 0);
   }
-  ['auth', 'onboarding', 'profile', 'tools', 'idle', 'loading', 'results', 'random-result', 'blend-loading', 'blend-result', 'inbox', 'blends', 'sinefil', 'feed', 'thread', 'user', 'follows', 'notifications'].forEach(v => {
+  ['auth', 'onboarding', 'profile', 'profile-list', 'tools', 'idle', 'loading', 'results', 'random-result', 'blend-loading', 'blend-result', 'inbox', 'blends', 'sinefil', 'feed', 'thread', 'user', 'follows', 'notifications'].forEach(v => {
     $(`view-${v}`).classList.toggle('hidden', v !== name);
   });
   $('main-footer').classList.toggle('hidden', NO_FOOTER_VIEWS.includes(name));
@@ -961,7 +961,7 @@ async function restoreRoute() {
 // sütun alta iner, sağ raf kaybolur — aynı bilgi mimarisi, dar ekran hâli.
 const SHELL_VIEWS = [
   'feed', 'thread', 'user', 'follows', 'notifications',
-  'profile', 'tools', 'inbox', 'blends', 'sinefil',
+  'profile', 'profile-list', 'tools', 'inbox', 'blends', 'sinefil',
   // Sonuç ekranları da kabuğun içinde: tepesinde MOVIENOTES bandı ve "Akış"
   // düğmesi yerine kendi geri bağlantısı ve profil avatarı var.
   'results', 'random-result', 'blend-result',
@@ -974,7 +974,7 @@ const OWN_HEADER_VIEWS = ['feed', 'thread', 'user', 'follows', 'notifications'];
 const NO_FOOTER_VIEWS = [
   'auth', 'onboarding', 'loading', 'blend-loading',
   'feed', 'thread', 'user', 'follows', 'notifications',
-  'profile', 'tools', 'inbox', 'blends', 'sinefil',
+  'profile', 'profile-list', 'tools', 'inbox', 'blends', 'sinefil',
 ];
 // Which nav item lights up for a given view.
 const NAV_OF_VIEW = {
@@ -1305,6 +1305,12 @@ function applyAccount(account) {
   $('profile-username').textContent = '@' + account.username;
   $('profile-avatar-fallback').textContent = (account.display_name || account.username)[0].toUpperCase();
   setImage($('profile-avatar'), $('profile-avatar-fallback'), account.avatar_url, account.display_name);
+  // Mobile profile intentionally has its own compact card instead of relying
+  // on responsive reflow of the desktop hero.
+  $('m-profile-display-name').textContent = account.display_name || account.username;
+  $('m-profile-username').textContent = '@' + account.username;
+  $('m-profile-avatar-fallback').textContent = (account.display_name || account.username)[0].toUpperCase();
+  setImage($('m-profile-avatar'), $('m-profile-avatar-fallback'), account.avatar_url, account.display_name);
   $('btn-delete-data').classList.add('hidden');
   $('btn-mode-blend').disabled = false;
   $('btn-mode-blend').classList.remove('opacity-40', 'cursor-not-allowed');
@@ -1319,6 +1325,8 @@ function renderProfileSocialStats(stats = {}) {
   const following = Math.max(0, Number(stats.following) || 0);
   $('profile-followers-count').textContent = String(followers);
   $('profile-following-count').textContent = String(following);
+  $('m-profile-followers-count').textContent = String(followers);
+  $('m-profile-following-count').textContent = String(following);
 }
 
 async function loadProfileSocialStats() {
@@ -1406,6 +1414,82 @@ function accountSummaryFromTaste(taste) {
     : 'İzleme geçmişin tamamlandıkça bu alan sinema alışkanlıklarını daha ayrıntılı anlatacak.';
 }
 
+function mobileFavoriteTiles(favorites) {
+  return favorites.length
+    ? favorites.slice(0, 4).map(film => {
+      const title = escapeHTML(film.title || 'Film');
+      const poster = safeImageURL(film.poster_url);
+      const href = letterboxdFilmURL(film.slug);
+      const art = poster
+        ? `<img src="${poster}" alt="${title}" onerror="posterErr(this)" loading="lazy" class="aspect-[2/3] w-full rounded-lg object-cover bg-surface-container"/>`
+        : `<span class="flex aspect-[2/3] items-center justify-center rounded-lg bg-surface-container text-on-surface-variant/45"><span class="material-symbols-outlined">movie</span></span>`;
+      return `<div class="min-w-0">${href ? `<a href="${href}" target="_blank" rel="noopener">${art}</a>` : art}<strong class="mt-1.5 block truncate text-center text-[10px] leading-tight text-on-surface">${title}</strong></div>`;
+    }).join('')
+    : '<p class="col-span-4 py-4 text-center text-xs text-on-surface-variant">Favori filmler hazırlanıyor…</p>';
+}
+
+function mobileCollectionCard(kind, kicker, title, cover, empty) {
+  const art = safeImageURL(cover)
+    ? `<img src="${safeImageURL(cover)}" alt="" class="absolute inset-0 h-full w-full object-cover opacity-80"/>`
+    : `<span class="absolute inset-0 flex items-center justify-center bg-surface-container text-on-surface-variant/35"><span class="material-symbols-outlined text-[32px]">movie</span></span>`;
+  return `<button type="button" data-mobile-profile-list="${kind}" class="relative h-[178px] w-[148px] shrink-0 snap-start overflow-hidden rounded-[20px] border border-outline-variant/25 text-left ${empty ? 'opacity-60' : ''}">${art}<span class="absolute inset-0 bg-gradient-to-t from-black via-black/35 to-transparent"></span><span class="absolute inset-x-0 bottom-0 p-3"><small class="block text-[9px] uppercase tracking-wide text-white/60">${escapeHTML(kicker)}</small><strong class="mt-1 block line-clamp-2 text-sm leading-tight text-white">${escapeHTML(title)}</strong><span class="mt-2 flex items-center gap-1 text-[10px] text-primary-container">Listeyi aç <span class="material-symbols-outlined text-[15px]">arrow_forward</span></span></span></button>`;
+}
+
+function renderMobileCollections() {
+  const host = $('m-profile-collections');
+  if (!host) return;
+  const directors = _directorDeck?.directors || [];
+  const directorCover = directors[0]?.photo_url || directors[0]?.films?.[0]?.poster_url || '';
+  host.innerHTML = [
+    mobileCollectionCard('directors', 'Auteur radar', 'Favori yönetmenlerin', directorCover, !directors.length),
+    mobileCollectionCard('top', 'Başucu filmleri', 'En sevdiğin 10 film', _topFilms[0]?.poster_url || '', !_topFilms.length),
+    mobileCollectionCard('recent', 'Günce', 'İzlediğin son 10 film', _recentFilms[0]?.poster_url || '', !_recentFilms.length),
+  ].join('');
+}
+
+function mobileListRow(film) {
+  const title = escapeHTML(film.title || 'Film');
+  const poster = safeImageURL(film.poster_url);
+  const meta = [film.year, film.director].filter(Boolean).map(escapeHTML).join(' · ');
+  const overview = escapeHTML(film.overview || 'Konu bilgisi yükleniyor…');
+  return `<details class="group" data-mobile-film-details data-slug="${escapeHTML(film.slug || '')}" data-title="${title}" data-year="${escapeHTML(String(film.year || ''))}"><summary class="flex cursor-pointer list-none items-center gap-3 px-3 py-3"><span class="h-14 w-10 shrink-0 overflow-hidden rounded-md bg-surface-container">${poster ? `<img src="${poster}" alt="" onerror="posterErr(this)" class="h-full w-full object-cover"/>` : '<span class="flex h-full items-center justify-center text-on-surface-variant/35"><span class="material-symbols-outlined text-[18px]">movie</span></span>'}</span><span class="min-w-0 flex-1"><strong class="block truncate text-sm text-on-surface">${title}</strong>${meta ? `<small class="block truncate text-xs text-on-surface-variant">${meta}</small>` : ''}</span><span class="material-symbols-outlined text-on-surface-variant transition-transform group-open:rotate-90">chevron_right</span></summary><p data-mobile-overview class="px-3 pb-3 pl-[64px] text-xs leading-relaxed text-on-surface-variant">${overview}</p></details>`;
+}
+
+function openMobileProfileList(kind) {
+  const config = {
+    directors: { kicker: 'Auteur radar', title: 'Favori yönetmenlerin' },
+    top: { kicker: 'Başucu filmleri', title: 'En sevdiğin 10 film' },
+    recent: { kicker: 'Günce', title: 'İzlediğin son 10 film' },
+  }[kind];
+  if (!config) return;
+  $('m-profile-list-kicker').textContent = config.kicker;
+  $('m-profile-list-title').textContent = config.title;
+  if (kind === 'directors') {
+    const directors = _directorDeck?.directors || [];
+    $('m-profile-list').innerHTML = directors.length ? directors.map((director, index) => {
+      const photo = safeImageURL(director.photo_url);
+      const films = director.films || [];
+      return `<details class="group"><summary class="flex cursor-pointer list-none items-center gap-3 px-3 py-3"><span class="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full bg-surface-container">${photo ? `<img src="${photo}" alt="" class="h-full w-full object-cover"/>` : '<span class="material-symbols-outlined text-on-surface-variant/45">person</span>'}</span><span class="min-w-0 flex-1"><small class="block text-[10px] text-primary-container">${escapeHTML(t('{rank}. sırada', { rank: index + 1 }))}</small><strong class="block truncate text-sm text-on-surface">${escapeHTML(director.name || '')}</strong><small class="text-xs text-on-surface-variant">${director.count || 0} ${t('film')}</small></span><span class="material-symbols-outlined text-on-surface-variant transition-transform group-open:rotate-90">chevron_right</span></summary><div class="border-t border-outline-variant/15 bg-surface-container/30 px-3 py-2">${films.length ? films.map(mobileListRow).join('') : '<p class="py-3 text-xs text-on-surface-variant">Filmleri arşiv taraması tamamlandıkça eklenecek.</p>'}</div></details>`;
+    }).join('') : '<p class="p-5 text-sm text-on-surface-variant">Yönetmen listesi hazırlanıyor…</p>';
+  } else {
+    const films = kind === 'top' ? _topFilms : _recentFilms;
+    $('m-profile-list').innerHTML = films.length ? films.slice(0, 10).map(mobileListRow).join('') : '<p class="p-5 text-sm text-on-surface-variant">Liste arşiv taraması tamamlandıkça eklenecek.</p>';
+  }
+  showView('profile-list');
+}
+
+async function loadMobileFilmOverview(details) {
+  if (!details.open || details.dataset.overviewLoaded === 'true') return;
+  details.dataset.overviewLoaded = 'true';
+  const target = details.querySelector('[data-mobile-overview]');
+  if (!target) return;
+  try {
+    const qs = `slug=${encodeURIComponent(details.dataset.slug || '')}&title=${encodeURIComponent(details.dataset.title || '')}&year=${encodeURIComponent(details.dataset.year || '')}`;
+    const data = await apiJSON(`/api/profile/film-overview?${qs}`);
+    target.textContent = data.overview || 'Konu bilgisi henüz bulunmuyor.';
+  } catch (_) { target.textContent = 'Konu bilgisi şu anda alınamadı.'; }
+}
+
 function renderPersistedProfile(data) {
   if (!data) return;
   if (applyStoredAccountLocale(data.account)) return;
@@ -1417,6 +1501,9 @@ function renderPersistedProfile(data) {
     const sweptTotal = (data.sync_job && data.sync_job.total) || 0;
     $('profile-sample-size').textContent = String(Math.max(taste.sample_size || 0, sweptTotal));
     $('profile-rated-count').textContent = String(taste.rated_count || 0);
+    $('m-profile-sample-size').textContent = String(Math.max(taste.sample_size || 0, sweptTotal));
+    $('m-profile-rated-count').textContent = String(taste.rated_count || 0);
+    $('m-profile-summary').textContent = accountSummaryFromTaste(taste);
     const genres = taste.top_genres || [];
     $('profile-genres').innerHTML = genres.length
       ? genres.slice(0, 4).map(genre => `<span class="inline-flex items-center gap-2 px-3.5 py-2 rounded-full border border-primary-container/20 bg-primary-container/5 text-on-surface font-label-md text-label-md"><span class="w-1.5 h-1.5 rounded-full bg-primary-container"></span>${escapeHTML(genre)}</span>`).join('')
@@ -1441,6 +1528,7 @@ function renderPersistedProfile(data) {
       unregisterProfileCarousel('profile-directors');
       _directorDeck = null;
       $('profile-directors').innerHTML = '<div class="rounded-2xl border border-dashed border-outline-variant/30 p-5 text-on-surface-variant">Yönetmen sıralaması için birkaç film bilgisinin daha tamamlanması gerekiyor.</div>';
+      renderMobileCollections();
     }
 
     const syncedAt = taste.updated_at || taste.generated_at;
@@ -1452,6 +1540,7 @@ function renderPersistedProfile(data) {
     _directorDeck = null;
     $('profile-directors').innerHTML = '<div class="rounded-2xl border border-dashed border-outline-variant/30 p-5 text-on-surface-variant">Zevk profili hazırlanıyor…</div>';
     $('profile-account-summary').textContent = 'İzleme geçmişin ve Fav 4 filmlerin analiz ediliyor…';
+    $('m-profile-summary').textContent = 'Favori filmlerin okunuyor; tam analiz arka planda genişleyecek.';
     $('profile-favorite-director-name').textContent = 'Henüz belirleniyor';
     $('profile-favorite-director-note').textContent = 'Yönetmen bilgileri tamamlandıkça burada görünecek.';
     $('profile-favorite-director-avatar').innerHTML = '<span class="material-symbols-outlined">person</span>';
@@ -1462,6 +1551,7 @@ function renderPersistedProfile(data) {
   const accountSummary = accountSummaryFromTaste(taste);
 
   const favorites = data.favorite_films || [];
+  $('m-profile-favorites').innerHTML = mobileFavoriteTiles(favorites);
   $('profile-favorites').innerHTML = favorites.length
     ? favorites.slice(0, 4).map((film, index) => {
       const title = escapeHTML(film.title);
@@ -2282,8 +2372,14 @@ function bulletinMoreCard(remaining) {
 
 function renderBulletin(data) {
   const section = $('profile-bulletin');
-  if (!data.enabled) { section.classList.add('hidden'); return; }
+  const mobileSection = $('m-profile-bulletin');
+  if (!data.enabled) {
+    section.classList.add('hidden');
+    mobileSection.classList.add('hidden');
+    return;
+  }
   section.classList.remove('hidden');
+  mobileSection.classList.remove('hidden');
   _bulletinData = data;
   _bulletinExpanded = false;
 
@@ -2296,6 +2392,18 @@ function renderBulletin(data) {
       .join('');
   }
   paintBulletin();
+  renderMobileBulletin(data);
+}
+
+function renderMobileBulletin(data) {
+  const body = $('m-bulletin-body');
+  const films = (data.films || []).slice(0, 6);
+  body.innerHTML = films.length ? films.map(film => {
+    const title = escapeHTML(film.title || 'Film');
+    const poster = safeImageURL(film.poster_url);
+    const note = escapeHTML(film.note || 'Bu hafta vizyonda');
+    return `<a href="${letterboxdFilmURL(film.slug) || '#'}" target="_blank" rel="noopener" class="flex items-center gap-3 py-2.5"><span class="h-14 w-10 shrink-0 overflow-hidden rounded-md bg-surface-container">${poster ? `<img src="${poster}" alt="" onerror="posterErr(this)" class="h-full w-full object-cover"/>` : '<span class="flex h-full items-center justify-center text-on-surface-variant/35"><span class="material-symbols-outlined text-[18px]">movie</span></span>'}</span><span class="min-w-0 flex-1"><small class="block truncate text-[10px] text-tertiary-container">${note}</small><strong class="block truncate text-sm text-on-surface">${title}</strong></span><span class="material-symbols-outlined text-on-surface-variant/55">chevron_right</span></a>`;
+  }).join('') : '<p class="py-4 text-sm text-on-surface-variant">Program hazırlanıyor…</p>';
 }
 
 function paintBulletin() {
@@ -2524,6 +2632,7 @@ function renderDirectorDeck(directors) {
   const preserved = rows.findIndex(d => d.name === currentName);
   _directorDeck = { directors: rows, index: preserved >= 0 ? preserved : 0 };
   _paintDirectorDeck(0);
+  renderMobileCollections();
 }
 
 function _paintDirectorDeck(direction = 0) {
@@ -2690,12 +2799,14 @@ function renderTopFilms(list) {
   _topFilms = Array.isArray(list) ? list : [];
   renderFilmDeck('profile-top-films', _topFilms,
     'Puanladığın filmler tarandıkça en sevdiğin 10 film burada. Kalemle kendin de seçebilirsin.');
+  renderMobileCollections();
 }
 
 function renderRecentFilms(list) {
   _recentFilms = Array.isArray(list) ? list : [];
   renderFilmDeck('profile-recent-films', _recentFilms,
     'İzleme geçmişin tarandıkça son izlediğin filmler burada görünür.');
+  renderMobileCollections();
 }
 
 async function loadTopFilms() {
@@ -2723,6 +2834,7 @@ async function loadProfileStats() {
     _statsLoaded = true;
     if (typeof data.this_year === 'number') {
       $('profile-year-count').textContent = data.this_year.toLocaleString(uiLocale());
+      $('m-profile-year-count').textContent = data.this_year.toLocaleString(uiLocale());
       if (_persistedProfile) {
         _persistedProfile.stats = { ...(_persistedProfile.stats || {}), this_year: data.this_year };
       }
@@ -2830,6 +2942,7 @@ const _SWEEP_PHASE_LABEL = {
 function applySyncJob(job) {
   const badge = $('profile-scope-badge');
   const strip = $('profile-sweep');
+  const mobileStrip = $('m-profile-sweep');
   const active = job && (job.state === 'queued' || job.state === 'running');
 
   if (job && job.state === 'done' && job.scope === 'full') {
@@ -2845,6 +2958,7 @@ function applySyncJob(job) {
 
   if (active) {
     strip.classList.remove('hidden');
+    mobileStrip.classList.remove('hidden');
     $('profile-sweep-label').textContent = _SWEEP_PHASE_LABEL[job.phase] || 'Tüm izleme geçmişin analiz ediliyor';
     $('profile-sweep-count').textContent = job.total
       ? `${job.processed.toLocaleString(uiLocale())} / ${job.total.toLocaleString(uiLocale())} ${t('film')}`
@@ -2852,9 +2966,17 @@ function applySyncJob(job) {
     const progressBar = $('profile-sweep-bar');
     progressBar.classList.toggle('is-indeterminate', !job.total);
     progressBar.style.width = job.total ? `${Math.max(4, job.percent || 0)}%` : '38%';
+    $('m-profile-sweep-label').textContent = _SWEEP_PHASE_LABEL[job.phase] || 'Arşivin taranıyor';
+    $('m-profile-sweep-count').textContent = job.total
+      ? `${job.processed.toLocaleString(uiLocale())} / ${job.total.toLocaleString(uiLocale())}`
+      : `${(job.processed || 0).toLocaleString(uiLocale())}`;
+    const mobileBar = $('m-profile-sweep-bar');
+    mobileBar.classList.toggle('is-indeterminate', !job.total);
+    mobileBar.style.width = job.total ? `${Math.max(4, job.percent || 0)}%` : '38%';
     startSweepPoll();
   } else {
     strip.classList.add('hidden');
+    mobileStrip.classList.add('hidden');
     stopSweepPoll();
   }
 }
@@ -4032,10 +4154,10 @@ function _obRenderFavs(favs) {
       ${favs.map((f, i) => {
         const poster = safeImageURL(f.poster_url);
         const title = escapeHTML(f.title || '');
-        return `<div class="line-rise" style="animation-delay:${i * 140}ms">
+        return `<div class="line-rise min-w-0" style="animation-delay:${i * 140}ms">
           <div class="relative aspect-[2/3] rounded-xl overflow-hidden bg-surface-container ring-1 ring-outline-variant/25">
             ${poster ? `<img src="${poster}" alt="${title}" class="absolute inset-0 w-full h-full object-cover"/>` : `<div class="absolute inset-0 flex items-center justify-center p-2 text-center text-[9px] text-on-surface-variant/70">${title}</div>`}
-          </div>
+          </div><strong class="mt-2 block truncate text-center text-[10px] leading-tight text-on-surface-variant">${title}</strong>
         </div>`;
       }).join('')}
     </div>`);
@@ -4055,7 +4177,7 @@ function _obRenderDirector(d) {
 
 function _obRenderPersonality(text) {
   _obStage(`
-    <p class="font-label-sm text-label-sm uppercase tracking-[.24em] text-primary-container">Sinefil kişiliğin</p>
+    <p class="font-label-sm text-label-sm uppercase tracking-[.24em] text-primary-container">Favori dörtlünden ilk okuma</p>
     <p id="ob-personality" class="mt-5 font-body-lg text-body-lg leading-[1.7] text-on-surface"></p>`);
   streamText($('ob-personality'), text);
 }
@@ -4093,7 +4215,7 @@ function _obRenderOutro(full) {
     <h2 class="mt-3 font-headline-lg text-[26px] text-on-surface">Zevk profilin hazır</h2>
     <p class="mt-3 font-body-md text-body-md text-on-surface-variant/80">${full
       ? 'Tüm izleme geçmişin ve yönetmen verilerin analiz edildi. İçeri girip bu geceye bir film seçelim.'
-      : 'Tam analiz doğrulanıyor; tamamlanmadan profile geçilmeyecek.'}</p>`);
+      : 'Tüm geçmişin arka planda taranıyor. Profilin tarama ilerledikçe kendiliğinden zenginleşecek; şimdi uygulamaya girebilirsin.'}</p>`);
 }
 
 // Tarama sonrası sunum: slaytları sırayla gösterir, OB_SLIDE_MS'de bir
@@ -4121,8 +4243,9 @@ function _obRevealNav(delta) {
   if (_obReveal) _obShowRevealSlide(_obReveal.index + delta);
 }
 
-// Tüm Letterboxd sayfaları, tüm film metadata pass'i ve final zevk snapshot'ı
-// tamamlanana kadar bekler. Ham crawl'un bitmesi tek başına yeterli değildir.
+// Eski tam-tarama bekleyicisi, yarım kalmış onboarding sürümlerinden kalan
+// güvenli bir yardımcıdır. Yeni akış onu giriş kapısı olarak kullanmaz: Fav 4
+// analizi hazır olur olmaz kullanıcı uygulamaya geçebilir.
 function _obAwaitFullSweep(token, provisional) {
   return new Promise(resolve => {
     const job0 = provisional && provisional.sync_job;
@@ -4173,39 +4296,30 @@ async function startOnboarding() {
   $('ob-prev').classList.add('hidden');
   $('ob-next').classList.add('hidden');
   $('ob-skip-label').textContent = 'Uygulamaya geç';
-  $('ob-bg-note').textContent = 'Tüm geçmişin ve yönetmen verilerin hazırlanıyor…';
+  $('ob-bg-note').textContent = 'Favori dörtlün hazırlanıyor…';
   $('ob-dots').innerHTML = '';
 
-  // ── Bekleme: tüm Letterboxd geçmişi taranana ve reveal verisi hazır olana kadar.
-  //    Slaytlar (Merhaba, rakamlar, favori 4, kişilik, yönetmen) tarama
-  //    tamamlandıktan sonra sırayla sunulur.
-  _obRenderWaiting('Zevk profilin hazırlanıyor');
+  // Sadece tek küçük profil isteği ve Fav 4 enrichment'i beklenir. Tam
+  // Letterboxd geçmişi _SyncPipeline'da ayrı çalışır; kayıt deneyimini
+  // yüzlerce günlük sayfasına bağımlı kılmıyoruz.
+  _obRenderWaiting('Favori dörtlün hazırlanıyor');
 
   const data = await syncProfile();       // bootstrap: kimlik bilgileri + tam sweep'i başlatır
   if (!_obLive(token)) return;
   if (!data) {
     _obRenderWaiting('Bağlantı yeniden kuruluyor');
-    $('ob-bg-note').textContent = 'Geçmiş taraması tamamlanmadan devam edilmeyecek.';
+    $('ob-bg-note').textContent = 'Profil bağlantısı yeniden kuruluyor.';
     _obSlideTimer = setTimeout(() => {
       if (_obLive(token)) startOnboarding();
     }, 8000);
     return;
   }
 
-  const total0 = Math.max(
-    (data.letterboxd_stats || {}).films || 0,
-    (data.taste || {}).sample_size || 0,
-    (data.sync_job && data.sync_job.total) || 0,
-  );
-  const bl = $('ob-bucket-line');
-  if (bl) bl.textContent = _obBucketText(total0);
-
-  const readyProfile = await _obAwaitFullSweep(token, data);
-  if (!_obLive(token)) return;
+  _persistedProfile = data;
   _obStopFacts();
 
-  // ── Tarama bitti — slaytları sırayla sun ──
-  const profile = readyProfile || _persistedProfile || data;
+  // ── Fav 4 hazır — slaytları hemen sun. ──────────────────────────────
+  const profile = data;
   const taste = profile.taste || data.taste || {};
   const stats = data.letterboxd_stats || {};
   const favs = (profile.favorite_films || data.favorite_films || []).slice(0, 4);
@@ -5797,6 +5911,15 @@ document.addEventListener('click', event => {
 });
 $('btn-profile-sync').addEventListener('click', () => syncProfile(false, true));
 $('btn-profile-back').addEventListener('click', () => showView(homeView()));
+$('btn-mobile-profile-list-back').addEventListener('click', () => showView('profile'));
+$('m-profile-collections').addEventListener('click', event => {
+  const card = event.target.closest('[data-mobile-profile-list]');
+  if (card) openMobileProfileList(card.dataset.mobileProfileList);
+});
+$('m-profile-list').addEventListener('toggle', event => {
+  const details = event.target.closest('[data-mobile-film-details]');
+  if (details) loadMobileFilmOverview(details);
+}, true);
 $('btn-inbox-back').addEventListener('click', () => showView(homeView()));
 window.addEventListener('resize', () => {
   if (!$('view-inbox').classList.contains('hidden')) renderLetterWorkspace();

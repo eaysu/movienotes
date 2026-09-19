@@ -481,6 +481,14 @@
     user-select: none;
   }
 
+  /* The compact profile owns the phone layout.  The richer desktop bulletin
+     is still rendered for its controls, but must not leak into that sequence. */
+  @media (max-width: 767px) {
+    #profile-bulletin { display: none !important; }
+    #m-profile-collections { scrollbar-width: none; }
+    #m-profile-collections::-webkit-scrollbar { display: none; }
+  }
+
   .profile-dashboard-card {
     height: 42rem;
     min-height: 42rem;

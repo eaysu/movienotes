@@ -29,7 +29,7 @@
 <link rel="manifest" href="/static/site.webmanifest?v=20260910.6"/>
 <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Geist:wght@400;500;600;700&display=swap" rel="stylesheet"/>
-<link rel="stylesheet" href="/static/app.css?v=20260910.83"/>
+<link rel="stylesheet" href="/static/app.css?v=20260920.1"/>
 </head>
 <body class="is-booting bg-surface-container-lowest text-on-surface min-h-screen flex flex-col selection:bg-primary-container selection:text-on-primary-container">
 
@@ -449,8 +449,37 @@
       </div>
     </div>
 
-    <!-- ── HERO · kimlik + sinematik DNA ─────────────────────────────── -->
-    <section class="mobile-flat profile-rise relative overflow-hidden rounded-[28px] border border-outline-variant/25 bg-surface/70 backdrop-blur-2xl shadow-[0_36px_120px_-28px_rgba(0,0,0,.6)]">
+    <!-- ── MOBILE PROFILE · compact, card-led reading order ───────────── -->
+    <div id="mobile-profile" class="md:hidden space-y-4">
+      <section class="rounded-[24px] border border-outline-variant/25 bg-surface/80 p-4 shadow-[0_20px_60px_-30px_rgba(0,0,0,.85)]">
+        <div class="grid grid-cols-[76px_minmax(0,1fr)] gap-3">
+          <div>
+            <div class="rounded-full p-[2px] bg-gradient-to-br from-primary-container via-tertiary-container to-secondary-container">
+              <div class="rounded-full bg-surface p-1"><div id="m-profile-avatar-fallback" class="flex h-[64px] w-[64px] items-center justify-center rounded-full bg-surface-container text-2xl text-primary-container"></div><img id="m-profile-avatar" class="hidden h-[64px] w-[64px] rounded-full object-cover" alt=""/></div>
+            </div>
+            <div class="mt-3 flex gap-2 text-center text-[10px] text-on-surface-variant"><button type="button" data-profile-follows="followers" class="min-w-0 flex-1"><strong id="m-profile-followers-count" class="block text-sm text-primary-container">0</strong>Takipçi</button><button type="button" data-profile-follows="following" class="min-w-0 flex-1"><strong id="m-profile-following-count" class="block text-sm text-primary-container">0</strong>Takip</button></div>
+          </div>
+          <div class="min-w-0">
+            <div class="flex items-start justify-between gap-2"><div class="min-w-0"><h1 id="m-profile-display-name" class="truncate font-headline-md text-[22px] leading-tight text-on-surface"></h1><p id="m-profile-username" class="mt-1 truncate text-xs text-on-surface-variant"></p></div><span class="material-symbols-outlined text-primary-container">verified</span></div>
+            <div class="mt-4 grid grid-cols-3 gap-1.5 text-center"><span class="rounded-xl bg-surface-container/70 px-1.5 py-2"><strong id="m-profile-sample-size" class="block text-[15px] text-on-surface">—</strong><small class="block text-[8px] uppercase text-on-surface-variant">izlenen</small></span><span class="rounded-xl bg-surface-container/70 px-1.5 py-2"><strong id="m-profile-rated-count" class="block text-[15px] text-tertiary-container">—</strong><small class="block text-[8px] uppercase text-on-surface-variant">puanlanan</small></span><span class="rounded-xl bg-surface-container/70 px-1.5 py-2"><strong id="m-profile-year-count" class="block text-[15px] text-secondary-container">—</strong><small class="block text-[8px] uppercase text-on-surface-variant">bu yıl</small></span></div>
+          </div>
+        </div>
+        <div id="m-profile-sweep" class="hidden mt-4 rounded-xl border border-primary-container/20 bg-primary-container/[.06] p-3"><div class="flex items-center justify-between gap-2 text-xs"><span class="flex items-center gap-1.5 text-primary-container"><span class="material-symbols-outlined animate-spin text-[16px]">progress_activity</span><span id="m-profile-sweep-label">Arşivin taranıyor</span></span><span id="m-profile-sweep-count" class="text-on-surface-variant"></span></div><div class="mt-2 h-1 overflow-hidden rounded bg-surface-container"><div id="m-profile-sweep-bar" class="h-full rounded bg-primary-container transition-[width] duration-700" style="width:38%"></div></div><p class="mt-2 text-[10px] leading-relaxed text-on-surface-variant">Fav 4 analizini şimdi kullanabilirsin; tam geçmişin arka planda ekleniyor.</p></div>
+      </section>
+
+      <section class="rounded-[24px] border border-outline-variant/25 bg-surface/80 p-4">
+        <p class="text-[10px] font-semibold uppercase tracking-[.2em] text-secondary-container">Favori dörtlün</p>
+        <div id="m-profile-favorites" class="mt-3 grid grid-cols-4 gap-2"></div>
+        <div class="mt-4 border-t border-outline-variant/15 pt-3"><p class="text-[10px] font-semibold uppercase tracking-[.18em] text-primary-container">Zevk analizi</p><p id="m-profile-summary" class="mt-2 text-sm leading-relaxed text-on-surface-variant">Favori filmlerin okunuyor…</p></div>
+      </section>
+
+      <section id="m-profile-bulletin" class="hidden rounded-[24px] border border-outline-variant/25 bg-surface/80 p-4"><p class="text-[10px] font-semibold uppercase tracking-[.2em] text-tertiary-container">Sinema gündemi</p><h2 class="mt-1 font-headline-md text-xl text-on-surface">Bu hafta perdede</h2><div id="m-bulletin-body" class="mt-3 divide-y divide-outline-variant/15"></div></section>
+
+      <section><div id="m-profile-collections" class="flex snap-x gap-3 overflow-x-auto pb-1"></div></section>
+    </div>
+
+    <!-- ── HERO · kimlik + sinematik DNA (wide screens) ─────────────── -->
+    <section class="hidden md:block mobile-flat profile-rise relative overflow-hidden rounded-[28px] border border-outline-variant/25 bg-surface/70 backdrop-blur-2xl shadow-[0_36px_120px_-28px_rgba(0,0,0,.6)]">
       <div class="absolute -top-36 -right-28 w-[26rem] h-[26rem] rounded-full bg-primary-container/12 blur-[130px] pointer-events-none"></div>
       <div class="absolute -bottom-44 -left-28 w-[26rem] h-[26rem] rounded-full bg-tertiary-container/8 blur-[130px] pointer-events-none"></div>
 
@@ -599,7 +628,7 @@
     </section>
 
     <!-- ── 2 · ARAÇLAR · ne izlesen? / Blend ─────────────────────────── -->
-    <section id="profile-quick-tools" class="mobile-flat hidden profile-rise rounded-[28px] border border-outline-variant/25 bg-surface/65 backdrop-blur-2xl p-6 md:p-8 mt-6" style="animation-delay:.06s">
+    <section id="profile-quick-tools" class="hidden md:block mobile-flat profile-rise rounded-[28px] border border-outline-variant/25 bg-surface/65 backdrop-blur-2xl p-6 md:p-8 mt-6" style="animation-delay:.06s">
       <div id="quick-tools-head" class="flex items-start justify-between gap-4 mb-6">
         <div>
           <span id="quick-tools-kicker" class="font-label-sm text-label-sm uppercase tracking-[.24em] text-primary-container">Bu gece</span>
@@ -655,7 +684,7 @@
     </section>
 
     <!-- ── 3 · Sinema gündemi — bu hafta perdede ───────────────────────── -->
-    <section id="profile-bulletin" class="mobile-flat hidden profile-rise rounded-[28px] border border-outline-variant/25 bg-surface/65 backdrop-blur-2xl p-6 md:p-8 mt-6" style="animation-delay:.08s">
+    <section id="profile-bulletin" class="hidden md:block mobile-flat profile-rise rounded-[28px] border border-outline-variant/25 bg-surface/65 backdrop-blur-2xl p-6 md:p-8 mt-6" style="animation-delay:.08s">
       <div class="flex items-end justify-between gap-4 mb-6 flex-wrap">
         <div>
           <span class="font-label-sm text-label-sm uppercase tracking-[.24em] text-tertiary-container">Sinema gündemi</span>
@@ -676,7 +705,7 @@
     </section>
 
     <!-- ── 4 · Auteur radar · Başucu filmleri · Son filmler ─────────────── -->
-    <div class="profile-rise grid items-stretch lg:grid-cols-3 gap-6 mt-6" style="animation-delay:.12s">
+    <div class="hidden md:grid profile-rise items-stretch lg:grid-cols-3 gap-6 mt-6" style="animation-delay:.12s">
       <section class="mobile-flat profile-dashboard-card rounded-[28px] border border-outline-variant/25 bg-surface/65 backdrop-blur-2xl p-6 md:p-8 flex flex-col" data-fold="auteur">
         <div class="flex items-start justify-between gap-4 mb-7">
           <div>
@@ -707,6 +736,16 @@
         <div id="profile-recent-films" class="profile-carousel flex-grow flex flex-col overflow-hidden"></div>
       </div></section>
     </div>
+  </main>
+</div>
+
+<!-- ═══════════════════════ VIEW: MOBILE PROFILE LIST ═══════════════════ -->
+<div id="view-profile-list" class="hidden flex-grow pt-20 pb-24 md:hidden">
+  <main class="mx-auto w-full max-w-[620px] px-margin-mobile">
+    <div class="page-topbar"><button id="btn-mobile-profile-list-back" type="button" class="page-back"><span class="material-symbols-outlined">arrow_back</span>Profile dön</button></div>
+    <p id="m-profile-list-kicker" class="mt-5 text-[10px] font-semibold uppercase tracking-[.2em] text-primary-container"></p>
+    <h1 id="m-profile-list-title" class="mt-1 font-headline-lg text-[28px] text-on-surface"></h1>
+    <div id="m-profile-list" class="mt-5 divide-y divide-outline-variant/20 rounded-[22px] border border-outline-variant/25 bg-surface/80"></div>
   </main>
 </div>
 
@@ -1370,6 +1409,6 @@
   </div>
 </footer>
 
-<script type="module" src="/static/js/app.js?v=20260919.5"></script>
+<script type="module" src="/static/js/app.js?v=20260920.1"></script>
 </body>
 </html>

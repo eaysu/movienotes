@@ -55,6 +55,26 @@ def test_phone_layout_prevents_film_grid_and_inbox_overflow():
     assert 'class="safe-footer ' in html
 
 
+def test_mobile_profile_uses_the_compact_card_flow_and_expandable_lists():
+    html = (FRONTEND / "index.html").read_text()
+    js = (FRONTEND / "js" / "app.js").read_text()
+
+    for element_id in (
+        "mobile-profile",
+        "m-profile-favorites",
+        "m-profile-summary",
+        "m-profile-bulletin",
+        "m-profile-collections",
+        "view-profile-list",
+        "m-profile-list",
+    ):
+        assert f'id="{element_id}"' in html
+    assert "mobileCollectionCard('directors'" in js
+    assert "function openMobileProfileList(kind)" in js
+    assert "data-mobile-film-details" in js
+    assert "showView('profile-list')" in js
+
+
 def test_logo_button_accessible_name_contains_its_visible_label():
     html = (FRONTEND / "index.html").read_text()
 
@@ -831,10 +851,10 @@ def test_shell_asset_content_changes_force_a_version_bump():
     files that no longer existed.
     """
     expected = {
-        "js/app.js": "15f5049addf5cd298745484ed6eadcc052b42522f21bfc3f78fc3ee9c0d0678c",
-        "app.css": "098314bfe07625fe57386a3173bfc470aa8be208840efe90bf74e31ff1950695",
-        "js/share-cards.js": "7d470911f773a426d7f07f5d4cc36a9370d53ba95fbf79353b12182fe0f9cf5b",
-        "js/i18n.js": "20ec8dbc0abf9f6f2e777dc0917121d2bab845a7cd6cbff00aafe6e6d86b1136",
+        "js/app.js": "ec145e8e13317aaf635ee4a4ed407fad12876e13c74ce4b7c695ba8dd8981105",
+        "app.css": "159328be70b0763849933514a5ac25ce3c045de4430a0744894af07e29d14542",
+        "js/share-cards.js": "74d6091f83c97a0ca0a95dbfbdf2e2d53e4697d282211b85dc42efbd58449fc1",
+        "js/i18n.js": "5cb32f4f011950867c584b2eced8ae4ef08241e0d1446d15c0230649c35fc395",
         "site.webmanifest": "7a7de349179ed9f226d38632dfde5a8478edd10305972ea52641b0dc6aa7f405",
         "movienotes-mark.png": "850aa9117aa52768952843f8e2c410c0c17868877d81b2058274290373b4ee1e",
         "movienotes-icon-192.png": "3b04c52ffd23799ce424f1acefd0a1d7c386b8c968b09be9bd5c87b623c6ac12",
@@ -870,24 +890,24 @@ def test_every_app_shell_asset_has_an_explicit_immutable_version():
     source_css = (FRONTEND / "css" / "source.css").read_text()
 
     dependency_version = "v=20260902.15"
-    api_version = "v=20260919.2"
-    css_version = "v=20260910.83"
+    api_version = "v=20260920.1"
+    css_version = "v=20260920.1"
     assert f"/static/app.css?{css_version}" in html
-    assert "/static/js/app.js?v=20260919.5" in html
-    assert "./i18n.js?v=20260919.3" in app_js
+    assert "/static/js/app.js?v=20260920.1" in html
+    assert "./i18n.js?v=20260920.1" in app_js
     assert app_js.count(f"?{dependency_version}") == 2
     assert f"./api.js?{api_version}" in app_js
-    assert "./recommendations.js?v=20260919.2" in app_js
-    assert "./share-cards.js?v=20260919.2" in app_js
-    assert "./auth.js?v=20260919.2" in app_js
+    assert "./recommendations.js?v=20260920.1" in app_js
+    assert "./share-cards.js?v=20260920.1" in app_js
+    assert "./auth.js?v=20260920.1" in app_js
     assert f"./dom.js?{dependency_version}" in auth_js
-    assert "./i18n.js?v=20260919.3" in auth_js
+    assert "./i18n.js?v=20260920.1" in auth_js
     assert f"./dom.js?{dependency_version}" in profile_js
-    assert "./i18n.js?v=20260919.3" in profile_js
+    assert "./i18n.js?v=20260920.1" in profile_js
     assert f"./dom.js?{dependency_version}" in recommendations_js
-    assert "./i18n.js?v=20260919.3" in recommendations_js
+    assert "./i18n.js?v=20260920.1" in recommendations_js
     assert f"./api.js?{api_version}" in share_js
-    assert "./i18n.js?v=20260919.3" in share_js
+    assert "./i18n.js?v=20260920.1" in share_js
     assert f"criterion-closet-bg.jpg?{dependency_version}" in source_css
 
 
@@ -957,7 +977,7 @@ def test_png_share_renderer_is_lazy_loaded_on_first_share_action():
 
     imports = app_js.split("// ── Cinema facts", 1)[0]
     assert "from './share-cards.js" not in imports
-    assert "import('./share-cards.js?v=20260919.2')" in imports
+    assert "import('./share-cards.js?v=20260920.1')" in imports
     assert "const shareCards = await loadShareCardsModule();" in app_js
 
 
