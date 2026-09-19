@@ -420,8 +420,14 @@ def _set_session_cookies(response: Response, session, *, remember: bool = True) 
 
 
 def _remembered(request: Request) -> bool:
-    """Yenilerken ilk girişteki seçimi izler; çerez yoksa kısa oturum."""
-    return request.cookies.get(REMEMBER_COOKIE, "") == "1"
+    """Yenilerken ilk girişteki kalıcılık seçimini izler.
+
+    ``mb_remember`` daha sonra eklendi. Eski, hâlâ geçerli yenileme
+    çerezleri bu işareti taşımaz; onları kısa oturuma indirgemek bir iOS/PWA
+    kullanıcısının cihazının her açılışta unutulmasına yol açıyordu. Açıkça
+    "0" seçilmedikçe cihazı hatırla; çıkış işlemi dört çerezi de siler.
+    """
+    return request.cookies.get(REMEMBER_COOKIE, "") != "0"
 
 
 def _clear_session_cookies(response: Response) -> None:
@@ -461,6 +467,38 @@ async def _require_account(request: Request) -> Account:
         raise HTTPException(status_code=401, detail="Oturum geçersiz.") from exc
     _cache_account(service, access_token, account)
     return account
+
+
+async def _restore_account_from_device(request: Request, response: Response) -> Account:
+    """Recover a returning browser/PWA from its httpOnly refresh cookie.
+
+    An access token normally lasts about an hour. A standalone mobile web app
+    is often resumed only after that, and relying on a readable CSRF cookie to
+    start recovery made a valid remembered device look signed out. This helper
+    is deliberately used only by the read-only bootstrap endpoint below. The
+    refresh credential is httpOnly, Secure and SameSite=Lax; a cross-site
+    fetch is rejected before it can rotate the credential.
+    """
+    if request.headers.get("sec-fetch-site", "").lower() == "cross-site":
+        raise HTTPException(status_code=401, detail="Oturum açman gerekiyor.")
+
+    refresh_token = request.cookies.get(REFRESH_COOKIE, "")
+    if not refresh_token:
+        raise HTTPException(status_code=401, detail="Oturum açman gerekiyor.")
+    try:
+        session = await asyncio.to_thread(_auth_service().refresh, refresh_token)
+    except TransientStorageError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Oturum bağlantısı kısa süreli yanıt vermedi. Lütfen tekrar dene.",
+        ) from exc
+    except AuthError as exc:
+        _clear_session_cookies(response)
+        raise HTTPException(status_code=401, detail="Oturum geçersiz.") from exc
+
+    _set_session_cookies(response, session, remember=_remembered(request))
+    _cache_account(_auth_service(), session.access_token, session.account)
+    return session.account
 
 
 def _validated_share_image_url(value: str) -> str:
@@ -1568,7 +1606,15 @@ if get_settings().dev_login_enabled:  # pragma: no cover - local tooling only
 @app.get("/api/auth/me")
 async def auth_me(request: Request, response: Response) -> dict:
     response.headers["Cache-Control"] = "no-store, private"
-    account = await _require_account(request)
+    try:
+        account = await _require_account(request)
+    except HTTPException as exc:
+        # The bootstrap is the one place a device may silently exchange its
+        # durable, httpOnly credential for a new short-lived access token.
+        # Other API calls retain the normal CSRF-protected retry in api.js.
+        if exc.status_code != 401:
+            raise
+        account = await _restore_account_from_device(request, response)
     return {"account": account.__dict__}
 
 

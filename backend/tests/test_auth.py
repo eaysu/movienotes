@@ -22,6 +22,7 @@ def _settings(**overrides):
         "auth_identity_secret": "test-identity-secret",
         "auth_cookie_secure": True,
         "auth_session_max_age": 604800,
+        "auth_session_short_max_age": 86400,
     }
     values.update(overrides)
     return SimpleNamespace(**values)
@@ -274,6 +275,58 @@ def test_login_sets_http_only_session_and_readable_csrf_cookies():
     assert "HttpOnly" in access and "Secure" in access and "SameSite=lax" in access
     assert "HttpOnly" in refresh
     assert "HttpOnly" not in csrf and "Secure" in csrf
+
+
+def test_auth_me_restores_a_remembered_device_without_a_readable_csrf_cookie():
+    """A cold installed PWA must enter the app from its durable cookie alone."""
+    session = AuthSession(
+        account=_account(),
+        access_token="renewed-access-token",
+        refresh_token="renewed-refresh-token",
+        expires_in=3600,
+    )
+    fake_service = SimpleNamespace(
+        refresh=lambda token: session if token == "device-refresh-token" else None,
+    )
+    with (
+        patch("app.main.get_settings", return_value=_settings(auth_session_max_age=34560000)),
+        patch("app.main._auth_service", return_value=fake_service),
+        TestClient(main.app, base_url="https://testserver") as client,
+    ):
+        # No access or CSRF cookie: this models an app reopened after its
+        # one-hour access token elapsed. The refresh token is httpOnly and
+        # remains available to the server.
+        response = client.get(
+            "/api/auth/me",
+            headers={"Cookie": "mb_refresh=device-refresh-token"},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["account"]["username"] == "film_fan"
+    cookies = response.headers.get_list("set-cookie")
+    assert any(cookie.startswith("mb_access=renewed-access-token") for cookie in cookies)
+    assert any(cookie.startswith("mb_refresh=renewed-refresh-token") for cookie in cookies)
+    # A missing marker denotes a pre-marker remembered device, not a short
+    # session. 400 days is the browser's persistent-cookie ceiling.
+    assert any(cookie.startswith("mb_remember=1") and "Max-Age=34560000" in cookie for cookie in cookies)
+
+
+def test_auth_me_does_not_restore_a_cross_site_request():
+    fake_service = SimpleNamespace(refresh=pytest.fail)
+    with (
+        patch("app.main.get_settings", return_value=_settings()),
+        patch("app.main._auth_service", return_value=fake_service),
+        TestClient(main.app, base_url="https://testserver") as client,
+    ):
+        response = client.get(
+            "/api/auth/me",
+            headers={
+                "Cookie": "mb_refresh=device-refresh-token",
+                "Sec-Fetch-Site": "cross-site",
+            },
+        )
+
+    assert response.status_code == 401
 
 
 def test_account_mode_rejects_state_change_without_csrf_before_work_starts():
@@ -917,6 +970,11 @@ def test_remember_me_keeps_the_session_until_logout_and_one_day_without_it():
     # Logging out clears the marker along with the tokens.
     clear = main_py.split("def _clear_session_cookies", 1)[1].split("\ndef ", 1)[0]
     assert "REMEMBER_COOKIE" in clear
+
+    # Existing device sessions pre-date the marker cookie. They must retain
+    # the original durable refresh credential rather than falling to one day.
+    remembered = main_py.split("def _remembered", 1)[1].split("\ndef ", 1)[0]
+    assert 'request.cookies.get(REMEMBER_COOKIE, "") != "0"' in remembered
 
     app_js = (Path(__file__).resolve().parents[2] / "frontend" / "js" / "app.js").read_text()
     html = (Path(__file__).resolve().parents[2] / "frontend" / "index.html").read_text()
