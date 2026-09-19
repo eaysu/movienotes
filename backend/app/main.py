@@ -5192,6 +5192,9 @@ async def recommend(req: RecommendRequest, request: Request):
                     favorite_directors=favorite_directors,
                     director_boost=getattr(settings, "favorite_director_boost", 0.08),
                     favorite_four_slugs=favorite_four_slugs,
+                    # This pass writes the reasons the member actually reads
+                    # whenever the LLM is unavailable, so it needs the locale too.
+                    locale=response_locale,
                 )
                 rank_ms = round((time.perf_counter() - t3) * 1000)
                 log.warning("⏱ tfidf rank      %.2fs  (candidates=%d)", time.perf_counter() - t3, len(candidates))

@@ -1,7 +1,50 @@
+import inspect
 import unittest
 
 from app.enrich import EnrichedFilm
 from app.recommender import rank_watchlist
+
+
+class FallbackReasonLocaleTests(unittest.TestCase):
+    """Reported: "zevkime göre öner" failed with an unexpected error.
+
+    The pipeline asked for a locale so the self-written reasons would follow
+    the member's language, but the ranker never grew the argument, so every
+    uncached run raised TypeError at the ranking stage. The SSE handler turned
+    that into "Beklenmeyen bir hata oluştu." and no recommendation ever landed.
+    The integration tests missed it because they patched the ranker out.
+    """
+
+    def test_ranker_accepts_every_argument_the_pipeline_passes(self):
+        signature = inspect.signature(rank_watchlist)
+        signature.bind(
+            [],
+            [],
+            n=8,
+            favorite_directors=[],
+            director_boost=0.08,
+            favorite_four_slugs=[],
+            locale="tr",
+        )
+
+    def test_self_written_reasons_follow_the_requested_language(self):
+        # The ranker writes onto the films it is handed, so each run needs its
+        # own objects or the second call rewrites the first one's reason.
+        def watchlist():
+            return [EnrichedFilm(title="Space One", slug="space-one", genres=["Science Fiction"], keywords=["space"])]
+
+        watched = [EnrichedFilm(title="Space Love", genres=["Science Fiction"], keywords=["space"])]
+
+        turkish = rank_watchlist(watched, watchlist(), n=1, locale="tr")
+        english = rank_watchlist(watched, watchlist(), n=1, locale="en")
+
+        self.assertIn("Sevdiğin filmlerin", turkish[0].reason)
+        self.assertIn("films you love", english[0].reason)
+
+    def test_the_empty_history_reason_is_localised_too(self):
+        english = rank_watchlist([], [EnrichedFilm(title="Space One", slug="space-one")], n=1, locale="en")
+
+        self.assertIn("No viewing history", english[0].reason)
 
 
 class RatingAwareRankingTests(unittest.TestCase):

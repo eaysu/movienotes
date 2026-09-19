@@ -130,7 +130,7 @@ class SseIntegrationTests(unittest.TestCase):
             patch("app.main._make_cache", return_value=(None, cache)),
             patch("app.main._make_persistent_cache", return_value=cache),
             patch("app.main._load_user_films", side_effect=load),
-            patch("app.main.rank_watchlist", return_value=watchlist),
+            patch("app.main.rank_watchlist", autospec=True, return_value=watchlist),
             patch("app.main.rank_candidates", new=AsyncMock(return_value=result)),
             TestClient(main.app) as client,
         ):
@@ -267,7 +267,7 @@ class SseIntegrationTests(unittest.TestCase):
             patch("app.main._make_cache", return_value=(None, cache)),
             patch("app.main._make_persistent_cache", return_value=cache),
             patch("app.main._load_user_films", side_effect=load),
-            patch("app.main.rank_watchlist", return_value=[film]),
+            patch("app.main.rank_watchlist", autospec=True, return_value=[film]),
             patch("app.main.rank_candidates", new=AsyncMock(return_value=result)),
             TestClient(main.app) as client,
         ):

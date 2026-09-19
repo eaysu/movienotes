@@ -57,6 +57,24 @@ def _mmr_indices(scores, watchlist_matrix, n: int, relevance_weight: float = 0.7
     return [pool[position] for position in selected_positions]
 
 
+# Sıralayıcının kendi yazdığı gerekçeler. LLM açıkken üzerine yazılır; kapalıyken
+# ya da LLM düşünce kullanıcının okuduğu metin bunlar, dolayısıyla dile uymalı.
+_FALLBACK_REASONS: dict[str, dict[str, str]] = {
+    "no_history": {
+        "tr": "İzleme geçmişi bulunamadı; sıralama yapılamadı.",
+        "en": "No viewing history found, so nothing could be ranked.",
+    },
+    "similar": {
+        "tr": "Sevdiğin filmlerin temalarına ve anlatım tarzına yakın olduğu için öne çıktı.",
+        "en": "It stands out for sitting close to the themes and storytelling of the films you love.",
+    },
+}
+
+
+def _reason(key: str, locale: str) -> str:
+    return _FALLBACK_REASONS[key]["en" if locale == "en" else "tr"]
+
+
 def rank_watchlist(
     watched: list[EnrichedFilm],
     watchlist: list[EnrichedFilm],
@@ -64,6 +82,7 @@ def rank_watchlist(
     favorite_directors: list[str] | None = None,
     director_boost: float = 0.08,
     favorite_four_slugs: list[str] | set[str] | None = None,
+    locale: str = "tr",
 ) -> list[EnrichedFilm]:
     """Watchlist filmlerini izleme geçmişine benzerliğe göre sırala.
 
@@ -71,6 +90,8 @@ def rank_watchlist(
         watched:   Kullanıcının daha önce izlediği filmler (zevk profili kaynağı).
         watchlist: İzlemek istediği filmler (aday havuzu).
         n:         Döndürülecek film sayısı.
+        locale:    Fallback ``reason`` metninin dili. LLM devredeyse üzerine
+                   yazar; devre dışıysa kullanıcının gördüğü metin budur.
 
     Returns:
         Watchlist'ten seçilmiş, benzerlik skoruna göre sıralanmış n film.
@@ -83,7 +104,7 @@ def rank_watchlist(
         # İzleme geçmişi yoksa watchlist'in ilk n filmini döndür
         for f in watchlist[:n]:
             f.similarity = 0.0
-            f.reason = "İzleme geçmişi bulunamadı; sıralama yapılamadı."
+            f.reason = _reason("no_history", locale)
         return watchlist[:n]
 
     # Tüm filmlerin metin bloblarını birleştir (TF-IDF birleşik korpusta fit olsun)
@@ -188,7 +209,7 @@ def rank_watchlist(
         film = watchlist[int(idx)]
         film.similarity = round(float(scores[idx]), 4)
         # Kısa fallback reason — LLM varsa zaten üzerine yazar
-        film.reason = "Sevdiğin filmlerin temalarına ve anlatım tarzına yakın olduğu için öne çıktı."
+        film.reason = _reason("similar", locale)
         results.append(film)
 
     return results
