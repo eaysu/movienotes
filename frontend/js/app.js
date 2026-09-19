@@ -8,24 +8,24 @@ import {
   finishApiRequest,
   scrapeErrorMessage,
   streamErrorMessage,
-} from './api.js?v=20260918.1';
+} from './api.js?v=20260919.2';
 import {
   cookieValue,
   csrfHeaders,
   setAuthMessage,
   setAuthMode,
   setPasswordVisibility,
-} from './auth.js?v=20260918.2';
-import { directorAvatar, directorFilmGrid, directorFilmTile } from './profile.js?v=20260918.2';
+} from './auth.js?v=20260919.2';
+import { directorAvatar, directorFilmGrid, directorFilmTile } from './profile.js?v=20260919.2';
 import { animateScore, getScoreInfo } from './blend.js?v=20260902.15';
-import { createRecommendationCards } from './recommendations.js?v=20260918.2';
+import { createRecommendationCards } from './recommendations.js?v=20260919.2';
 import {
   getLocale,
   initI18n,
   localePreference,
   setLocalePreference,
   t,
-} from './i18n.js?v=20260918.2';
+} from './i18n.js?v=20260919.3';
 
 initI18n();
 
@@ -34,7 +34,7 @@ const uiLocale = () => (getLocale() === 'en' ? 'en-US' : 'tr-TR');
 let _shareCardsModule;
 function loadShareCardsModule() {
   if (!_shareCardsModule) {
-    _shareCardsModule = import('./share-cards.js?v=20260918.2');
+    _shareCardsModule = import('./share-cards.js?v=20260919.2');
   }
   return _shareCardsModule;
 }
@@ -202,12 +202,28 @@ const CINEMA_ITEMS = [
   { type: 'fact', text: 'Alien\'ın meşhur sahnesinde oyuncular o kadar kan geleceğini bilmiyordu; şaşkınlıkları gerçek.' },
 ];
 
+// These are written as English editorial copy, rather than machine-translated
+// quotations, so an English onboarding never rotates back into Turkish.
+const CINEMA_ITEMS_EN = [
+  { type: 'quote', text: 'Cinema is a way of looking closely at the world.', author: 'Movienotes' },
+  { type: 'quote', text: 'A great film gives you a new way to notice the familiar.', author: 'Movienotes' },
+  { type: 'quote', text: 'The best watchlist is the one you actually keep returning to.', author: 'Movienotes' },
+  { type: 'fact', text: 'A film’s mood is built from image, sound, rhythm, and the spaces between them.' },
+  { type: 'fact', text: 'Your ratings, favourites, and recent watches each reveal a different side of your taste.' },
+  { type: 'fact', text: 'Film posters were one of cinema’s first shared languages: a promise of tone before the lights go down.' },
+  { type: 'fact', text: 'A rewatch can change a favourite because you bring a different version of yourself to the film.' },
+  { type: 'fact', text: 'Directors, genres, decades, and pacing all leave useful signals in a viewing history.' },
+  { type: 'fact', text: 'The most useful recommendation is not the most popular film; it is the one that meets you at the right moment.' },
+  { type: 'fact', text: 'A shared watchlist is often the fastest way to discover a new corner of someone else’s taste.' },
+];
+
 let _factTimer = null;
 let _factPool = [];
 
 function _nextFact() {
   if (!_factPool.length) {
-    _factPool = [...CINEMA_ITEMS].sort(() => Math.random() - 0.5);
+    _factPool = [...(getLocale() === 'en' ? CINEMA_ITEMS_EN : CINEMA_ITEMS)]
+      .sort(() => Math.random() - 0.5);
   }
   return _factPool.pop();
 }
@@ -216,7 +232,7 @@ function _showFact(item) {
   const badge  = $('fact-badge');
   const text   = $('fact-text');
   const author = $('fact-author');
-  badge.textContent  = item.type === 'quote' ? '❝ Söz' : '🎬 Bilgi';
+  badge.textContent  = item.type === 'quote' ? t('❝ Söz') : t('🎬 Bilgi');
   text.textContent   = item.text;
   author.textContent = item.author ? `— ${item.author}` : '';
 }
@@ -1510,6 +1526,14 @@ const FEED_COMPOSER_PROMPTS = [
   'Bir oyunculuk, bir plan ya da final… paylaş',
   'Sinefillerin arasında bir not bırak',
 ];
+const FEED_COMPOSER_PROMPTS_EN = [
+  'Share your thoughts about a film',
+  'What stayed with you after the credits?',
+  'How did this scene stay with you?',
+  'Write two sentences about the film you watched today',
+  'Share a performance, a shot, or an ending…',
+  'Leave a note among cinephiles',
+];
 let _feedComposerPromptIndex = 0;
 let _feedComposerPromptTimer = null;
 
@@ -1521,7 +1545,8 @@ function startFeedComposerPromptFlow() {
       _feedComposerPromptTimer = setTimeout(next, 1400);
       return;
     }
-    const phrase = FEED_COMPOSER_PROMPTS[_feedComposerPromptIndex % FEED_COMPOSER_PROMPTS.length];
+    const prompts = getLocale() === 'en' ? FEED_COMPOSER_PROMPTS_EN : FEED_COMPOSER_PROMPTS;
+    const phrase = prompts[_feedComposerPromptIndex % prompts.length];
     _feedComposerPromptIndex += 1;
     let length = 0;
     const stream = () => {
@@ -1543,9 +1568,9 @@ function feedRelativeTime(value) {
   const then = new Date(value).getTime();
   if (!then) return '';
   const minutes = Math.floor((Date.now() - then) / 60000);
-  if (minutes < 1) return 'az önce';
-  if (minutes < 60) return `${minutes} dk`;
-  if (minutes < 1440) return `${Math.floor(minutes / 60)} sa`;
+  if (minutes < 1) return t('az önce');
+  if (minutes < 60) return getLocale() === 'en' ? `${minutes} min` : `${minutes} dk`;
+  if (minutes < 1440) return getLocale() === 'en' ? `${Math.floor(minutes / 60)} h` : `${Math.floor(minutes / 60)} sa`;
   const days = Math.floor(minutes / 1440);
   return days < 7 ? `${days} ${t('g')}` : new Date(then).toLocaleDateString(uiLocale(), { day: '2-digit', month: 'short' });
 }
@@ -3723,9 +3748,34 @@ async function loadProfile() {
     const profile = await apiJSON('/api/profile/me');
     renderPersistedProfile(profile);
     if (_account?.profile_sync_status === 'pending' || profile.needs_refresh) syncProfile();
-    else checkWatchlistFreshness();
+    else {
+      checkFavoriteFreshness();
+      checkWatchlistFreshness();
+    }
   } catch (_) {
     if (_account?.profile_sync_status === 'pending') syncProfile();
+  }
+}
+
+async function checkFavoriteFreshness() {
+  if (!_account) return;
+  // A profile page is tiny, but do not make repeated view switches scrape it.
+  const key = `mb_fav4_check:${_account.username || _account.id}`;
+  const lastCheck = Number(sessionStorage.getItem(key) || 0);
+  if (Date.now() - lastCheck < 5 * 60 * 1000) return;
+  sessionStorage.setItem(key, String(Date.now()));
+  try {
+    const result = await apiJSON('/api/profile/favorites/check', {
+      method: 'POST',
+      headers: csrfHeaders(),
+    });
+    if (result.changed && result.profile) {
+      renderPersistedProfile(result.profile);
+      _topFilmsLoaded = false;
+      _recentLoaded = false;
+    }
+  } catch (_) {
+    // A temporary Letterboxd block must never hide an otherwise usable profile.
   }
 }
 

@@ -181,7 +181,8 @@ def test_manual_profile_refresh_also_forces_a_watchlist_check():
 def test_profile_entry_checks_watchlist_head_without_blocking_profile_render():
     app_js = (FRONTEND / "js" / "app.js").read_text()
 
-    assert "else checkWatchlistFreshness();" in app_js
+    assert "checkFavoriteFreshness();" in app_js
+    assert "checkWatchlistFreshness();" in app_js
     assert "'/api/profile/watchlist/check'" in app_js
     assert "mb_watchlist_check:" in app_js
 
@@ -829,10 +830,10 @@ def test_shell_asset_content_changes_force_a_version_bump():
     files that no longer existed.
     """
     expected = {
-        "js/app.js": "1c485f2a223a6d5e1128575f7cb35123452ae194e31783f06119123c33fdd0aa",
+        "js/app.js": "3486f603be8f1c4cec4ea95756b0ac6c0fbf192c3a4802e8686a99817f9482f6",
         "app.css": "098314bfe07625fe57386a3173bfc470aa8be208840efe90bf74e31ff1950695",
-        "js/share-cards.js": "ca3a27550a3ed6407dc9fcabb46a6c3e8b8bba67921362491af75fd46d0389de",
-        "js/i18n.js": "7d3d3d1b338cfb7dc9e819732035f3f7343c2cd8a0fccdc7064c26a8edfbaa97",
+        "js/share-cards.js": "7d470911f773a426d7f07f5d4cc36a9370d53ba95fbf79353b12182fe0f9cf5b",
+        "js/i18n.js": "20ec8dbc0abf9f6f2e777dc0917121d2bab845a7cd6cbff00aafe6e6d86b1136",
         "site.webmanifest": "7a7de349179ed9f226d38632dfde5a8478edd10305972ea52641b0dc6aa7f405",
         "movienotes-mark.png": "850aa9117aa52768952843f8e2c410c0c17868877d81b2058274290373b4ee1e",
         "movienotes-icon-192.png": "3b04c52ffd23799ce424f1acefd0a1d7c386b8c968b09be9bd5c87b623c6ac12",
@@ -868,24 +869,24 @@ def test_every_app_shell_asset_has_an_explicit_immutable_version():
     source_css = (FRONTEND / "css" / "source.css").read_text()
 
     dependency_version = "v=20260902.15"
-    api_version = "v=20260918.1"
+    api_version = "v=20260919.2"
     css_version = "v=20260910.83"
     assert f"/static/app.css?{css_version}" in html
-    assert "/static/js/app.js?v=20260918.2" in html
-    assert "./i18n.js?v=20260918.2" in app_js
+    assert "/static/js/app.js?v=20260919.4" in html
+    assert "./i18n.js?v=20260919.3" in app_js
     assert app_js.count(f"?{dependency_version}") == 2
     assert f"./api.js?{api_version}" in app_js
-    assert "./recommendations.js?v=20260918.2" in app_js
-    assert "./share-cards.js?v=20260918.2" in app_js
-    assert "./auth.js?v=20260918.2" in app_js
+    assert "./recommendations.js?v=20260919.2" in app_js
+    assert "./share-cards.js?v=20260919.2" in app_js
+    assert "./auth.js?v=20260919.2" in app_js
     assert f"./dom.js?{dependency_version}" in auth_js
-    assert "./i18n.js?v=20260918.2" in auth_js
+    assert "./i18n.js?v=20260919.3" in auth_js
     assert f"./dom.js?{dependency_version}" in profile_js
-    assert "./i18n.js?v=20260918.2" in profile_js
+    assert "./i18n.js?v=20260919.3" in profile_js
     assert f"./dom.js?{dependency_version}" in recommendations_js
-    assert "./i18n.js?v=20260918.2" in recommendations_js
+    assert "./i18n.js?v=20260919.3" in recommendations_js
     assert f"./api.js?{api_version}" in share_js
-    assert "./i18n.js?v=20260918.2" in share_js
+    assert "./i18n.js?v=20260919.3" in share_js
     assert f"criterion-closet-bg.jpg?{dependency_version}" in source_css
 
 
@@ -955,7 +956,7 @@ def test_png_share_renderer_is_lazy_loaded_on_first_share_action():
 
     imports = app_js.split("// ── Cinema facts", 1)[0]
     assert "from './share-cards.js" not in imports
-    assert "import('./share-cards.js?v=20260918.2')" in imports
+    assert "import('./share-cards.js?v=20260919.2')" in imports
     assert "const shareCards = await loadShareCardsModule();" in app_js
 
 
@@ -983,6 +984,18 @@ def test_sync_progress_polling_does_not_reload_the_full_profile_snapshot():
     assert "if (!active) await loadProfile();" in sweep_poll
     assert "apiJSON('/api/profile/sync-status')" in onboarding_poll
     assert onboarding_poll.count("apiJSON('/api/profile/me')") == 2
+
+
+def test_profile_checks_fav4_with_a_small_profile_request_before_any_full_crawl():
+    app_js = (FRONTEND / "js" / "app.js").read_text()
+    main_py = (ROOT / "app" / "main.py").read_text()
+
+    assert "function checkFavoriteFreshness" in app_js
+    assert "apiJSON('/api/profile/favorites/check'" in app_js
+    assert "checkFavoriteFreshness();" in app_js
+    assert '@app.post("/api/profile/favorites/check")' in main_py
+    assert "resolve_posters=False" in main_py
+    assert "save_profile_identity_and_favorites" in main_py
 
 
 def test_a_new_member_is_invited_to_install_the_app_too():

@@ -1,4 +1,4 @@
-import { t } from './i18n.js?v=20260918.2';
+import { t } from './i18n.js?v=20260919.3';
 
 export const API_BASE = window.__API_BASE__ || '';
 

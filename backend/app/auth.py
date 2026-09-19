@@ -759,6 +759,44 @@ class AuthService:
             },
         ).execute()
 
+    def save_profile_identity_and_favorites(
+        self, account: Account, profile: ScrapedProfile, favorites: list[EnrichedFilm]
+    ) -> None:
+        """Persist a just-scraped profile header and Fav 4 without replacing taste data.
+
+        A member can change Letterboxd favourites independently of their diary.
+        Rebuilding the whole snapshot just to reflect that edit used to leave the
+        app showing stale favourites until the next long history crawl.
+        """
+        service = self._service_client()
+        now = datetime.now(timezone.utc).isoformat()
+        service.table("profile_favorites").delete().eq("user_id", account.id).execute()
+        rows = [
+            {
+                "user_id": account.id,
+                "position": position,
+                "slug": film.slug,
+                "title": film.title,
+                "release_year": film.year,
+                "tmdb_id": film.tmdb_id,
+                "poster_url": film.poster_url,
+            }
+            for position, film in enumerate(favorites[:4], start=1)
+            if film.slug and film.title
+        ]
+        if rows:
+            service.table("profile_favorites").insert(rows).execute()
+        service.table("users").update(
+            {
+                "display_name": profile.display_name,
+                "avatar_url": profile.avatar_url,
+                "letterboxd_stats": profile.stats or {},
+                "profile_synced_at": now,
+                "updated_at": now,
+                "last_seen_at": now,
+            }
+        ).eq("id", account.id).execute()
+
     def get_profile(self, account: Account) -> dict:
         service = self._service_client()
         taste = self._first(

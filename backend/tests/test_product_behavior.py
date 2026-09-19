@@ -14,9 +14,10 @@ from app.main import (
     _community_reason,
     _personality_refresh_needed,
     _pick_random_films,
+    _refresh_profile_favorites,
     _refresh_profile_watchlist,
 )
-from app.scraper import ScrapedFilm
+from app.scraper import ScrapedFilm, ScrapedProfile
 
 
 class ProductBehaviorTests(unittest.TestCase):
@@ -43,6 +44,42 @@ class ProductBehaviorTests(unittest.TestCase):
         ]
 
         self.assertTrue(_personality_refresh_needed(stored, current))
+
+    def test_favorite_refresh_reads_the_profile_page_and_persists_new_fav4(self):
+        account = Account(
+            id=7, auth_user_id="auth-7", username="cinephile", display_name="Old name"
+        )
+        stored = {
+            "account": account.__dict__.copy(),
+            "taste": {"analysis": ["existing"]},
+            "favorite_films": [{"slug": "old", "title": "Old"}],
+        }
+        saved = []
+        service = SimpleNamespace(
+            get_profile=lambda _account: stored,
+            save_profile_identity_and_favorites=lambda *_args: saved.append(_args),
+        )
+        settings = SimpleNamespace(scrape_max_retries=1, has_tmdb=False)
+        profile = ScrapedProfile(
+            username="cinephile",
+            display_name="New name",
+            favorite_films=[ScrapedFilm("New", 2024, "new")],
+            stats={"films": 12},
+        )
+
+        with (
+            patch("app.main.scrape_profile", new=AsyncMock(return_value=profile)),
+            patch("app.main._make_cache", return_value=(None, None)),
+            patch("app.main._resolve_favorite_posters", new=AsyncMock()),
+            patch("app.main._refresh_favorite_taste", new=AsyncMock()),
+        ):
+            result = asyncio.run(
+                _refresh_profile_favorites(account, settings, service)
+            )
+
+        self.assertTrue(result["changed"])
+        self.assertEqual(saved[0][2][0].slug, "new")
+        self.assertEqual(result["profile"]["account"]["display_name"], "New name")
 
     def test_random_pick_has_a_short_reason(self):
         film = EnrichedFilm(

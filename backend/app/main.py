@@ -2586,23 +2586,13 @@ async def _provisional_profile_sync(
     await asyncio.to_thread(service.mark_sync_status, account.id, "syncing")
     try:
         stored = await asyncio.to_thread(service.get_profile, account)
-        stored_favorites = stored.get("favorite_films") or []
         stored_taste = stored.get("taste") or {}
-        profile = ScrapedProfile(
-            username=account.username,
-            display_name=account.display_name or account.username,
-            avatar_url=account.avatar_url or None,
-            favorite_films=[
-                ScrapedFilm(
-                    title=film.get("title") or "",
-                    year=film.get("release_year"),
-                    slug=film.get("slug") or "",
-                    poster_url=film.get("poster_url") or None,
-                )
-                for film in stored_favorites
-                if film.get("slug")
-            ],
-            stats=account.letterboxd_stats or {},
+        # A profile page is a single small request and is the source of truth
+        # for Fav 4. Never bootstrap a new account from an old DB copy.
+        profile = await scrape_profile(
+            account.username,
+            max_retries=settings.scrape_max_retries,
+            resolve_posters=False,
         )
         _supabase_client, cache = _make_cache(settings)
         enricher = (
@@ -2691,6 +2681,64 @@ def _personality_refresh_needed(stored_snapshot: dict, favorites: list) -> bool:
         != _favorite_slug_tuple(favorites)
         or not stored_taste.get("analysis")
     )
+
+
+async def _refresh_profile_favorites(account: Account, settings, service) -> dict:
+    """Fetch only the public profile page and immediately expose a changed Fav 4.
+
+    This deliberately does *not* crawl the diary or watchlist. It keeps a
+    favourite edit visible in seconds and lets the background taste refresh
+    rebuild prose from the saved watched-film catalogue afterwards.
+    """
+    stored = await asyncio.to_thread(service.get_profile, account)
+    profile = await scrape_profile(
+        account.username,
+        max_retries=settings.scrape_max_retries,
+        resolve_posters=False,
+    )
+    previous = _favorite_slug_tuple(stored.get("favorite_films") or [])
+    current = _favorite_slug_tuple(profile.favorite_films)
+    identity_changed = (
+        str(account.display_name or "").strip() != str(profile.display_name or "").strip()
+        or str(account.avatar_url or "").strip() != str(profile.avatar_url or "").strip()
+        or (profile.stats or {}) != (account.letterboxd_stats or {})
+    )
+    changed = current != previous or identity_changed
+    if not changed:
+        stored["account"] = account.__dict__
+        return {"changed": False, "profile": stored}
+
+    _supabase_client, cache = _make_cache(settings)
+    enricher = (
+        Enricher(settings.tmdb_api_key, cache, asset_store=service)
+        if settings.has_tmdb
+        else None
+    )
+    if enricher is not None:
+        favorites = await enricher.enrich(profile.favorite_films, include_details=False)
+    else:
+        favorites = [
+            EnrichedFilm(
+                title=film.title,
+                year=film.year,
+                slug=film.slug,
+                poster_url=film.poster_url,
+            )
+            for film in profile.favorite_films
+        ]
+    await _resolve_favorite_posters(favorites, [], service, enricher)
+    await asyncio.to_thread(
+        service.save_profile_identity_and_favorites, account, profile, favorites
+    )
+    account.display_name = profile.display_name or account.display_name
+    account.avatar_url = profile.avatar_url or ""
+    account.letterboxd_stats = profile.stats or {}
+    fresh = await asyncio.to_thread(service.get_profile, account)
+    fresh["account"] = account.__dict__
+    # New favourites are an explicit taste signal. Build the prose separately
+    # so the tap that triggered refresh remains fast.
+    asyncio.create_task(_refresh_favorite_taste(account))
+    return {"changed": True, "profile": fresh}
 
 
 async def _stash_posters(films: list[dict]) -> None:
@@ -3224,6 +3272,18 @@ async def _refresh_locale_taste(account: Account) -> None:
         log.warning("locale taste refresh failed account=%s", account.id, exc_info=True)
 
 
+async def _refresh_favorite_taste(account: Account) -> None:
+    """Regenerate taste prose from stored data after a Fav 4 edit."""
+    try:
+        await _SyncPipeline(get_settings(), use_stored_profile=True).rebuild_snapshot(
+            account,
+            use_llm=True,
+            repair_all=False,
+        )
+    except Exception:  # noqa: BLE001 - favourites are already safely persisted
+        log.warning("favorite taste refresh failed account=%s", account.id, exc_info=True)
+
+
 async def _refresh_profile_watchlist(account: Account, settings, service) -> int:
     """Force a complete watchlist read and replace its durable recommendation cache."""
     supabase_client, cache = _make_cache(settings)
@@ -3247,6 +3307,14 @@ async def _refresh_profile_watchlist(account: Account, settings, service) -> int
         force=True,
     )
     return len(films)
+
+
+async def _refresh_profile_watchlist_background(account: Account, settings, service) -> None:
+    """Keep an optional watchlist refresh off the fast Fav 4 response path."""
+    try:
+        await _refresh_profile_watchlist(account, settings, service)
+    except Exception:  # noqa: BLE001 - the durable cache remains available
+        log.warning("background watchlist refresh failed account=%s", account.id, exc_info=True)
 
 
 def _watchlist_head_matches(cached_rows: list[dict], head: list[ScrapedFilm]) -> bool:
@@ -3379,6 +3447,22 @@ async def check_my_watchlist(request: Request) -> dict:
         _raise_scrape_http(exc)
 
 
+@app.post("/api/profile/favorites/check")
+async def check_my_profile_favorites(request: Request) -> dict:
+    """Quickly reflect Fav 4 edits without scheduling a full Letterboxd crawl."""
+    _require_csrf(request)
+    account = await _require_account(request)
+    service = _auth_service()
+    try:
+        result = await _refresh_profile_favorites(account, get_settings(), service)
+        await _record_activity_event(
+            service, account, "favorites_checked", {"changed": result["changed"]}
+        )
+        return result
+    except ScrapeError as exc:
+        _raise_scrape_http(exc)
+
+
 @app.post("/api/profile/sync")
 async def sync_my_profile(
     request: Request,
@@ -3410,15 +3494,6 @@ async def sync_my_profile(
     except Exception:
         full_sync_available = False
 
-    refreshed_watchlist_count: int | None = None
-    if refresh_watchlist:
-        try:
-            refreshed_watchlist_count = await _refresh_profile_watchlist(
-                account, settings, service
-            )
-        except ScrapeError as exc:
-            _raise_scrape_http(exc)
-
     # Once the full history has been crawled once, never regress to the 100-film
     # in-request pass — serve the stored snapshot and self-heal if it fell behind.
     if full_sync_available and not force:
@@ -3428,8 +3503,15 @@ async def sync_my_profile(
             job and job.get("scope") == "full" and crawled >= 100
         )
         if already_swept:
-            stored = await asyncio.to_thread(service.get_profile, account)
-            stored["account"] = account.__dict__
+            # A completed diary crawl must not freeze Fav 4 forever. This is
+            # only one profile-page request, not another history scrape.
+            refreshed = await _refresh_profile_favorites(account, settings, service)
+            stored = refreshed["profile"]
+            if refresh_watchlist:
+                asyncio.create_task(
+                    _refresh_profile_watchlist_background(account, settings, service)
+                )
+                stored["watchlist_refreshing"] = True
             with contextlib.suppress(Exception):
                 swept_total = await asyncio.to_thread(
                     service.count_watched_films, account.id
@@ -3449,11 +3531,18 @@ async def sync_my_profile(
                         _SyncPipeline(settings), service, account, scope="incremental"
                     )
             stored["sync_job"] = profile_sync.progress_of(job)
-            if refreshed_watchlist_count is not None:
-                stored["watchlist_count"] = refreshed_watchlist_count
             with contextlib.suppress(Exception):
                 await asyncio.to_thread(service.mark_sync_status, account.id, "ready")
             return stored
+
+    refreshed_watchlist_count: int | None = None
+    if refresh_watchlist:
+        try:
+            refreshed_watchlist_count = await _refresh_profile_watchlist(
+                account, settings, service
+            )
+        except ScrapeError as exc:
+            _raise_scrape_http(exc)
 
     result = await _provisional_profile_sync(account, settings, service, force=force)
     if refreshed_watchlist_count is not None:

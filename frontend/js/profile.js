@@ -1,5 +1,5 @@
 import { escapeHTML, safeImageURL, letterboxdFilmURL } from './dom.js?v=20260902.15';
-import { t } from './i18n.js?v=20260918.2';
+import { t } from './i18n.js?v=20260919.3';
 
 export function directorFilmTile(film) {
   const poster = safeImageURL(film.poster_url);
