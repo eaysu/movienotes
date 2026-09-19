@@ -3292,8 +3292,11 @@ class _SyncPipeline:
 
         # A full first snapshot gets an LLM pass. Later passes only refresh the
         # profile prose when its source changes; merely opening the app does not.
-        should_analyze = force_analysis or source_changed or (
-            use_llm and not stored_taste.get("analysis")
+        # A repair/maintenance rebuild can deliberately opt out of external
+        # prose generation. In that mode it must never send a member's film
+        # history to the LLM merely because the stored fingerprint changed.
+        should_analyze = use_llm and (
+            force_analysis or source_changed or not stored_taste.get("analysis")
         )
         refresh_personality = _personality_refresh_needed(stored_snapshot, favorites)
         if should_analyze:
