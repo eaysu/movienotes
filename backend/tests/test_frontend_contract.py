@@ -371,10 +371,97 @@ def test_letter_workspace_is_a_mobile_thread_view_and_sent_letters_can_be_recall
     assert 'id="letters-sidebar"' in html
     assert 'id="letters-workspace"' in html
     assert "function renderLetterWorkspace" in app_js
-    assert "data-letter-mobile-back" in app_js
+    # An open correspondence is its own page: the inbox heading steps aside and
+    # the page's single back link walks to the list, so the panel carries no
+    # second back arrow of its own.
+    assert "data-letter-mobile-back" not in app_js
+    assert "function closeLetterThread" in app_js
+    assert "$('inbox-header').classList.toggle('hidden', open);" in app_js
+    assert "if (_openLetterThread) closeLetterThread();" in app_js
+    assert 'id="inbox-back-label"' in html
+    assert "Sosyal alan" not in html
     assert 'data-letter-action="delete"' in app_js
     assert "Bu gönderilmiş mektup iki tarafın konuşmasından da silinsin mi?" in app_js
     assert "`/api/letters/${encodeURIComponent(letterId)}`" in app_js
+
+
+def test_the_phone_profile_header_puts_follows_by_the_name_and_stats_on_their_own_row():
+    """Asked for: follows beside the username, the three counts full width."""
+    html = (FRONTEND / "index.html").read_text()
+
+    card = html.split('id="mobile-profile"', 1)[1].split("</section>", 1)[0]
+    name_block = card.split('id="m-profile-display-name"', 1)[1]
+    follows, stats = name_block.split('id="m-profile-sample-size"', 1)
+    # Both follow buttons sit in the column that holds the name…
+    assert 'data-profile-follows="followers"' in follows
+    assert 'data-profile-follows="following"' in follows
+    # …and the watched/rated/this-year row comes after them, spanning the card.
+    assert 'id="m-profile-rated-count"' in stats
+    assert 'id="m-profile-year-count"' in stats
+    assert 'class="mt-4 grid grid-cols-3' in card
+
+
+def test_the_cinema_guide_card_teases_five_and_leaves_filtering_to_the_list():
+    """Asked for: no filter on the dashboard card, five most relevant picks."""
+    html = (FRONTEND / "index.html").read_text()
+    app_js = (FRONTEND / "js" / "app.js").read_text()
+
+    card = html.split('id="m-profile-bulletin"', 1)[1].split("</section>", 1)[0]
+    assert "m-bulletin-venue" not in card
+    assert 'data-mobile-profile-list="bulletin"' in card
+    # The select now belongs to the full-programme page, top right of its head.
+    list_page = html.split('id="view-profile-list"', 1)[1].split("</div>\n</div>", 1)[0]
+    assert 'id="m-profile-list-filter"' in list_page
+    assert 'id="m-bulletin-venue"' in list_page
+
+    teaser = app_js.split("function renderMobileBulletin(data)", 1)[1].split(
+        "function renderMobileBulletinList", 1
+    )[0]
+    assert "const films = (data.films || []).slice(0, 5);" in teaser
+    assert "m-bulletin-venue" not in teaser
+    assert "$('m-bulletin-venue').addEventListener('change', () => renderMobileBulletinList());" in app_js
+
+
+def test_the_two_collection_cards_split_the_phone_width_evenly():
+    """Asked for: the last two cards side by side, flush with the card above."""
+    html = (FRONTEND / "index.html").read_text()
+    app_js = (FRONTEND / "js" / "app.js").read_text()
+
+    marker = 'id="m-profile-collections" class="'
+    classes = html.split(marker, 1)[1].split('"', 1)[0]
+    assert "grid grid-cols-2" in classes
+    # No horizontal strip left over, and nothing padding the row from below.
+    assert "overflow-x-auto" not in classes
+    assert "pb-1" not in classes
+    card = app_js.split("function mobileCollectionCard", 1)[1].split(
+        "function renderMobileCollections", 1
+    )[0]
+    assert "w-full" in card
+    assert "shrink-0" not in card
+    assert "snap-start" not in card
+
+
+def test_one_recommendation_fits_a_screen_without_scrolling():
+    """Asked for: a thumbnail beside the title, not a full-bleed poster."""
+    tools = (FRONTEND / "index.html").read_text().split('id="view-tools"', 1)[1]
+    reco_js = (FRONTEND / "js" / "recommendations.js").read_text()
+
+    # The tools page owns its top bar, so it no longer reserves a header's gap.
+    assert "pt-20" not in tools.split("</div>", 1)[0]
+    assert "Sinema araçları</span>" not in tools
+    assert "whitespace-nowrap" in tools.split('id="tools-directory"', 1)[1]
+
+    assert "function buildPickCard" in reco_js
+    card = reco_js.split("function buildPickCard", 1)[1].split("function buildHeroCard", 1)[0]
+    assert 'class="relative w-[92px] shrink-0 aspect-[2/3]' in card
+    # Identity on the top row; genres and the reasoning below it.
+    title_row = card.split('<div class="flex items-start gap-3.5">', 1)[1]
+    assert title_row.index("${title}") < title_row.index("${director}")
+    assert card.index("${genres}") > card.index("${director}")
+    assert card.index("whyBlock(film)") > card.index("${genres}")
+    # Both single-pick surfaces share it, so neither can drift back to a hero.
+    assert "md:w-[260px]" not in reco_js
+    assert "return buildPickCard(film" in reco_js
 
 
 def test_profile_follow_lists_are_dialogs_and_stay_out_of_the_share_card():
@@ -850,9 +937,9 @@ def test_shell_asset_content_changes_force_a_version_bump():
     files that no longer existed.
     """
     expected = {
-        "js/app.js": "309caa387a1393b6a302f993ae98358914f0e56d57f7ee7854d91c1eaff09fb9",
-        "app.css": "ccc78d269c09ec108a4d23c83d46d7deb0a352d206034355232576dcb25f97f1",
-        "js/share-cards.js": "66b82f86fd654a98fc187a33245db035b7261e526c8e7fc9ec788c469c8d386f",
+        "js/app.js": "4629b96c7a2419682e32ddc33674d01e2d1b79dd0797f37e03979f0f7052720a",
+        "app.css": "3e846bd9a23e413698dae4bd3d43bf9d3157b3e1ac4b2043ed2fdc9d97f7fd42",
+        "js/share-cards.js": "7ef8f74c7d8ff8dd28da65d75675cff38d68deb4e8e5ec342b8e0b585e4b70b9",
         "js/i18n.js": "d4eab4d2f6dc01ded277e1c39d15dc0818d2baa15dc49f51a57a19da83e70ba1",
         "site.webmanifest": "7a7de349179ed9f226d38632dfde5a8478edd10305972ea52641b0dc6aa7f405",
         "movienotes-mark.png": "850aa9117aa52768952843f8e2c410c0c17868877d81b2058274290373b4ee1e",
@@ -889,24 +976,24 @@ def test_every_app_shell_asset_has_an_explicit_immutable_version():
     source_css = (FRONTEND / "css" / "source.css").read_text()
 
     dependency_version = "v=20260902.15"
-    api_version = "v=20260920.3"
-    css_version = "v=20260920.3"
+    api_version = "v=20260920.4"
+    css_version = "v=20260920.4"
     assert f"/static/app.css?{css_version}" in html
-    assert "/static/js/app.js?v=20260920.3" in html
-    assert "./i18n.js?v=20260920.3" in app_js
+    assert "/static/js/app.js?v=20260920.4" in html
+    assert "./i18n.js?v=20260920.4" in app_js
     assert app_js.count(f"?{dependency_version}") == 2
     assert f"./api.js?{api_version}" in app_js
-    assert "./recommendations.js?v=20260920.3" in app_js
-    assert "./share-cards.js?v=20260920.3" in app_js
-    assert "./auth.js?v=20260920.3" in app_js
+    assert "./recommendations.js?v=20260920.4" in app_js
+    assert "./share-cards.js?v=20260920.4" in app_js
+    assert "./auth.js?v=20260920.4" in app_js
     assert f"./dom.js?{dependency_version}" in auth_js
-    assert "./i18n.js?v=20260920.3" in auth_js
+    assert "./i18n.js?v=20260920.4" in auth_js
     assert f"./dom.js?{dependency_version}" in profile_js
-    assert "./i18n.js?v=20260920.3" in profile_js
+    assert "./i18n.js?v=20260920.4" in profile_js
     assert f"./dom.js?{dependency_version}" in recommendations_js
-    assert "./i18n.js?v=20260920.3" in recommendations_js
+    assert "./i18n.js?v=20260920.4" in recommendations_js
     assert f"./api.js?{api_version}" in share_js
-    assert "./i18n.js?v=20260920.3" in share_js
+    assert "./i18n.js?v=20260920.4" in share_js
     assert f"criterion-closet-bg.jpg?{dependency_version}" in source_css
 
 
@@ -976,7 +1063,7 @@ def test_png_share_renderer_is_lazy_loaded_on_first_share_action():
 
     imports = app_js.split("// ── Cinema facts", 1)[0]
     assert "from './share-cards.js" not in imports
-    assert "import('./share-cards.js?v=20260920.3')" in imports
+    assert "import('./share-cards.js?v=20260920.4')" in imports
     assert "const shareCards = await loadShareCardsModule();" in app_js
 
 

@@ -8,24 +8,24 @@ import {
   finishApiRequest,
   scrapeErrorMessage,
   streamErrorMessage,
-} from './api.js?v=20260920.3';
+} from './api.js?v=20260920.4';
 import {
   cookieValue,
   csrfHeaders,
   setAuthMessage,
   setAuthMode,
   setPasswordVisibility,
-} from './auth.js?v=20260920.3';
-import { directorAvatar, directorFilmGrid, directorFilmTile } from './profile.js?v=20260920.3';
+} from './auth.js?v=20260920.4';
+import { directorAvatar, directorFilmGrid, directorFilmTile } from './profile.js?v=20260920.4';
 import { animateScore, getScoreInfo } from './blend.js?v=20260902.15';
-import { createRecommendationCards } from './recommendations.js?v=20260920.3';
+import { createRecommendationCards } from './recommendations.js?v=20260920.4';
 import {
   getLocale,
   initI18n,
   localePreference,
   setLocalePreference,
   t,
-} from './i18n.js?v=20260920.3';
+} from './i18n.js?v=20260920.4';
 
 initI18n();
 
@@ -34,7 +34,7 @@ const uiLocale = () => (getLocale() === 'en' ? 'en-US' : 'tr-TR');
 let _shareCardsModule;
 function loadShareCardsModule() {
   if (!_shareCardsModule) {
-    _shareCardsModule = import('./share-cards.js?v=20260920.3');
+    _shareCardsModule = import('./share-cards.js?v=20260920.4');
   }
   return _shareCardsModule;
 }
@@ -1432,7 +1432,7 @@ function mobileCollectionCard(kind, kicker, title, cover, empty) {
   const art = safeImageURL(cover)
     ? `<img src="${safeImageURL(cover)}" alt="" class="absolute inset-0 h-full w-full object-cover opacity-80"/>`
     : `<span class="absolute inset-0 flex items-center justify-center bg-surface-container text-on-surface-variant/35"><span class="material-symbols-outlined text-[32px]">movie</span></span>`;
-  return `<button type="button" data-mobile-profile-list="${kind}" class="relative h-[178px] w-[148px] shrink-0 snap-start overflow-hidden rounded-[20px] border border-outline-variant/25 text-left ${empty ? 'opacity-60' : ''}">${art}<span class="absolute inset-0 bg-gradient-to-t from-black via-black/35 to-transparent"></span><span class="absolute inset-x-0 bottom-0 p-3"><small class="block text-[9px] uppercase tracking-wide text-white/60">${escapeHTML(kicker)}</small><strong class="mt-1 block line-clamp-2 text-sm leading-tight text-white">${escapeHTML(title)}</strong><span class="mt-2 flex items-center gap-1 text-[10px] text-primary-container">Listeyi aç <span class="material-symbols-outlined text-[15px]">arrow_forward</span></span></span></button>`;
+  return `<button type="button" data-mobile-profile-list="${kind}" class="relative h-[184px] w-full overflow-hidden rounded-[24px] border border-outline-variant/25 text-left ${empty ? 'opacity-60' : ''}">${art}<span class="absolute inset-0 bg-gradient-to-t from-black via-black/35 to-transparent"></span><span class="absolute inset-x-0 bottom-0 p-3"><small class="block text-[9px] uppercase tracking-wide text-white/60">${escapeHTML(kicker)}</small><strong class="mt-1 block line-clamp-2 text-sm leading-tight text-white">${escapeHTML(title)}</strong><span class="mt-2 flex items-center gap-1 text-[10px] text-primary-container">Listeyi aç <span class="material-symbols-outlined text-[15px]">arrow_forward</span></span></span></button>`;
 }
 
 function renderMobileCollections() {
@@ -1463,6 +1463,8 @@ function openMobileProfileList(kind) {
   if (!config) return;
   $('m-profile-list-kicker').textContent = config.kicker;
   $('m-profile-list-title').textContent = config.title;
+  // Only the cinema programme has something to filter by.
+  $('m-profile-list-filter').classList.toggle('hidden', kind !== 'bulletin');
   if (kind === 'directors') {
     const directors = _directorDeck?.directors || [];
     $('m-profile-list').innerHTML = directors.length ? directors.map((director, index) => {
@@ -2452,11 +2454,12 @@ function renderBulletin(data) {
   renderMobileBulletin(data);
 }
 
+// The dashboard card is a teaser, not a browser: the five picks the bulletin
+// already ranked highest for this member, with no filter of its own. Narrowing
+// by venue belongs to the full list the "see all" button opens.
 function renderMobileBulletin(data) {
   const body = $('m-bulletin-body');
-  const selected = $('m-bulletin-venue').value || '';
-  const films = (data.films || []).filter(film =>
-    !selected || (film.venues || []).some(venue => venue.slug === selected)).slice(0, 6);
+  const films = (data.films || []).slice(0, 5);
   body.innerHTML = films.length ? films.map(film => {
     const title = escapeHTML(film.title || 'Film');
     const poster = safeImageURL(film.poster_url);
@@ -2467,6 +2470,7 @@ function renderMobileBulletin(data) {
 
 function renderMobileBulletinList() {
   const data = _bulletinData || {};
+  $('m-profile-list-filter').classList.remove('hidden');
   const selected = $('m-bulletin-venue').value || '';
   const films = (data.films || []).filter(film =>
     !selected || (film.venues || []).some(venue => venue.slug === selected));
@@ -3140,7 +3144,7 @@ function letterThreadCard(group) {
   const unread = group.items.filter(({ item }) => item.direction === 'received' && !item.read_at).length;
   const latest = group.items[0]?.payload?.body || 'Filmli bir mektup';
   const selected = _openLetterThread === peer.username;
-  return `<button type="button" data-letter-thread="${username}" class="flex w-full items-center gap-3 rounded-xl p-3 text-left transition-colors ${selected ? 'bg-tertiary-container/15 text-on-surface ring-1 ring-tertiary-container/25' : 'text-on-surface hover:bg-surface-variant/45'}"><span class="shrink-0">${peerAvatar(peer)}</span><span class="min-w-0 flex-1"><strong class="block truncate text-sm">${name}</strong><span class="mt-0.5 block truncate text-xs text-on-surface-variant">${escapeHTML(latest)}</span></span>${unread ? `<span class="rounded-full bg-secondary-container px-2 py-1 text-[10px] font-bold text-on-secondary-container">${unread}</span>` : ''}</button>`;
+  return `<button type="button" data-letter-thread="${username}" class="flex w-full items-center gap-3 py-3 pl-2 pr-3 text-left transition-colors ${selected ? 'bg-tertiary-container/15 text-on-surface' : 'text-on-surface hover:bg-surface-variant/45'}"><span class="shrink-0">${peerAvatar(peer)}</span><span class="min-w-0 flex-1"><strong class="block truncate text-sm">${name}</strong><span class="mt-0.5 block truncate text-xs text-on-surface-variant">${escapeHTML(latest)}</span></span>${unread ? `<span class="rounded-full bg-secondary-container px-2 py-1 text-[10px] font-bold text-on-secondary-container">${unread}</span>` : ''}</button>`;
 }
 
 function renderLetterConversation(username = _openLetterThread) {
@@ -3155,7 +3159,9 @@ function renderLetterConversation(username = _openLetterThread) {
   const name = escapeHTML(peer.display_name || peer.username || 'Sinefil');
   const usernameLabel = escapeHTML(peer.username || '');
   const details = group.items.map(({ item, payload }) => letterCard(item, payload)).join('');
-  panel.innerHTML = `<div class="flex flex-col"><header class="flex items-center gap-3 border-b border-outline-variant/20 px-5 py-4"><button type="button" data-letter-mobile-back class="-ml-2 rounded-full p-2 text-on-surface-variant hover:text-on-surface" aria-label="Mektuplara dön"><span class="material-symbols-outlined text-[20px]">arrow_back</span></button><span class="shrink-0">${peerAvatar(peer)}</span><span class="min-w-0 flex-1"><strong class="block truncate text-on-surface">${name}</strong><span class="block truncate text-xs text-on-surface-variant">@${usernameLabel} · ${group.items.length} mektup</span></span></header><div class="flex-1 space-y-3 p-4">${details}</div><div class="border-t border-outline-variant/20 p-4">${letterReplyBar(peer)}</div></div>`;
+  // No second back arrow in here: the page's own top bar becomes "back to
+  // letters" while a correspondence is open.
+  panel.innerHTML = `<div class="flex flex-col"><header class="flex items-center gap-3 border-b border-outline-variant/20 px-4 py-4"><span class="shrink-0">${peerAvatar(peer)}</span><span class="min-w-0 flex-1"><strong class="block truncate text-on-surface">${name}</strong><span class="block truncate text-xs text-on-surface-variant">@${usernameLabel} · ${group.items.length} mektup</span></span></header><div class="flex-1 space-y-3 p-4">${details}</div><div class="border-t border-outline-variant/20 p-4">${letterReplyBar(peer)}</div></div>`;
   $('letters-list').innerHTML = _letterThreads.map(letterThreadCard).join('');
   renderLetterWorkspace();
 }
@@ -3173,6 +3179,10 @@ function renderLetterWorkspace() {
   const open = Boolean(_openLetterThread);
   $('letters-sidebar').classList.toggle('hidden', open);
   $('letters-conversation').classList.toggle('hidden', !open);
+  // An open correspondence is its own page: the inbox heading steps aside and
+  // the single top-left button walks back to the list instead of the feed.
+  $('inbox-header').classList.toggle('hidden', open);
+  $('inbox-back-label').textContent = open ? 'Mektuplara dön' : 'Akışa dön';
 }
 
 async function loadLetters() {
@@ -3594,13 +3604,13 @@ async function routeToExistingBlend(data) {
   $('blends-notice').classList.remove('hidden');
 }
 
+function closeLetterThread() {
+  _openLetterThread = '';
+  renderLetterConversation();
+  renderLetterWorkspace();
+}
+
 async function handleBlendInboxAction(event) {
-  if (event.target.closest('[data-letter-mobile-back]')) {
-    _openLetterThread = '';
-    renderLetterConversation();
-    renderLetterWorkspace();
-    return;
-  }
   const thread = event.target.closest('[data-letter-thread]');
   if (thread) {
     renderLetterConversation(thread.dataset.letterThread);
@@ -5755,7 +5765,7 @@ $('follows-list').addEventListener('click', event => {
 });
 
 $('bulletin-venue').addEventListener('change', () => { _bulletinExpanded = false; paintBulletin(); });
-$('m-bulletin-venue').addEventListener('change', () => renderMobileBulletin(_bulletinData || {}));
+$('m-bulletin-venue').addEventListener('change', () => renderMobileBulletinList());
 $('profile-bulletin').addEventListener('click', event => {
   if (event.target.closest('#bulletin-more')) {
     _bulletinExpanded = true;
@@ -5827,7 +5837,10 @@ $('m-profile-list').addEventListener('toggle', event => {
   if (details.matches?.('[data-mobile-director-list]')) loadMobileDirectorFilms(details);
   else if (details.matches?.('[data-mobile-film-details]')) loadMobileFilmOverview(details);
 }, true);
-$('btn-inbox-back').addEventListener('click', () => showView(homeView()));
+$('btn-inbox-back').addEventListener('click', () => {
+  if (_openLetterThread) closeLetterThread();
+  else showView(homeView());
+});
 window.addEventListener('resize', () => {
   if (!$('view-inbox').classList.contains('hidden')) renderLetterWorkspace();
 });

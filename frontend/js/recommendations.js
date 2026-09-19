@@ -1,5 +1,5 @@
 import { escapeHTML, safeImageURL, letterboxdFilmURL } from './dom.js?v=20260902.15';
-import { t } from './i18n.js?v=20260920.3';
+import { t } from './i18n.js?v=20260920.4';
 
 export function createRecommendationCards() {
 // Make a poster clickable through to its Letterboxd page.
@@ -19,50 +19,61 @@ function overviewBlock() {
 // "Sana neden önerdik?" — the LLM's reasoning for this pick.
 function whyBlock(film) {
   if (!film.reason) return '';
-  return `<div class="mobile-flat mobile-flat--tight rounded-xl border border-primary-container/25 bg-primary-container/[0.07] p-4">
-      <p class="flex items-center gap-2 font-label-sm text-label-sm uppercase tracking-[.18em] text-primary-container mb-1.5">
+  // No mobile-flat here: the reasoning now sits inside a padded card, so it
+  // keeps its own inset instead of bleeding to the screen edge.
+  return `<div class="rounded-xl border border-primary-container/25 bg-primary-container/[0.07] p-3">
+      <p class="flex items-center gap-2 font-label-sm text-label-sm uppercase tracking-[.18em] text-primary-container mb-1">
         <span class="material-symbols-outlined text-[15px]" style="font-variation-settings:'FILL' 1">auto_awesome</span>${t('Sana neden önerdik?')}
       </p>
       <p class="font-body-md text-body-md text-on-surface leading-relaxed">${escapeHTML(film.reason)}</p>
     </div>`;
 }
-function buildHeroCard(film) {
+// ── Compact pick card ─────────────────────────────────────────────────────
+// One recommendation has to be readable without scrolling, so the poster is a
+// thumbnail beside the title rather than a full-bleed image above it: identity
+// on the top row, then the genres and the reasoning that earn the scroll-free
+// decision.
+function buildPickCard(film, { badge, extraMeta = '' } = {}) {
   const title = escapeHTML(film.title);
   const director = escapeHTML(film.director);
   const year = escapeHTML(film.year);
   const posterURL = safeImageURL(film.poster_url);
   const genres = (film.genres || []).slice(0, 4).map(g =>
-    `<span class="px-3 py-1 rounded-full bg-surface-variant text-on-surface-variant font-label-sm text-label-sm border border-outline-variant/20">${escapeHTML(g)}</span>`
+    `<span class="px-2.5 py-1 rounded-full bg-surface-variant text-on-surface-variant font-label-sm text-label-sm border border-outline-variant/20">${escapeHTML(g)}</span>`
   ).join('');
 
   const poster = posterURL
     ? `<img alt="${title}" draggable="false"
-          class="w-full h-full object-cover object-center transition-transform duration-700 group-hover:scale-[1.03]"
+          class="w-full h-full object-cover object-center transition-transform duration-500 group-hover:scale-[1.04]"
           src="${posterURL}" loading="lazy"/>`
     : `<div class="w-full h-full flex items-center justify-center bg-surface-container">
-          <span class="material-symbols-outlined text-[64px] text-on-surface-variant/20">movie</span>
+          <span class="material-symbols-outlined text-[32px] text-on-surface-variant/20">movie</span>
        </div>`;
 
   return `
-    <article class="tilt-card glass-panel rounded-xl overflow-hidden group flex flex-col md:flex-row gap-0">
-      <div class="md:w-[260px] shrink-0 aspect-[2/3] md:aspect-auto md:h-auto overflow-hidden relative bg-surface-container">
-        ${posterLink(poster, film)}
-        <div class="absolute inset-0 bg-gradient-to-t from-surface-container-lowest/60 via-transparent to-transparent md:bg-gradient-to-r md:from-transparent md:to-surface-container-lowest/30 pointer-events-none"></div>
-        <div class="absolute top-3 left-3 px-3 py-1 rounded-full bg-primary-container/90 backdrop-blur-sm font-label-md text-label-md text-on-primary-container font-bold">#1</div>
-      </div>
-      <div class="p-stack-lg flex flex-col gap-stack-md flex-grow justify-center">
-        <div>
-          <h3 class="font-headline-lg text-headline-lg text-on-surface leading-tight">
-            ${title}
-            ${film.year ? `<span class="font-body-lg text-body-lg text-on-surface-variant/60 ml-2">${year}</span>` : ''}
-          </h3>
-          ${film.director ? `<div class="font-label-md text-label-md text-tertiary-container mt-unit">${director}</div>` : ''}
+    <article class="tilt-card glass-panel rounded-xl overflow-hidden group p-4 flex flex-col gap-3">
+      <div class="flex items-start gap-3.5">
+        <div class="relative w-[92px] shrink-0 aspect-[2/3] overflow-hidden rounded-lg bg-surface-container">
+          ${posterLink(poster, film)}
+          ${badge}
         </div>
-        ${genres ? `<div class="flex flex-wrap gap-stack-sm">${genres}</div>` : ''}
-        ${overviewBlock(film)}
-        ${whyBlock(film)}
+        <div class="min-w-0 flex-1">
+          <h3 class="font-headline-md text-[20px] leading-tight text-on-surface break-words">${title}</h3>
+          ${film.director ? `<div class="mt-1.5 font-label-md text-label-md text-tertiary-container break-words">${director}</div>` : ''}
+          ${film.year ? `<div class="mt-0.5 font-label-sm text-label-sm text-on-surface-variant/60">${year}</div>` : ''}
+          ${extraMeta}
+        </div>
       </div>
+      ${genres ? `<div class="flex flex-wrap gap-1.5">${genres}</div>` : ''}
+      ${overviewBlock(film)}
+      ${whyBlock(film)}
     </article>`;
+}
+
+function buildHeroCard(film) {
+  return buildPickCard(film, {
+    badge: '<div class="absolute top-1.5 left-1.5 px-2 py-0.5 rounded-full bg-primary-container/90 backdrop-blur-sm font-label-sm text-label-sm text-on-primary-container font-bold">#1</div>',
+  });
 }
 
 // ── Alt card builder (portrait grid) ──────────────────────────────────────
@@ -106,52 +117,18 @@ function buildAltCard(film, idx) {
 
 // ── Random card builder ────────────────────────────────────────────────────
 function buildRandomCard(film) {
-  const title = escapeHTML(film.title);
-  const director = escapeHTML(film.director);
-  const year = escapeHTML(film.year);
-  const posterURL = safeImageURL(film.poster_url);
-  const genres = (film.genres || []).slice(0, 4).map(g =>
-    `<span class="px-3 py-1 rounded-full bg-surface-variant text-on-surface-variant font-label-sm text-label-sm border border-outline-variant/20">${escapeHTML(g)}</span>`
-  ).join('');
-
-  const poster = posterURL
-    ? `<img alt="${title}" draggable="false"
-          class="w-full h-full object-cover object-center transition-transform duration-700 group-hover:scale-[1.03]"
-          src="${posterURL}" loading="lazy"/>`
-    : `<div class="w-full h-full flex items-center justify-center bg-surface-container">
-          <span class="material-symbols-outlined text-[64px] text-on-surface-variant/20">movie</span>
-       </div>`;
-
   const rating = film.vote_average && film.vote_average > 0
-    ? `<div class="flex items-center gap-1 text-on-surface-variant/60 mt-unit">
+    ? `<div class="mt-1.5 flex items-center gap-1 text-on-surface-variant/60">
          <span class="material-symbols-outlined text-[14px]" style="font-variation-settings:'FILL' 1">star</span>
          <span class="font-label-md text-label-md">${film.vote_average.toFixed(1)}</span>
        </div>`
     : '';
-
-  return `
-    <article class="reco-card glass-panel rounded-xl overflow-hidden group flex flex-col md:flex-row gap-0">
-      <div class="md:w-[260px] shrink-0 aspect-[2/3] md:aspect-auto md:h-auto overflow-hidden relative bg-surface-container">
-        ${posterLink(poster, film)}
-        <div class="absolute inset-0 bg-gradient-to-t from-surface-container-lowest/60 via-transparent to-transparent md:bg-gradient-to-r md:from-transparent md:to-surface-container-lowest/30 pointer-events-none"></div>
-        <div class="absolute top-3 left-3 px-2 py-1 rounded-full bg-tertiary-container/90 backdrop-blur-sm">
-          <span class="material-symbols-outlined text-on-tertiary-container" style="font-size:16px;font-variation-settings:'FILL' 1">shuffle</span>
-        </div>
-      </div>
-      <div class="p-stack-lg flex flex-col gap-stack-md flex-grow justify-center">
-        <div>
-          <h3 class="font-headline-lg text-headline-lg text-on-surface leading-tight">
-            ${title}
-            ${film.year ? `<span class="font-body-lg text-body-lg text-on-surface-variant/60 ml-2">${year}</span>` : ''}
-          </h3>
-          ${film.director ? `<div class="font-label-md text-label-md text-tertiary-container mt-unit">${director}</div>` : ''}
-          ${rating}
-        </div>
-        ${genres ? `<div class="flex flex-wrap gap-stack-sm">${genres}</div>` : ''}
-        ${overviewBlock(film)}
-        ${whyBlock(film)}
-      </div>
-    </article>`;
+  return buildPickCard(film, {
+    badge: `<div class="absolute top-1.5 left-1.5 px-1.5 py-0.5 rounded-full bg-tertiary-container/90 backdrop-blur-sm">
+          <span class="material-symbols-outlined text-on-tertiary-container" style="font-size:14px;font-variation-settings:'FILL' 1">shuffle</span>
+        </div>`,
+    extraMeta: rating,
+  });
 }
 
 return { buildHeroCard, buildAltCard, buildRandomCard };
