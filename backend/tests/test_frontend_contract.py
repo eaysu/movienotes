@@ -850,10 +850,10 @@ def test_shell_asset_content_changes_force_a_version_bump():
     files that no longer existed.
     """
     expected = {
-        "js/app.js": "f08e63f5be17edf0a1faf57e873edac66d192d6c6682a2065248aa16df2a54b0",
-        "app.css": "801fc89a437f3af3c5ba59177c1e3981e47c4838c295d5eb927285b6e12e5fff",
-        "js/share-cards.js": "054b7fc1fc56676b0f7d9f29743e0e1675080a57006adaa9b3b09c9fec1c002a",
-        "js/i18n.js": "a8d67c23f411457169818b14e63a3d6888936b08959544d90a70a4886c8b6830",
+        "js/app.js": "309caa387a1393b6a302f993ae98358914f0e56d57f7ee7854d91c1eaff09fb9",
+        "app.css": "ccc78d269c09ec108a4d23c83d46d7deb0a352d206034355232576dcb25f97f1",
+        "js/share-cards.js": "66b82f86fd654a98fc187a33245db035b7261e526c8e7fc9ec788c469c8d386f",
+        "js/i18n.js": "d4eab4d2f6dc01ded277e1c39d15dc0818d2baa15dc49f51a57a19da83e70ba1",
         "site.webmanifest": "7a7de349179ed9f226d38632dfde5a8478edd10305972ea52641b0dc6aa7f405",
         "movienotes-mark.png": "850aa9117aa52768952843f8e2c410c0c17868877d81b2058274290373b4ee1e",
         "movienotes-icon-192.png": "3b04c52ffd23799ce424f1acefd0a1d7c386b8c968b09be9bd5c87b623c6ac12",
@@ -889,24 +889,24 @@ def test_every_app_shell_asset_has_an_explicit_immutable_version():
     source_css = (FRONTEND / "css" / "source.css").read_text()
 
     dependency_version = "v=20260902.15"
-    api_version = "v=20260920.2"
-    css_version = "v=20260920.2"
+    api_version = "v=20260920.3"
+    css_version = "v=20260920.3"
     assert f"/static/app.css?{css_version}" in html
-    assert "/static/js/app.js?v=20260920.2" in html
-    assert "./i18n.js?v=20260920.2" in app_js
+    assert "/static/js/app.js?v=20260920.3" in html
+    assert "./i18n.js?v=20260920.3" in app_js
     assert app_js.count(f"?{dependency_version}") == 2
     assert f"./api.js?{api_version}" in app_js
-    assert "./recommendations.js?v=20260920.2" in app_js
-    assert "./share-cards.js?v=20260920.2" in app_js
-    assert "./auth.js?v=20260920.2" in app_js
+    assert "./recommendations.js?v=20260920.3" in app_js
+    assert "./share-cards.js?v=20260920.3" in app_js
+    assert "./auth.js?v=20260920.3" in app_js
     assert f"./dom.js?{dependency_version}" in auth_js
-    assert "./i18n.js?v=20260920.2" in auth_js
+    assert "./i18n.js?v=20260920.3" in auth_js
     assert f"./dom.js?{dependency_version}" in profile_js
-    assert "./i18n.js?v=20260920.2" in profile_js
+    assert "./i18n.js?v=20260920.3" in profile_js
     assert f"./dom.js?{dependency_version}" in recommendations_js
-    assert "./i18n.js?v=20260920.2" in recommendations_js
+    assert "./i18n.js?v=20260920.3" in recommendations_js
     assert f"./api.js?{api_version}" in share_js
-    assert "./i18n.js?v=20260920.2" in share_js
+    assert "./i18n.js?v=20260920.3" in share_js
     assert f"criterion-closet-bg.jpg?{dependency_version}" in source_css
 
 
@@ -976,7 +976,7 @@ def test_png_share_renderer_is_lazy_loaded_on_first_share_action():
 
     imports = app_js.split("// ── Cinema facts", 1)[0]
     assert "from './share-cards.js" not in imports
-    assert "import('./share-cards.js?v=20260920.2')" in imports
+    assert "import('./share-cards.js?v=20260920.3')" in imports
     assert "const shareCards = await loadShareCardsModule();" in app_js
 
 
@@ -996,14 +996,71 @@ def test_sync_progress_polling_does_not_reload_the_full_profile_snapshot():
     sweep_poll = app_js.split("function startSweepPoll()", 1)[1].split(
         "function stopSweepPoll()", 1
     )[0]
-    onboarding_poll = app_js.split("function _obAwaitFullSweep", 1)[1].split(
-        "async function startOnboarding", 1
-    )[0]
     assert "apiJSON('/api/profile/sync-status')" in sweep_poll
     assert "apiJSON('/api/profile/me')" not in sweep_poll
     assert "if (!active) await loadProfile();" in sweep_poll
-    assert "apiJSON('/api/profile/sync-status')" in onboarding_poll
-    assert onboarding_poll.count("apiJSON('/api/profile/me')") == 2
+    # The progress strip is the only thing that polls the sweep. Onboarding
+    # gave up waiting for the archive, so it must not open a second poller.
+    onboarding = app_js.split("async function startOnboarding", 1)[1].split(
+        "async function boot()", 1
+    )[0]
+    assert "/api/profile/sync-status" not in onboarding
+
+
+def test_onboarding_slides_only_use_data_the_archive_sweep_is_not_needed_for():
+    """Asked for: onboarding must not promise anything the sweep still owes.
+
+    The director ranking needs the whole watched history, so its slide is gone.
+    Everything left comes from the one profile-page read (Letterboxd's own stat
+    row, the Fav 4, the reading built on them) plus a single diary page for the
+    newest film.
+    """
+    app_js = (FRONTEND / "js" / "app.js").read_text()
+
+    build = app_js.split("async function startOnboarding", 1)[1].split(
+        "async function boot()", 1
+    )[0]
+    slides = build.split("const slides = [", 1)[1].split("].filter(Boolean)", 1)[0]
+    order = [
+        "_obRenderWelcome",
+        "_obRenderNumbers",
+        "_obRenderLastWatched",
+        "_obRenderFavs",
+        "_obRenderPersonality",
+        "_obRenderSinefilConsent",
+    ]
+    positions = [slides.index(name) for name in order]
+    assert positions == sorted(positions), slides
+    # The retired full-sweep surfaces must not come back.
+    for gone in ("_obRenderDirector", "_obRenderOutro", "_obAwaitFullSweep"):
+        assert gone not in app_js, gone
+
+    # Numbers come off the scraped profile header, never the sweep's counters.
+    assert "stats.films" in build and "stats.this_year" in build
+    assert "stats.lists" in build
+    assert "apiJSON('/api/profile/recent?preview=1')" in build
+    # Consent is the last slide, so its button is the one that opens the app.
+    assert slides.rstrip().rstrip(",").endswith("_obRenderSinefilConsent()")
+
+
+def test_the_profile_says_which_cards_the_running_sweep_still_owes():
+    """Asked for: unfinished sections read as loading, not as broken."""
+    app_js = (FRONTEND / "js" / "app.js").read_text()
+
+    assert "function _isSweepActive" in app_js
+    assert "function _profilePendingCard" in app_js
+    # The snapshot renderer decides per card, so it needs the job up front.
+    render = app_js.split("function renderPersistedProfile", 1)[1].split(
+        "// ── Sinefil Akışı", 1
+    )[0]
+    assert "const sweeping = _isSweepActive(data.sync_job);" in render
+    assert render.count("_profilePendingCard(") == 2
+    assert "Arşivin taranıyor" in render
+    # Progress polling keeps the stored job fresh for those same decisions.
+    poll = app_js.split("function startSweepPoll()", 1)[1].split(
+        "function stopSweepPoll()", 1
+    )[0]
+    assert "_persistedProfile.sync_job = job;" in poll
 
 
 def test_profile_entry_sync_checks_fav4_before_any_full_crawl():

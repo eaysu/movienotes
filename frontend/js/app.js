@@ -8,24 +8,24 @@ import {
   finishApiRequest,
   scrapeErrorMessage,
   streamErrorMessage,
-} from './api.js?v=20260920.2';
+} from './api.js?v=20260920.3';
 import {
   cookieValue,
   csrfHeaders,
   setAuthMessage,
   setAuthMode,
   setPasswordVisibility,
-} from './auth.js?v=20260920.2';
-import { directorAvatar, directorFilmGrid, directorFilmTile } from './profile.js?v=20260920.2';
+} from './auth.js?v=20260920.3';
+import { directorAvatar, directorFilmGrid, directorFilmTile } from './profile.js?v=20260920.3';
 import { animateScore, getScoreInfo } from './blend.js?v=20260902.15';
-import { createRecommendationCards } from './recommendations.js?v=20260920.2';
+import { createRecommendationCards } from './recommendations.js?v=20260920.3';
 import {
   getLocale,
   initI18n,
   localePreference,
   setLocalePreference,
   t,
-} from './i18n.js?v=20260920.2';
+} from './i18n.js?v=20260920.3';
 
 initI18n();
 
@@ -34,7 +34,7 @@ const uiLocale = () => (getLocale() === 'en' ? 'en-US' : 'tr-TR');
 let _shareCardsModule;
 function loadShareCardsModule() {
   if (!_shareCardsModule) {
-    _shareCardsModule = import('./share-cards.js?v=20260920.2');
+    _shareCardsModule = import('./share-cards.js?v=20260920.3');
   }
   return _shareCardsModule;
 }
@@ -1469,7 +1469,10 @@ function openMobileProfileList(kind) {
       const photo = safeImageURL(director.photo_url);
       const films = director.films || [];
       return `<details class="group" data-mobile-director-list data-mobile-director-rank="${index + 1}"><summary class="flex cursor-pointer list-none items-center gap-3 px-3 py-3"><span class="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full bg-surface-container">${photo ? `<img src="${photo}" alt="" class="h-full w-full object-cover"/>` : '<span class="material-symbols-outlined text-on-surface-variant/45">person</span>'}</span><span class="min-w-0 flex-1"><small class="block text-[10px] text-primary-container">${escapeHTML(t('{rank}. sırada', { rank: index + 1 }))}</small><strong class="block truncate text-sm text-on-surface">${escapeHTML(director.name || '')}</strong><small class="text-xs text-on-surface-variant">${director.count || 0} ${t('film')}</small></span><span class="material-symbols-outlined text-on-surface-variant transition-transform group-open:rotate-90">chevron_right</span></summary><div data-mobile-director-films class="border-t border-outline-variant/15 bg-surface-container/30 px-3 py-2">${films.length ? films.map(mobileListRow).join('') : '<p class="py-3 text-xs text-on-surface-variant">Filmler yükleniyor…</p>'}</div></details>`;
-    }).join('') : '<p class="p-5 text-sm text-on-surface-variant">Yönetmen listesi hazırlanıyor…</p>';
+    }).join('') : `<p class="p-5 text-sm text-on-surface-variant">${
+      _isSweepActive(_persistedProfile?.sync_job)
+        ? 'Arşivin taranıyor; yönetmen listen tarama ilerledikçe oluşacak.'
+        : 'Yönetmen listesi hazırlanıyor…'}</p>`;
   } else if (kind === 'recent') {
     const films = _recentFilms;
     $('m-profile-list').innerHTML = films.length ? films.slice(0, 10).map(mobileListRow).join('') : '<p class="p-5 text-sm text-on-surface-variant">Liste arşiv taraması tamamlandıkça eklenecek.</p>';
@@ -1519,11 +1522,29 @@ async function loadMobileDirectorFilms(details) {
   }
 }
 
+// Onboarding hands the member the app while the archive is still being read.
+// Every card the sweep feeds has to say so, otherwise a half-filled profile
+// reads as a broken one rather than a loading one.
+function _isSweepActive(job) {
+  return Boolean(job && (job.state === 'queued' || job.state === 'running'));
+}
+
+function _profilePendingCard(sweeping, idleText) {
+  if (!sweeping) {
+    return `<div class="rounded-2xl border border-dashed border-outline-variant/30 p-5 text-on-surface-variant">${escapeHTML(idleText)}</div>`;
+  }
+  return `<div class="flex items-center gap-3 rounded-2xl border border-dashed border-primary-container/30 bg-primary-container/[.04] p-5 text-on-surface-variant">
+    <span class="material-symbols-outlined animate-spin text-[20px] text-primary-container">progress_activity</span>
+    <span>Arşivin taranıyor; bu bölüm tarama ilerledikçe dolacak.</span>
+  </div>`;
+}
+
 function renderPersistedProfile(data) {
   if (!data) return;
   if (applyStoredAccountLocale(data.account)) return;
   _persistedProfile = data;
   if (data.account) applyAccount(data.account);
+  const sweeping = _isSweepActive(data.sync_job);
   const taste = data.taste;
   if (taste) {
     streamText($('profile-account-summary'), accountSummaryFromTaste(taste));
@@ -1536,7 +1557,7 @@ function renderPersistedProfile(data) {
     const genres = taste.top_genres || [];
     $('profile-genres').innerHTML = genres.length
       ? genres.slice(0, 4).map(genre => `<span class="inline-flex items-center gap-2 px-3.5 py-2 rounded-full border border-primary-container/20 bg-primary-container/5 text-on-surface font-label-md text-label-md"><span class="w-1.5 h-1.5 rounded-full bg-primary-container"></span>${escapeHTML(genre)}</span>`).join('')
-      : '<span class="text-on-surface-variant/60 text-sm">Tür sinyali henüz yeterli değil.</span>';
+      : `<span class="text-on-surface-variant/60 text-sm">${sweeping ? 'Tür sinyali arşiv taraması sürerken oluşuyor…' : 'Tür sinyali henüz yeterli değil.'}</span>`;
     // ── Auteur radar: top-10 director carousel ──────────────────────────
     const dirDetail = (taste.top_directors_detail || []).filter(d => d && d.name).slice(0, 10);
     const dirFallback = (taste.top_directors?.length ? taste.top_directors : [taste.favorite_director])
@@ -1546,7 +1567,9 @@ function renderPersistedProfile(data) {
     $('profile-favorite-director-name').textContent = favoriteDirector?.name || 'Henüz belirleniyor';
     $('profile-favorite-director-note').textContent = favoriteDirector?.count
       ? `${favoriteDirector.count} film ve puanlarınla öne çıkan yönetmen.`
-      : favoriteDirector ? 'İzleme sıklığın ve verdiğin puanlarla öne çıkıyor.' : 'Yeterli yönetmen verisi oluştuğunda burada görünecek.';
+      : favoriteDirector ? 'İzleme sıklığın ve verdiğin puanlarla öne çıkıyor.'
+      : sweeping ? 'Arşivin taranıyor; yönetmen sıralaman tarama ilerledikçe oluşacak.'
+      : 'Yeterli yönetmen verisi oluştuğunda burada görünecek.';
     $('profile-favorite-director-avatar').innerHTML = favoriteDirector
       ? directorAvatar(favoriteDirector, 'w-14 h-14 text-[18px]')
       : '<span class="material-symbols-outlined">person</span>';
@@ -1556,7 +1579,10 @@ function renderPersistedProfile(data) {
     } else {
       unregisterProfileCarousel('profile-directors');
       _directorDeck = null;
-      $('profile-directors').innerHTML = '<div class="rounded-2xl border border-dashed border-outline-variant/30 p-5 text-on-surface-variant">Yönetmen sıralaması için birkaç film bilgisinin daha tamamlanması gerekiyor.</div>';
+      $('profile-directors').innerHTML = _profilePendingCard(
+        sweeping,
+        'Yönetmen sıralaması için birkaç film bilgisinin daha tamamlanması gerekiyor.',
+      );
       renderMobileCollections();
     }
 
@@ -1567,11 +1593,13 @@ function renderPersistedProfile(data) {
   } else {
     unregisterProfileCarousel('profile-directors');
     _directorDeck = null;
-    $('profile-directors').innerHTML = '<div class="rounded-2xl border border-dashed border-outline-variant/30 p-5 text-on-surface-variant">Zevk profili hazırlanıyor…</div>';
+    $('profile-directors').innerHTML = _profilePendingCard(sweeping, 'Zevk profili hazırlanıyor…');
     $('profile-account-summary').textContent = 'İzleme geçmişin ve Fav 4 filmlerin analiz ediliyor…';
     $('m-profile-summary').textContent = 'Favori filmlerin okunuyor; tam analiz arka planda genişleyecek.';
     $('profile-favorite-director-name').textContent = 'Henüz belirleniyor';
-    $('profile-favorite-director-note').textContent = 'Yönetmen bilgileri tamamlandıkça burada görünecek.';
+    $('profile-favorite-director-note').textContent = sweeping
+      ? 'Arşivin taranıyor; yönetmen sıralaman tarama ilerledikçe oluşacak.'
+      : 'Yönetmen bilgileri tamamlandıkça burada görünecek.';
     $('profile-favorite-director-avatar').innerHTML = '<span class="material-symbols-outlined">person</span>';
   }
   const deferAuxiliary = !$('view-onboarding').classList.contains('hidden');
@@ -2882,7 +2910,7 @@ function applySyncJob(job) {
   const badge = $('profile-scope-badge');
   const strip = $('profile-sweep');
   const mobileStrip = $('m-profile-sweep');
-  const active = job && (job.state === 'queued' || job.state === 'running');
+  const active = _isSweepActive(job);
 
   if (job && job.state === 'done' && job.scope === 'full') {
     $('profile-scope-badge-text').textContent = job.total
@@ -2927,7 +2955,8 @@ function startSweepPoll() {
     try {
       const data = await apiJSON('/api/profile/sync-status');
       const job = data.sync_job;
-      const active = job && (job.state === 'queued' || job.state === 'running');
+      const active = _isSweepActive(job);
+      if (_persistedProfile) _persistedProfile.sync_job = job;
       applySyncJob(job);
       if (!active) await loadProfile();
     } catch (_) { /* transient; keep polling */ }
@@ -3912,45 +3941,21 @@ function enterApp(account, opts = {}) {
 }
 
 // ── Onboarding reveal ──────────────────────────────────────────────────
-// Tüm izleme geçmişi taraması bitene kadar tek bir bekleme ekranı çalışır;
-// tam analiz hazır olduğunda slaytlar sırayla sunulur.
+// Onboarding never waits for the full watched-history sweep. It needs one
+// profile-page request — the same one that carries Letterboxd's own stat row
+// and the Fav 4 — plus one cheap diary read for the newest film. Everything
+// deeper (director ranking, genre signal) is filled in by the background
+// sweep while the member is already using the app.
 let _obToken = 0;             // her yeni çalışma bu sayacı artırır — async iptal kontrolü
 let _obSlideTimer = null;     // slayt otomatik ilerleme
 let _obFactTimer = null;      // bilgi kartı rotasyonu
-let _obPollTimer = null;      // tam tarama job yoklaması
-let _obReveal = null;         // { slides:[fn], index, token } — tarama sonrası sunum
+let _obReveal = null;         // { slides:[fn], index, token } — sunum durumu
 const OB_SLIDE_MS = 15000;
 const OB_FACT_MS = 7000;
-const OB_POLL_MS = 5000;
-
-const OB_BUCKETS = [
-  { max: 250,      text: 'Kısa ve tatlı bir geçmişin var. Analizin birazdan hazır, daha esnemeye fırsat bulamadan döneriz.' },
-  { max: 500,      text: 'Dolu dolu bir arşiv! Filmleri tek tek okuyoruz, yalnızca bir-iki dakika. Sen keyfine bak.' },
-  { max: 750,      text: 'Bu ciddi bir koleksiyon. Yüzlerce filmi tarıyoruz, birkaç dakika sürebilir; bu arada aşağıdaki sinema bilgileriyle vakit geçir.' },
-  { max: 1000,     text: 'Kocaman bir sinema geçmişin var ve hepsini hakkıyla analiz etmek istiyoruz. Kahveni tazele, birkaç dakikaya buradayız.' },
-  { max: Infinity, text: 'Binden fazla film… Sen gerçek bir sinefilsin. Bu arşivi satır satır okumak birkaç dakika alacak ama sonucu görünce ‘iyi ki beklemişim’ diyeceksin.' },
-];
-function _obBucketText(total) {
-  return (OB_BUCKETS.find(b => (total || 0) <= b.max) || OB_BUCKETS[OB_BUCKETS.length - 1]).text;
-}
-
-const OB_MILESTONES = [
-  { at: 250,  text: '250 filmi geride bıraktık…' },
-  { at: 500,  text: '500 film tamam, tempo yerinde.' },
-  { at: 750,  text: '750 film oldu, hâlâ okuyoruz.' },
-  { at: 1000, text: '1000 filmi de devirdik — amma izlemişsin!' },
-  { at: 1500, text: 'Son düzlükteyiz, analiz derleniyor…' },
-];
-function _obMilestoneText(processed) {
-  let hit = '';
-  for (const m of OB_MILESTONES) if ((processed || 0) >= m.at) hit = m.text;
-  return hit;
-}
 
 function _obClearTimers() {
   if (_obSlideTimer) { clearTimeout(_obSlideTimer); _obSlideTimer = null; }
   if (_obFactTimer)  { clearInterval(_obFactTimer); _obFactTimer = null; }
-  if (_obPollTimer)  { clearInterval(_obPollTimer); _obPollTimer = null; }
   _obReveal = null;
 }
 
@@ -4039,8 +4044,6 @@ function _obPaintFact() {
 function _obRenderWaiting(heading) {
   _obStage(`
     <p class="font-label-sm text-label-sm uppercase tracking-[.24em] text-primary-container">${escapeHTML(heading)}</p>
-    <p id="ob-bucket-line" class="mt-3 font-body-md text-body-md text-on-surface/90 leading-relaxed min-h-[1.5em]"></p>
-    <p id="ob-milestone-line" class="mt-3 font-label-sm text-label-sm text-primary-container/90 min-h-[1.25em]"></p>
     <div id="ob-fact-card" style="transition:opacity .3s ease" class="mt-6 rounded-2xl border border-outline-variant/20 bg-surface-container/50 p-5 text-left">
       <span id="ob-fact-badge" class="font-label-sm text-label-sm text-on-surface-variant/60"></span>
       <p id="ob-fact-text" class="mt-2 font-body-md text-body-md text-on-surface/90 leading-relaxed"></p>
@@ -4071,6 +4074,8 @@ function _obRenderWelcome() {
     </div>`);
 }
 
+// Letterboxd's own profile header already publishes these totals, so they cost
+// nothing beyond the single request onboarding was making anyway — no sweep.
 function _obRenderNumbers(items) {
   _obStage(`
     <p class="font-label-sm text-label-sm uppercase tracking-[.24em] text-primary-container">Letterboxd geçmişin</p>
@@ -4101,14 +4106,25 @@ function _obRenderFavs(favs) {
     </div>`);
 }
 
-function _obRenderDirector(d) {
+// The newest diary entry comes from one page-1 read, not the archive sweep, so
+// it can greet a member who registered moments ago.
+function _obRenderLastWatched(film) {
+  const poster = safeImageURL(film.poster_url);
+  const title = escapeHTML(film.title || '');
+  const meta = [film.year, film.director].filter(Boolean).map(escapeHTML).join(' · ');
+  const rating = Number(film.user_rating);
   _obStage(`
-    <p class="font-label-sm text-label-sm uppercase tracking-[.24em] text-tertiary-container">Favori yönetmenin</p>
+    <p class="font-label-sm text-label-sm uppercase tracking-[.24em] text-tertiary-container">Son izlediğin film</p>
     <div class="mt-6 flex flex-col items-center gap-4">
-      ${directorAvatar(d, 'w-28 h-28 text-[36px]')}
-      <div>
-        <h2 class="font-headline-lg text-[26px] text-on-surface">${escapeHTML(d.name)}</h2>
-        <p class="mt-1 font-body-md text-body-md text-on-surface-variant">${Number(d.count) || 0} filmini izledin${d.avg_rating ? ` · ortalaman ${Number(d.avg_rating).toFixed(1)}★` : ''}</p>
+      <div class="relative h-[220px] w-[147px] overflow-hidden rounded-2xl bg-surface-container ring-1 ring-outline-variant/25 shadow-2xl">
+        ${poster
+          ? `<img src="${poster}" alt="${title}" onerror="posterErr(this)" class="absolute inset-0 h-full w-full object-cover"/>`
+          : `<span class="absolute inset-0 flex items-center justify-center text-on-surface-variant/35"><span class="material-symbols-outlined text-[40px]">movie</span></span>`}
+      </div>
+      <div class="min-w-0">
+        <h2 class="break-words font-headline-lg text-[26px] leading-tight text-on-surface">${title}</h2>
+        ${meta ? `<p class="mt-1 font-body-md text-body-md text-on-surface-variant">${meta}</p>` : ''}
+        ${rating ? `<p class="mt-2 font-label-md text-label-md text-primary-container">${escapeHTML(t('{rating}★ verdin', { rating: rating.toFixed(1) }))}</p>` : ''}
       </div>
     </div>`);
 }
@@ -4130,7 +4146,8 @@ function _obRenderSinefilConsent() {
       <button type="button" data-ob-discoverable="true" class="rounded-xl bg-tertiary-container px-4 py-3 font-label-md text-label-md uppercase tracking-wide text-on-tertiary-container">Görünür kal</button>
       <button type="button" data-ob-discoverable="false" class="rounded-xl border border-outline-variant/30 bg-surface-container px-4 py-3 font-label-md text-label-md uppercase tracking-wide text-on-surface-variant">Gizli yap</button>
     </div>
-    <p id="ob-discovery-note" class="mt-4 font-label-sm text-label-sm ${visible ? 'text-tertiary-container' : 'text-on-surface-variant/60'}">${visible ? 'Profilin Sinefil Sineması’nda görünür.' : 'Profilin gizli kalacak.'}</p>`);
+    <p id="ob-discovery-note" class="mt-4 font-label-sm text-label-sm ${visible ? 'text-tertiary-container' : 'text-on-surface-variant/60'}">${visible ? 'Profilin Sinefil Sineması’nda görünür.' : 'Profilin gizli kalacak.'}</p>
+    <p class="mt-6 rounded-xl border border-outline-variant/20 bg-surface-container/40 p-3 font-label-sm text-label-sm leading-relaxed text-on-surface-variant/70">Tüm izleme geçmişin arka planda taranmaya devam ediyor. Uygulamaya şimdi geçebilirsin; profilin tarama ilerledikçe kendiliğinden zenginleşir.</p>`);
   $('ob-stage').querySelectorAll('[data-ob-discoverable]').forEach(button => {
     button.addEventListener('click', async () => {
       const next = button.dataset.obDiscoverable === 'true';
@@ -4147,17 +4164,8 @@ function _obRenderSinefilConsent() {
   });
 }
 
-function _obRenderOutro(full) {
-  _obStage(`
-    <p class="font-label-sm text-label-sm uppercase tracking-[.24em] text-primary-container">Hazır</p>
-    <h2 class="mt-3 font-headline-lg text-[26px] text-on-surface">Zevk profilin hazır</h2>
-    <p class="mt-3 font-body-md text-body-md text-on-surface-variant/80">${full
-      ? 'Tüm izleme geçmişin ve yönetmen verilerin analiz edildi. İçeri girip bu geceye bir film seçelim.'
-      : 'Tüm geçmişin arka planda taranıyor. Profilin tarama ilerledikçe kendiliğinden zenginleşecek; şimdi uygulamaya girebilirsin.'}</p>`);
-}
-
-// Tarama sonrası sunum: slaytları sırayla gösterir, OB_SLIDE_MS'de bir
-// otomatik ilerler; kullanıcı ileri/geri gezinebilir (timer sıfırlanır).
+// Slaytları sırayla gösterir, OB_SLIDE_MS'de bir otomatik ilerler;
+// kullanıcı ileri/geri gezinebilir (timer sıfırlanır).
 function _obShowRevealSlide(i) {
   const r = _obReveal;
   if (!r || r.token !== _obToken) return;
@@ -4169,7 +4177,7 @@ function _obShowRevealSlide(i) {
   $('ob-next').classList.toggle('hidden', last);
   $('ob-skip').classList.toggle('hidden', !last);
   $('ob-bg-note').textContent = last
-    ? 'Hazır olduğunda uygulamaya geçebilirsin.'
+    ? 'Arşiv taraman arka planda sürüyor.'
     : 'İleri / geri gezinebilirsin.';
   if (_obSlideTimer) { clearTimeout(_obSlideTimer); _obSlideTimer = null; }
   if (!last) {
@@ -4179,51 +4187,6 @@ function _obShowRevealSlide(i) {
 
 function _obRevealNav(delta) {
   if (_obReveal) _obShowRevealSlide(_obReveal.index + delta);
-}
-
-// Eski tam-tarama bekleyicisi, yarım kalmış onboarding sürümlerinden kalan
-// güvenli bir yardımcıdır. Yeni akış onu giriş kapısı olarak kullanmaz: Fav 4
-// analizi hazır olur olmaz kullanıcı uygulamaya geçebilir.
-function _obAwaitFullSweep(token, provisional) {
-  return new Promise(resolve => {
-    const job0 = provisional && provisional.sync_job;
-    if (job0 && job0.onboarding_ready) {
-      apiJSON('/api/profile/me')
-        .then(p => { if (p) _persistedProfile = p; resolve(p); })
-        .catch(() => resolve(provisional));
-      return;
-    }
-    let lastMilestone = '';
-
-    const tick = async () => {
-      if (!_obLive(token)) { resolve(null); return; }
-      let status = null;
-      try { status = await apiJSON('/api/profile/sync-status'); } catch (_) { /* geçici; yoklamaya devam */ }
-      if (!_obLive(token)) { resolve(null); return; }
-      const job = status && status.sync_job;
-      if (job) {
-        const mt = _obMilestoneText(job.processed || 0);
-        const ml = $('ob-milestone-line');
-        if (ml && mt && mt !== lastMilestone) { ml.textContent = mt; lastMilestone = mt; }
-      }
-      if (job && job.onboarding_ready) {
-        if (_obPollTimer) { clearInterval(_obPollTimer); _obPollTimer = null; }
-        _obStopFacts();
-        try {
-          const profile = await apiJSON('/api/profile/me');
-          if (profile) _persistedProfile = profile;
-          resolve(profile || provisional);
-        } catch (_) {
-          resolve(provisional);
-        }
-        return;
-      }
-    };
-
-    tick();
-    if (_obPollTimer) clearInterval(_obPollTimer);
-    if (_obLive(token)) _obPollTimer = setInterval(tick, OB_POLL_MS);
-  });
 }
 
 async function startOnboarding() {
@@ -4242,6 +4205,12 @@ async function startOnboarding() {
   // yüzlerce günlük sayfasına bağımlı kılmıyoruz.
   _obRenderWaiting('Favori dörtlün hazırlanıyor');
 
+  // The newest diary entry is an independent, single-page read. Firing it
+  // alongside the bootstrap keeps it off the critical path entirely.
+  const lastWatchedRequest = apiJSON('/api/profile/recent?preview=1')
+    .then(payload => (payload?.films || [])[0] || null)
+    .catch(() => null);
+
   const data = await syncProfile();       // bootstrap: kimlik bilgileri + tam sweep'i başlatır
   if (!_obLive(token)) return;
   if (!data) {
@@ -4254,34 +4223,40 @@ async function startOnboarding() {
   }
 
   _persistedProfile = data;
-  _obStopFacts();
 
   // ── Fav 4 hazır — slaytları hemen sun. ──────────────────────────────
+  // The diary read normally lands well before the slower bootstrap; the race
+  // only stops an unlucky slow one from holding the presentation back. The
+  // fact card keeps rotating until the last input is in, so the screen never
+  // sits frozen while this resolves.
+  const lastWatched = await Promise.race([
+    lastWatchedRequest,
+    new Promise(resolve => setTimeout(() => resolve(null), 2500)),
+  ]);
+  if (!_obLive(token)) return;
+  _obStopFacts();
+
   const profile = data;
   const taste = profile.taste || data.taste || {};
   const stats = data.letterboxd_stats || {};
   const favs = (profile.favorite_films || data.favorite_films || []).slice(0, 4);
-  const dir = (taste.top_directors_detail || [])[0];
-  const total = Math.max(
-    stats.films || 0, taste.sample_size || 0,
-    (profile.sync_job && profile.sync_job.total)
-      || (data.sync_job && data.sync_job.total) || 0,
-  );
+  // Letterboxd's public stat row, read in the same request as the Fav 4. The
+  // watched total is the one figure the sweep can also produce, so take
+  // whichever is larger once the archive is in.
   const numbers = [
-    { label: 'İzlediğin filmler', value: total },
-    { label: 'Puanladıkların', value: taste.rated_count || 0 },
+    { label: 'İzlediğin filmler', value: Math.max(stats.films || 0, taste.sample_size || 0) },
     { label: 'Bu yıl', value: stats.this_year || 0 },
+    { label: 'Listelerin', value: stats.lists || 0 },
   ].filter(x => x.value > 0);
   const personality = (taste.personality || '').trim();
 
   const slides = [
     () => _obRenderWelcome(),
     numbers.length ? () => _obRenderNumbers(numbers) : null,
+    (lastWatched && lastWatched.title) ? () => _obRenderLastWatched(lastWatched) : null,
     favs.length ? () => _obRenderFavs(favs) : null,
     personality ? () => _obRenderPersonality(personality) : null,
-    (dir && dir.name) ? () => _obRenderDirector(dir) : null,
     () => _obRenderSinefilConsent(),
-    () => _obRenderOutro(profile?.sync_job?.state === 'done'),
   ].filter(Boolean);
 
   _obReveal = { slides, index: 0, token };
