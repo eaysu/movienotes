@@ -181,7 +181,8 @@ def test_manual_profile_refresh_also_forces_a_watchlist_check():
 def test_profile_entry_checks_watchlist_head_without_blocking_profile_render():
     app_js = (FRONTEND / "js" / "app.js").read_text()
 
-    assert "checkFavoriteFreshness();" in app_js
+    assert "queueEntrySync();" in app_js
+    assert "apiJSON('/api/profile/entry-sync'" in app_js
     assert "checkWatchlistFreshness();" in app_js
     assert "'/api/profile/watchlist/check'" in app_js
     assert "mb_watchlist_check:" in app_js
@@ -830,7 +831,7 @@ def test_shell_asset_content_changes_force_a_version_bump():
     files that no longer existed.
     """
     expected = {
-        "js/app.js": "3486f603be8f1c4cec4ea95756b0ac6c0fbf192c3a4802e8686a99817f9482f6",
+        "js/app.js": "15f5049addf5cd298745484ed6eadcc052b42522f21bfc3f78fc3ee9c0d0678c",
         "app.css": "098314bfe07625fe57386a3173bfc470aa8be208840efe90bf74e31ff1950695",
         "js/share-cards.js": "7d470911f773a426d7f07f5d4cc36a9370d53ba95fbf79353b12182fe0f9cf5b",
         "js/i18n.js": "20ec8dbc0abf9f6f2e777dc0917121d2bab845a7cd6cbff00aafe6e6d86b1136",
@@ -872,7 +873,7 @@ def test_every_app_shell_asset_has_an_explicit_immutable_version():
     api_version = "v=20260919.2"
     css_version = "v=20260910.83"
     assert f"/static/app.css?{css_version}" in html
-    assert "/static/js/app.js?v=20260919.4" in html
+    assert "/static/js/app.js?v=20260919.5" in html
     assert "./i18n.js?v=20260919.3" in app_js
     assert app_js.count(f"?{dependency_version}") == 2
     assert f"./api.js?{api_version}" in app_js
@@ -986,14 +987,16 @@ def test_sync_progress_polling_does_not_reload_the_full_profile_snapshot():
     assert onboarding_poll.count("apiJSON('/api/profile/me')") == 2
 
 
-def test_profile_checks_fav4_with_a_small_profile_request_before_any_full_crawl():
+def test_profile_entry_sync_checks_fav4_before_any_full_crawl():
     app_js = (FRONTEND / "js" / "app.js").read_text()
     main_py = (ROOT / "app" / "main.py").read_text()
 
     assert "function checkFavoriteFreshness" in app_js
     assert "apiJSON('/api/profile/favorites/check'" in app_js
-    assert "checkFavoriteFreshness();" in app_js
+    assert "function queueEntrySync" in app_js
+    assert "apiJSON('/api/profile/entry-sync'" in app_js
     assert '@app.post("/api/profile/favorites/check")' in main_py
+    assert '@app.post("/api/profile/entry-sync")' in main_py
     assert "resolve_posters=False" in main_py
     assert "save_profile_identity_and_favorites" in main_py
 

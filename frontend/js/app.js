@@ -3749,12 +3749,30 @@ async function loadProfile() {
     renderPersistedProfile(profile);
     if (_account?.profile_sync_status === 'pending' || profile.needs_refresh) syncProfile();
     else {
-      checkFavoriteFreshness();
+      // Fav 4 and recent-history checks are coalesced into the background
+      // entry sync. Keep watchlist on its own, longer-lived fingerprint.
       checkWatchlistFreshness();
     }
   } catch (_) {
     if (_account?.profile_sync_status === 'pending') syncProfile();
   }
+}
+
+function queueEntrySync() {
+  if (!_account) return;
+  apiJSON('/api/profile/entry-sync', {
+    method: 'POST', headers: csrfHeaders(),
+  }).then(result => {
+    if (result.status !== 'queued') return;
+    // Let the background worker finish its small Letterboxd pass, then make
+    // any changed Fav 4 or taste snapshot visible without a manual reload.
+    setTimeout(async () => {
+      try {
+        const profile = await apiJSON('/api/profile/me', { cache: 'no-store' });
+        if (profile) renderPersistedProfile(profile);
+      } catch (_) {}
+    }, 8000);
+  }).catch(() => {});
 }
 
 async function checkFavoriteFreshness() {
@@ -3824,6 +3842,7 @@ function enterApp(account, opts = {}) {
     startOnboarding();
     return;
   }
+  queueEntrySync();
   // Yenilendiğinde aynı ekrana dönülür; adres yoksa ev akıştır. Pano arka
   // planda hazırlanmaya devam eder, "Profil"e geçiş anlık olsun diye.
   restoreRoute()

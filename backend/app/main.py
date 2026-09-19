@@ -737,6 +737,9 @@ def _make_cache(settings):
 TTL_USER_FILMS = 24 * 3600  # 1 gün
 TTL_FULL_SCRAPE = 7 * 24 * 3600  # derindeki silme/değişiklikler için haftalık tam crawl
 WATCHLIST_HEAD_CHECK_MIN_INTERVAL = 30 * 60  # oturumlar arasında 30 dk
+# Installed apps can be opened many times a day. Each entry asks for a sync,
+# but the durable gate keeps the actual Letterboxd work bounded per account.
+ENTRY_SYNC_MIN_INTERVAL = 15 * 60
 FINGERPRINT_FILM_LIMIT = 28
 TTL_RECOMMENDATION = 30 * 24 * 3600
 RECOMMENDER_VERSION = "v4-last100-explicit-favorites"
@@ -2798,6 +2801,165 @@ async def _refresh_profile_favorites(account: Account, settings, service) -> dic
     return {"changed": True, "profile": fresh}
 
 
+async def _sync_recent_history_on_entry(account: Account, settings, service) -> dict:
+    """Merge only the newest Letterboxd observations into a stored archive.
+
+    This deliberately avoids the old all-incomplete-film repair pass. Opening
+    the installed app should check new watches and rating edits, not begin a
+    multi-thousand-film metadata job.
+    """
+    known = await asyncio.to_thread(service.get_watched_slugs, account.id)
+    existing = {
+        row.get("film_slug"): row
+        for row in await asyncio.to_thread(service.get_watched_films, account.id)
+    }
+    recent = await scrape_recent_watched(
+        account.username, max_retries=settings.scrape_max_retries
+    )
+    new_rows = [film for film in recent if film.slug and film.slug not in known]
+    rating_updates = [
+        {
+            "slug": film.slug,
+            "user_rating": film.user_rating,
+            "rating_observed": True,
+        }
+        for film in recent
+        if film.slug in existing
+        and existing[film.slug].get("user_rating") != film.user_rating
+    ]
+    if not new_rows and not rating_updates:
+        return {"new_films": 0, "rating_updates": 0}
+
+    if new_rows:
+        seeds = []
+        for offset, film in enumerate(new_rows):
+            seeds.append(
+                {
+                    "slug": film.slug,
+                    "title": film.title,
+                    "year": film.year,
+                    "user_rating": film.user_rating,
+                    "poster_url": film.poster_url,
+                    "poster_resolver_url": film.poster_resolver_url,
+                    "watched_rank": -(len(new_rows) - offset),
+                    "rating_observed": True,
+                }
+            )
+        pipeline = _SyncPipeline(settings, use_stored_profile=True)
+        enriched = await pipeline.enrich_search(seeds)
+        await asyncio.to_thread(service.save_watched_films, account.id, enriched)
+        detailed = await pipeline.enrich_details(enriched)
+        if detailed:
+            await asyncio.to_thread(service.save_watched_films, account.id, detailed)
+    if rating_updates:
+        await asyncio.to_thread(service.save_watched_films, account.id, rating_updates)
+
+    # The persisted Fav 4 is reused, so this rebuild makes no second
+    # Letterboxd profile request. Metadata repair stays bounded for entry sync.
+    total = await _SyncPipeline(settings, use_stored_profile=True).rebuild_snapshot(
+        account,
+        use_llm=True,
+        repair_all=False,
+    )
+    with contextlib.suppress(Exception):
+        await asyncio.to_thread(
+            service.upsert_sync_job,
+            account.id,
+            state="done",
+            phase="done",
+            scope="full",
+            films_processed=total,
+            films_total=total,
+            last_error="",
+            backoff_until=None,
+            lease_token=None,
+            lease_expires_at=None,
+        )
+        await asyncio.to_thread(service.mark_sync_status, account.id, "ready")
+    return {"new_films": len(new_rows), "rating_updates": len(rating_updates)}
+
+
+async def _sync_recent_diary_on_entry(account: Account, settings, service) -> int:
+    """Import the member's newest written Letterboxd logs, if any."""
+    entries = await scrape_reviewed_diary(account.username, max_pages=1)
+    if entries is None:
+        return 0
+    keep = max(1, int(getattr(settings, "diary_scan_entries", 3)))
+    newest = sorted(
+        (entry for entry in entries if entry.slug and entry.review.strip()),
+        key=lambda entry: entry.watched_on,
+        reverse=True,
+    )[:keep]
+    rows = [
+        {
+            "source_key": entry.key,
+            "film_slug": entry.slug,
+            "film_title": entry.title,
+            "film_year": entry.year,
+            "tmdb_id": entry.tmdb_id,
+            "body": entry.review,
+            "payload": {
+                "rating": entry.rating,
+                "rewatch": entry.rewatch,
+                "watched_on": entry.watched_on,
+            },
+            "created_at": f"{entry.watched_on}T12:00:00+00:00",
+        }
+        for entry in newest
+    ]
+    written = await asyncio.to_thread(service.import_diary_entries, account.id, rows)
+    await asyncio.to_thread(service.mark_diary_synced, account.id, wrote=written)
+    return written
+
+
+_entry_sync_tasks: dict[int, asyncio.Task] = {}
+
+
+async def _run_entry_sync(account: Account, settings, service) -> None:
+    """Best-effort, sequential entry sync; failures retain the last good state."""
+    try:
+        favorite_result = await _refresh_profile_favorites(account, settings, service)
+        history_result = await _sync_recent_history_on_entry(account, settings, service)
+        diary_written = await _sync_recent_diary_on_entry(account, settings, service)
+        await _record_activity_event(
+            service,
+            account,
+            "entry_sync_completed",
+            {
+                "favorites_changed": bool(favorite_result.get("changed")),
+                **history_result,
+                "diary_written": diary_written,
+            },
+        )
+    except ScrapeError as exc:
+        log.info("entry sync deferred account=%s: %s", account.id, exc)
+    except Exception:  # noqa: BLE001 - opening the app must remain reliable
+        log.warning("entry sync failed account=%s", account.id, exc_info=True)
+    finally:
+        _entry_sync_tasks.pop(account.id, None)
+
+
+async def _schedule_entry_sync(account: Account, settings, service) -> str:
+    """Queue one durable, throttled background refresh for an app entry."""
+    if account.id in _entry_sync_tasks:
+        return "running"
+    client, _cache = _make_cache(settings)
+    pcache = _make_persistent_cache(settings, client)
+    recent = await asyncio.to_thread(
+        pcache.get, "entry_sync", account.username, ENTRY_SYNC_MIN_INTERVAL
+    )
+    if recent is not None:
+        return "deferred"
+    # Mark before scheduling so simultaneous tabs and PWA resumes share one
+    # Letterboxd budget even if the task takes a few seconds to start.
+    await asyncio.to_thread(
+        pcache.set, "entry_sync", account.username, {"queued": True}
+    )
+    task = asyncio.create_task(_run_entry_sync(account, settings, service))
+    _entry_sync_tasks[account.id] = task
+    return "queued"
+
+
 async def _stash_posters(films: list[dict]) -> None:
     """Promote public film metadata into the shared durable catalog."""
     rows = [
@@ -3528,6 +3690,15 @@ async def check_my_profile_favorites(request: Request) -> dict:
         return result
     except ScrapeError as exc:
         _raise_scrape_http(exc)
+
+
+@app.post("/api/profile/entry-sync")
+async def sync_profile_on_entry(request: Request) -> dict:
+    """Queue a bounded freshness check without delaying the app shell."""
+    _require_csrf(request)
+    account = await _require_account(request)
+    status = await _schedule_entry_sync(account, get_settings(), _auth_service())
+    return {"status": status}
 
 
 @app.post("/api/profile/sync")

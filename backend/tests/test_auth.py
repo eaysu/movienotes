@@ -362,6 +362,29 @@ def test_profile_visit_does_not_start_a_daily_incremental_scrape():
     starter.assert_not_awaited()
 
 
+def test_entry_sync_is_queued_without_holding_the_signed_in_shell():
+    account = _account()
+    fake_service = SimpleNamespace(current_account=lambda _token: account)
+    scheduler = AsyncMock(return_value="queued")
+    with (
+        patch("app.main.get_settings", return_value=_settings()),
+        patch("app.main._auth_service", return_value=fake_service),
+        patch("app.main._schedule_entry_sync", new=scheduler),
+        TestClient(main.app, base_url="https://testserver") as client,
+    ):
+        response = client.post(
+            "/api/profile/entry-sync",
+            headers={
+                "Cookie": "mb_access=entry-sync-token; mb_csrf=csrf-token",
+                "X-CSRF-Token": "csrf-token",
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "queued"}
+    scheduler.assert_awaited_once()
+
+
 def test_auth_me_restores_a_remembered_device_without_a_readable_csrf_cookie():
     """A cold installed PWA must enter the app from its durable cookie alone."""
     session = AuthSession(
