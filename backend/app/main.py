@@ -23,6 +23,7 @@ import secrets
 import threading
 import time
 import uuid
+from collections import Counter
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import urljoin, urlsplit
@@ -73,6 +74,7 @@ from .taste_profile import (
     TASTE_PROFILE_VERSION,
     build_taste_profile,
     personality_from_favorites,
+    taste_analysis_signal,
     taste_source_fingerprint,
 )
 from . import profile_sync
@@ -742,8 +744,8 @@ WATCHLIST_HEAD_CHECK_MIN_INTERVAL = 30 * 60  # oturumlar arasında 30 dk
 ENTRY_SYNC_MIN_INTERVAL = 15 * 60
 FINGERPRINT_FILM_LIMIT = 28
 TTL_RECOMMENDATION = 30 * 24 * 3600
-RECOMMENDER_VERSION = "v4-last100-explicit-favorites"
-BLEND_VERSION = "blend-v6-five-watchlist-picks"
+RECOMMENDER_VERSION = "v5-last100-fav4-directors"
+BLEND_VERSION = "blend-v7-fav4-directors"
 
 
 def _make_persistent_cache(settings, client):
@@ -835,7 +837,6 @@ def _recommendation_cache_key(
     model: str,
     count: int,
     favorite_directors: list[str] | None = None,
-    favorite_slugs: list[str] | None = None,
     favorite_four_slugs: list[str] | None = None,
     locale: str = "tr",
 ) -> str:
@@ -848,7 +849,6 @@ def _recommendation_cache_key(
         "watched": [(film.slug, film.user_rating) for film in watched],
         "watchlist": [film.slug for film in watchlist],
         "favorite_directors": (favorite_directors or [])[:3],
-        "favorite_slugs": (favorite_slugs or [])[:10],
         "favorite_four_slugs": (favorite_four_slugs or [])[:4],
         "locale": locale,
     }
@@ -2086,13 +2086,9 @@ async def profile_director_films(
     }
 
 
-class TopFilmsRequest(BaseModel):
-    slugs: list[str] = []
-
-
 @app.get("/api/profile/watched")
 async def profile_watched_films(request: Request, q: str = "", limit: int = 60) -> dict:
-    """Watched films for the 'top 10' picker — the user's own library."""
+    """Search the member's own watched library (note composer, film pickers)."""
     account = await _require_account(request)
     if limit < 1 or limit > 120:
         raise HTTPException(status_code=422, detail="Geçersiz sayfalama.")
@@ -2574,16 +2570,6 @@ async def profile_stats(request: Request) -> dict:
     return out
 
 
-@app.get("/api/profile/top-films")
-async def get_top_films(request: Request, preview: int = 10) -> dict:
-    """The user's curated (or highest-rated) top 10, all with plot summaries."""
-    account = await _require_account(request)
-    service = _auth_service()
-    rows = await asyncio.to_thread(service.resolve_top_films, account)
-    await _fill_overviews(service, rows, max(0, min(preview, 10)))
-    return {"films": rows}
-
-
 @app.get("/api/profile/film-overview")
 async def profile_film_overview(
     request: Request, slug: str, title: str = "", year: int | None = None
@@ -2607,23 +2593,6 @@ async def profile_film_overview(
         return {"overview": ""}
     await _fill_overviews(service, [row], 1)
     return {"overview": row.get("overview", "")}
-
-
-@app.put("/api/profile/top-films")
-async def save_top_films(req: TopFilmsRequest, request: Request) -> dict:
-    _require_csrf(request)
-    account = await _require_account(request)
-    if len(req.slugs) > 10:
-        raise HTTPException(status_code=422, detail="En fazla 10 film seçebilirsin.")
-    try:
-        films = await asyncio.to_thread(
-            _auth_service().set_top_films, account, req.slugs
-        )
-    except Exception as exc:
-        raise HTTPException(
-            status_code=503, detail="Liste kaydedilemedi. Lütfen tekrar dene."
-        ) from exc
-    return {"ok": True, "top_films": films}
 
 
 async def _provisional_profile_sync(
@@ -2686,7 +2655,7 @@ async def _provisional_profile_sync(
         # favourites, not on an empty watched list.  This makes genre, theme
         # and director signals available in the first onboarding seconds;
         # _SyncPipeline replaces it with the full-history snapshot later.
-        taste = build_taste_profile(favorites)
+        taste = build_taste_profile(favorites, favorites)
         taste.source_fingerprint = source_fingerprint
         taste.personality = personality_from_favorites(favorites)
         if stored_taste.get("personality"):
@@ -2802,7 +2771,7 @@ async def _refresh_profile_favorites(account: Account, settings, service) -> dic
     fresh["account"] = account.__dict__
     # New favourites are an explicit taste signal. Build the prose separately
     # so the tap that triggered refresh remains fast.
-    asyncio.create_task(_refresh_favorite_taste(account))
+    _schedule_favorite_taste_refresh(account, force_analysis=True)
     return {"changed": True, "profile": fresh}
 
 
@@ -3432,7 +3401,7 @@ class _SyncPipeline:
                 for film in profile.favorite_films
             ]
         await _resolve_favorite_posters(favorites, rows, service, enricher)
-        taste = build_taste_profile(watched)
+        taste = build_taste_profile(watched, favorites)
         if account.preferred_locale == "en":
             genres = ", ".join(taste.top_genres[:2])
             director = taste.favorite_director
@@ -3470,7 +3439,7 @@ class _SyncPipeline:
             with contextlib.suppress(Exception):
                 extra = await analyze_taste(
                     self.settings,
-                    watched,
+                    taste_analysis_signal(watched, favorites),
                     favorites,
                     locale="en" if account.preferred_locale == "en" else "tr",
                 )
@@ -3499,16 +3468,39 @@ async def _refresh_locale_taste(account: Account) -> None:
         log.warning("locale taste refresh failed account=%s", account.id, exc_info=True)
 
 
-async def _refresh_favorite_taste(account: Account) -> None:
-    """Regenerate taste prose from stored data after a Fav 4 edit."""
+async def _refresh_favorite_taste(account: Account, *, force_analysis: bool = False) -> None:
+    """Regenerate the stored Fav 4 + director taste read off-request."""
     try:
         await _SyncPipeline(get_settings(), use_stored_profile=True).rebuild_snapshot(
             account,
             use_llm=True,
             repair_all=False,
+            force_analysis=force_analysis,
         )
     except Exception:  # noqa: BLE001 - favourites are already safely persisted
         log.warning("favorite taste refresh failed account=%s", account.id, exc_info=True)
+
+
+_favorite_taste_refresh_tasks: dict[int, asyncio.Task] = {}
+
+
+def _schedule_favorite_taste_refresh(
+    account: Account, *, force_analysis: bool = False
+) -> None:
+    """Coalesce duplicate profile-page refreshes for the same account."""
+    active = _favorite_taste_refresh_tasks.get(account.id)
+    if active is not None and not active.done():
+        return
+    task = asyncio.create_task(
+        _refresh_favorite_taste(account, force_analysis=force_analysis)
+    )
+    _favorite_taste_refresh_tasks[account.id] = task
+
+    def _clear(completed: asyncio.Task) -> None:
+        if _favorite_taste_refresh_tasks.get(account.id) is completed:
+            _favorite_taste_refresh_tasks.pop(account.id, None)
+
+    task.add_done_callback(_clear)
 
 
 async def _refresh_profile_watchlist(account: Account, settings, service) -> int:
@@ -3747,6 +3739,12 @@ async def sync_my_profile(
             # only one profile-page request, not another history scrape.
             refreshed = await _refresh_profile_favorites(account, settings, service)
             stored = refreshed["profile"]
+            # v4 changes the taste source from the whole archive to Fav 4 plus
+            # the most-watched directors. Rebuild it asynchronously: opening a
+            # profile must remain instant and never trigger another crawl.
+            if (stored.get("taste") or {}).get("algorithm_version") != TASTE_PROFILE_VERSION:
+                _schedule_favorite_taste_refresh(account, force_analysis=True)
+                stored["taste_refreshing"] = True
             if refresh_watchlist:
                 asyncio.create_task(
                     _refresh_profile_watchlist_background(account, settings, service)
@@ -4486,9 +4484,8 @@ async def _compute_accepted_blend(
             _complete_blend_profile_metadata(watched1, first.id, enricher, service),
             _complete_blend_profile_metadata(watched2, second.id, enricher, service),
         )
-    async def _preference_slugs(participant: Account) -> tuple[list[str], list[str]]:
+    async def _preference_slugs(participant: Account) -> list[str]:
         favorite_four: list[str] = []
-        favorite_ten: list[str] = []
         if hasattr(service, "get_profile"):
             with contextlib.suppress(Exception):
                 profile = await asyncio.to_thread(service.get_profile, participant)
@@ -4496,14 +4493,9 @@ async def _compute_accepted_blend(
                     film.get("slug") for film in profile.get("favorite_films", [])
                     if film.get("slug")
                 ][:4]
-        if hasattr(service, "get_curated_top_film_slugs"):
-            with contextlib.suppress(Exception):
-                favorite_ten = await asyncio.to_thread(
-                    service.get_curated_top_film_slugs, participant
-                )
-        return favorite_four, favorite_ten
+        return favorite_four
 
-    (favorite_four1, favorite_ten1), (favorite_four2, favorite_ten2) = (
+    favorite_four1, favorite_four2 = (
         await asyncio.gather(_preference_slugs(first), _preference_slugs(second))
     )
     blend_result = _calculate_blend(
@@ -4512,8 +4504,6 @@ async def _compute_accepted_blend(
         top_n=10,
         favorite_four1=favorite_four1,
         favorite_four2=favorite_four2,
-        favorite_ten1=favorite_ten1,
-        favorite_ten2=favorite_ten2,
     )
     payload = {
         "username1": first.username,
@@ -5025,7 +5015,6 @@ async def recommend(req: RecommendRequest, request: Request):
 
                 favorite_directors: list[str] = []
                 top_genres: list[str] = []
-                favorite_slugs: list[str] = []
                 favorite_four_slugs: list[str] = []
                 stage = "profile_signals"
                 if service is not None and account is not None:
@@ -5043,20 +5032,35 @@ async def recommend(req: RecommendRequest, request: Request):
                             for film in stored_profile.get("favorite_films", [])
                             if film.get("slug")
                         ][:4]
-                    with contextlib.suppress(Exception):
-                        favorite_slugs = await asyncio.to_thread(
-                            service.get_curated_top_film_slugs, account
-                        )
+                # The same source used for the profile read powers discovery:
+                # Fav 4 plus films by the directors watched most often. This
+                # replaces the retired manual Top 10 signal.
+                director_counts = Counter(
+                    film.director.strip()
+                    for film in all_watched_films
+                    if film.director and film.director.strip()
+                )
+                most_watched_directors = [
+                    name for name, _count in director_counts.most_common(3)
+                ]
+                if most_watched_directors:
+                    favorite_directors = most_watched_directors
 
                 history_limit = getattr(settings, "recommendation_history_limit", 100)
                 watched_films = all_watched_films[:history_limit]
                 included_slugs = {film.slug for film in watched_films if film.slug}
-                explicit_slugs = set(favorite_slugs) | set(favorite_four_slugs)
+                explicit_slugs = set(favorite_four_slugs)
                 watched_films += [
                     film
                     for film in all_watched_films
                     if film.slug in explicit_slugs and film.slug not in included_slugs
                 ]
+                director_signal = [
+                    film for film in all_watched_films
+                    if film.director in set(most_watched_directors)
+                    and film.slug not in {item.slug for item in watched_films if item.slug}
+                ][:90]
+                watched_films += director_signal
 
                 discover_fallback = False
                 if len(watchlist_films) < settings.num_recommendations:
@@ -5093,7 +5097,6 @@ async def recommend(req: RecommendRequest, request: Request):
                     model=settings.openai_model if settings.has_openai else "local",
                     count=settings.num_recommendations,
                     favorite_directors=favorite_directors,
-                    favorite_slugs=favorite_slugs,
                     favorite_four_slugs=favorite_four_slugs,
                     locale=response_locale,
                 )
@@ -5177,7 +5180,6 @@ async def recommend(req: RecommendRequest, request: Request):
                     n=min(len(watchlist_films), candidate_count * 4),
                     favorite_directors=favorite_directors,
                     director_boost=getattr(settings, "favorite_director_boost", 0.08),
-                    favorite_slugs=favorite_slugs,
                     favorite_four_slugs=favorite_four_slugs,
                     locale=response_locale,
                 )
@@ -5189,7 +5191,6 @@ async def recommend(req: RecommendRequest, request: Request):
                     n=candidate_count,
                     favorite_directors=favorite_directors,
                     director_boost=getattr(settings, "favorite_director_boost", 0.08),
-                    favorite_slugs=favorite_slugs,
                     favorite_four_slugs=favorite_four_slugs,
                 )
                 rank_ms = round((time.perf_counter() - t3) * 1000)
@@ -5203,7 +5204,6 @@ async def recommend(req: RecommendRequest, request: Request):
                     settings,
                     watched_films,
                     candidates,
-                    favorite_slugs=favorite_slugs,
                     favorite_four_slugs=favorite_four_slugs,
                     locale=response_locale,
                 )
@@ -5393,8 +5393,6 @@ def _calculate_blend(
     *,
     favorite_four1: list[str] | set[str] | None = None,
     favorite_four2: list[str] | set[str] | None = None,
-    favorite_ten1: list[str] | set[str] | None = None,
-    favorite_ten2: list[str] | set[str] | None = None,
 ) -> dict:
     """Blend skoru, ortak filmler ve ortak yönetmen hesapla."""
     from collections import Counter
@@ -5422,8 +5420,6 @@ def _calculate_blend(
 
     fav4_1 = {slug for slug in (favorite_four1 or []) if slug}
     fav4_2 = {slug for slug in (favorite_four2 or []) if slug}
-    fav10_1 = {slug for slug in (favorite_ten1 or []) if slug}
-    fav10_2 = {slug for slug in (favorite_ten2 or []) if slug}
 
     # ── Ortak filmler ──────────────────────────────────────────────────────
     # 1. Slug eşleşmesi (birincil)
@@ -5440,9 +5436,8 @@ def _calculate_blend(
     ]
     common = common_slugs + common_title
     common_count = len(common)
-    # Explicit favorites behave like strong personal ratings. Fav 10 is at
-    # least 4.5★ and Fav 4 is at least 5★, while the other person's dislike is
-    # still allowed to pull the mutual floor down.
+    # Fav 4 is an explicit 5★ signal, while the other person's dislike can
+    # still pull the mutual floor down.
     _w2_by_slug = {f.slug: f for f in watched2 if f.slug}
     _w2_by_key = {(f.title.lower().strip(), f.year): f for f in watched2}
 
@@ -5453,19 +5448,15 @@ def _calculate_blend(
             else _w2_by_key.get((f.title.lower().strip(), f.year))
         ) or _w2_by_key.get((f.title.lower().strip(), f.year))
 
-    def _effective_rating(rating, slug: str, fav10: set[str], fav4: set[str]):
+    def _effective_rating(rating, slug: str, fav4: set[str]):
         value = float(rating) if rating is not None else None
         if slug in fav4:
             return max(value or 0.0, 5.0)
-        if slug in fav10:
-            return max(value or 0.0, 4.5)
         return value
 
-    def _favorite_label(slug: str, fav10: set[str], fav4: set[str]) -> str:
+    def _favorite_label(slug: str, fav4: set[str]) -> str:
         if slug in fav4:
             return "fav4"
-        if slug in fav10:
-            return "top10"
         return ""
 
     def _common_rank(f):
@@ -5474,8 +5465,8 @@ def _calculate_blend(
         r2 = f2.user_rating if f2 else None
         slug1 = f.slug or ""
         slug2 = f2.slug if f2 else slug1
-        effective1 = _effective_rating(r1, slug1, fav10_1, fav4_1)
-        effective2 = _effective_rating(r2, slug2, fav10_2, fav4_2)
+        effective1 = _effective_rating(r1, slug1, fav4_1)
+        effective2 = _effective_rating(r2, slug2, fav4_2)
         both_signaled = effective1 is not None and effective2 is not None
         if both_signaled:
             mutual_floor = min(effective1, effective2)
@@ -5486,8 +5477,7 @@ def _calculate_blend(
             mutual_floor = -1.0
             mutual_average = sum(known) / len(known) if known else -1.0
             agreement = -5.0
-        explicit_count = sum((slug1 in fav10_1 or slug1 in fav4_1,
-                              slug2 in fav10_2 or slug2 in fav4_2))
+        explicit_count = sum((slug1 in fav4_1, slug2 in fav4_2))
         return (
             both_signaled,
             mutual_floor,
@@ -5509,8 +5499,8 @@ def _calculate_blend(
         film_preferences[identity] = {
             "rating1": film.user_rating,
             "rating2": second.user_rating if second else None,
-            "favorite1": _favorite_label(slug1, fav10_1, fav4_1),
-            "favorite2": _favorite_label(slug2, fav10_2, fav4_2),
+            "favorite1": _favorite_label(slug1, fav4_1),
+            "favorite2": _favorite_label(slug2, fav4_2),
         }
 
     # ── Uyum skoru ─────────────────────────────────────────────────────────
@@ -5622,17 +5612,7 @@ def _calculate_blend(
     calibrated_score = 25.0 + 75.0 * (bounded_raw ** 0.85)
 
     shared_fav4 = sorted(fav4_1 & fav4_2)
-    shared_fav10 = sorted((fav10_1 & fav10_2) - set(shared_fav4))
-    cross_favorites = sorted(
-        ((fav4_1 & fav10_2) | (fav4_2 & fav10_1))
-        - set(shared_fav4)
-        - set(shared_fav10)
-    )
-    favorite_bonus = (
-        min(len(shared_fav4) * 10, 20)
-        + min(len(shared_fav10) * 4, 12)
-        + min(len(cross_favorites) * 3, 6)
-    )
+    favorite_bonus = min(len(shared_fav4) * 10, 20)
     score = round(min(100.0, calibrated_score + favorite_bonus))
 
     min_watched = min(len(watched1), len(watched2))
@@ -5714,8 +5694,6 @@ def _calculate_blend(
         "film_preferences": film_preferences,
         "favorite_matches": {
             "fav4": shared_fav4,
-            "top10": shared_fav10,
-            "cross": cross_favorites,
             "bonus": favorite_bonus,
         },
     }

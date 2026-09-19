@@ -281,7 +281,7 @@ def test_existing_film_archive_is_never_replaced_by_an_empty_bootstrap_snapshot(
     """A failed incremental job must not make a mature account look new."""
     account = _account()
     saved = {
-        "taste": {"sample_size": 564, "algorithm_version": "taste-v3"},
+        "taste": {"sample_size": 564, "algorithm_version": "taste-v4-fav4-directors"},
         "favorite_films": [{"slug": "a-film", "title": "A Film"}],
     }
     fake_service = SimpleNamespace(
@@ -302,7 +302,7 @@ def test_existing_film_archive_is_never_replaced_by_an_empty_bootstrap_snapshot(
 def test_existing_archive_sync_skips_heavy_limit_and_does_not_restart_incremental_crawl():
     account = _account()
     stored = {
-        "taste": {"sample_size": 564, "algorithm_version": "taste-v3"},
+        "taste": {"sample_size": 564, "algorithm_version": "taste-v4-fav4-directors"},
         "favorite_films": [],
     }
     job = {

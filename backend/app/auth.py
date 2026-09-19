@@ -12,7 +12,6 @@ import hashlib
 import hmac
 import json
 import logging
-import re
 import secrets
 import threading
 import time
@@ -1215,14 +1214,6 @@ class AuthService:
             return {"can_send": False, "seconds_remaining": 60, "next_send_at": None, "recipient_username": username}
 
     @staticmethod
-    def _safe_slug_set(values) -> set[str]:
-        return {
-            str(value).strip().lower()
-            for value in (values or [])
-            if isinstance(value, str) and value.strip()
-        }
-
-    @staticmethod
     def _overlap(left, right) -> set[str]:
         return {
             str(value).strip().casefold()
@@ -1244,12 +1235,11 @@ class AuthService:
             for row in viewer_favorites if row.get("slug")
         }
         viewer_fav = set(viewer_fav_titles)
-        viewer_top = self._safe_slug_set(self.get_curated_top_film_slugs(account))
         viewer_taste = viewer.get("taste") or {}
 
         candidates_query = (
             service.table("users")
-            .select("id,username,display_name,avatar_url,top_films,letter_receiving_enabled,private_account")
+            .select("id,username,display_name,avatar_url,letter_receiving_enabled,private_account")
             .eq("account_status", "active")
             .eq("profile_sync_status", "ready")
             .neq("id", account.id)
@@ -1314,11 +1304,7 @@ class AuthService:
                 for row in favorites if row.get("slug")
             }
             candidate_fav = set(candidate_fav_titles)
-            candidate_top = self._safe_slug_set(candidate.get("top_films"))
             same_fav4 = viewer_fav & candidate_fav
-            viewer_fav_to_top10 = viewer_fav & candidate_top
-            viewer_top_to_fav4 = viewer_top & candidate_fav
-            shared_top10 = viewer_top & candidate_top
             taste = taste_by_user.get(user_id, {})
             directors = self._overlap(viewer_taste.get("top_directors"), taste.get("top_directors"))
             genres = self._overlap(viewer_taste.get("top_genres"), taste.get("top_genres"))
@@ -1327,21 +1313,15 @@ class AuthService:
             semantic_match = semantic_coverage >= 0.30 and semantic_score >= 0.62
             score = min(100, (
                 len(same_fav4) * 42
-                + (len(viewer_fav_to_top10) + len(viewer_top_to_fav4)) * 22
-                + len(shared_top10) * 7
                 + len(directors) * 6 + len(genres) * 4 + len(keywords) * 2
                 + round(semantic_score * 10 if semantic_coverage >= 0.30 else 0)
             ))
             shared_titles: list[str] = []
-            for slug in list(same_fav4) + list(viewer_fav_to_top10):
+            for slug in list(same_fav4):
                 title = viewer_fav_titles.get(slug)
                 if title and title not in shared_titles:
                     shared_titles.append(title)
-            for slug in list(viewer_top_to_fav4):
-                title = candidate_fav_titles.get(slug)
-                if title and title not in shared_titles:
-                    shared_titles.append(title)
-            has_favorite_match = bool(same_fav4 or viewer_fav_to_top10 or viewer_top_to_fav4)
+            has_favorite_match = bool(same_fav4)
             cards.append({
                 "username": candidate["username"],
                 "display_name": candidate.get("display_name") or candidate["username"],
@@ -1393,11 +1373,10 @@ class AuthService:
         ) or {}
         return str(taste.get("personality") or "")
 
-    # ── "Top 10 films" — user-curated, falls back to highest rated ────────
+    # ── Watched-film lookups ───────────────────────────────────────────────
     _WATCHED_PICK_COLS = (
         "film_slug,title,release_year,director,user_rating,poster_url,tmdb_id"
     )
-    _SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,159}$")
 
     @staticmethod
     def _film_row(row: dict) -> dict:
@@ -1440,67 +1419,6 @@ class AuthService:
         rows = self._retry_storage_read(read).data or []
         return self._film_row(rows[0]) if rows else None
 
-    def _default_top_films(self, user_id: int, limit: int = 10) -> list[dict]:
-        rows = (
-            self._service_client()
-            .table("user_watched_films")
-            .select(self._WATCHED_PICK_COLS)
-            .eq("user_id", user_id)
-            .eq("is_active", True)
-            .not_.is_("user_rating", "null")
-            .order("user_rating", desc=True)
-            .order("watched_rank")
-            .limit(limit)
-            .execute()
-        ).data or []
-        return [self._film_row(r) for r in rows]
-
-    def resolve_top_films(self, account: Account) -> list[dict]:
-        service = self._service_client()
-        slugs: list[str] = []
-        try:  # the top_films column may predate the migration
-            row = self._first(
-                service.table("users").select("top_films").eq("id", account.id).execute()
-            ) or {}
-            slugs = [
-                s for s in (row.get("top_films") or [])
-                if isinstance(s, str) and self._SLUG_RE.match(s)
-            ][:10]
-        except Exception:
-            slugs = []
-        try:
-            if not slugs:
-                return self._default_top_films(account.id)
-            picked = (
-                service.table("user_watched_films")
-                .select(self._WATCHED_PICK_COLS)
-                .eq("user_id", account.id)
-                .in_("film_slug", slugs)
-                .execute()
-            ).data or []
-            by_slug = {r["film_slug"]: self._film_row(r) for r in picked}
-            return [by_slug[s] for s in slugs if s in by_slug]
-        except Exception:
-            return []
-
-    def get_curated_top_film_slugs(self, account: Account) -> list[str]:
-        """Return only the user's explicit Top 10 choices, without a fallback."""
-        try:
-            row = self._first(
-                self._service_client()
-                .table("users")
-                .select("top_films")
-                .eq("id", account.id)
-                .execute()
-            ) or {}
-        except Exception:
-            return []
-        return [
-            slug
-            for slug in (row.get("top_films") or [])
-            if isinstance(slug, str) and self._SLUG_RE.match(slug)
-        ][:10]
-
     def list_recent_watched(self, user_id: int, limit: int = 10) -> list[dict]:
         rows = (
             self._service_client()
@@ -1533,30 +1451,6 @@ class AuthService:
             .execute()
         ).data or []
         return [self._film_row(r) for r in rows]
-
-    def set_top_films(self, account: Account, slugs: list) -> list[dict]:
-        clean: list[str] = []
-        for raw in slugs or []:
-            s = str(raw or "").strip().lower()
-            if s and s not in clean and self._SLUG_RE.match(s):
-                clean.append(s)
-            if len(clean) >= 10:
-                break
-        if clean:
-            watched = (
-                self._service_client()
-                .table("user_watched_films")
-                .select("film_slug")
-                .eq("user_id", account.id)
-                .in_("film_slug", clean)
-                .execute()
-            ).data or []
-            valid = {r["film_slug"] for r in watched}
-            clean = [s for s in clean if s in valid]
-        self._service_client().table("users").update(
-            {"top_films": clean, "updated_at": datetime.now(timezone.utc).isoformat()}
-        ).eq("id", account.id).execute()
-        return self.resolve_top_films(account)
 
     # ── Full-history background sync ──────────────────────────────────────
     def get_sync_job(self, user_id: int) -> dict | None:

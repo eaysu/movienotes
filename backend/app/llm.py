@@ -56,7 +56,6 @@ def _build_prompt(
     watched: list[EnrichedFilm],
     candidates: list[EnrichedFilm],
     n: int,
-    favorite_slugs: list[str] | None = None,
     favorite_four_slugs: list[str] | None = None,
     locale: str = "tr",
 ) -> str:
@@ -80,11 +79,7 @@ def _build_prompt(
             f"— türler: {genres or 'n/a'}\n    {overview}"
         )
     candidate_block = "\n".join(lines)
-    favorite_set = set(favorite_slugs or [])
     favorite_four_set = set(favorite_four_slugs or [])
-    top_ten_block = "; ".join(
-        _film_label(film) for film in watched if film.slug in favorite_set
-    ) or "(seçim yapılmamış)"
     fav_four_block = "; ".join(
         _film_label(film) for film in watched if film.slug in favorite_four_set
     ) or "(seçim yapılmamış)"
@@ -92,7 +87,6 @@ def _build_prompt(
     prompt = (
         "Sen deneyimli bir film öneri uzmanısın.\n\n"
         f"{reference_heading}:\n{watched_block}\n\n"
-        f"Kullanıcının kendi seçtiği favori 10 film:\n{top_ten_block}\n\n"
         f"Letterboxd Favori 4 (en güçlü tercih sinyali):\n{fav_four_block}\n\n"
         "Aşağıdaki filmler kullanıcının watchlist'inden seçilmiş adaylardır "
         "(izleme geçmişine benzerliğe göre ön filtrelendi):\n"
@@ -146,7 +140,6 @@ async def rank_candidates(
     watched: list[EnrichedFilm],
     candidates: list[EnrichedFilm],
     *,
-    favorite_slugs: list[str] | None = None,
     favorite_four_slugs: list[str] | None = None,
     locale: str = "tr",
 ) -> dict:
@@ -183,7 +176,6 @@ async def rank_candidates(
                     watched,
                     candidates,
                     n,
-                    favorite_slugs=favorite_slugs,
                     favorite_four_slugs=favorite_four_slugs,
                     locale=locale,
                 ),

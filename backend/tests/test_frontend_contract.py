@@ -8,14 +8,13 @@ ROOT = Path(__file__).resolve().parents[1]        # backend/
 FRONTEND = ROOT.parent / "frontend"               # depo kökü/frontend
 
 
-def test_profile_uses_three_swipe_carousels_without_director_accordion():
+def test_profile_uses_two_swipe_carousels_without_director_accordion():
     html = (FRONTEND / "index.html").read_text()
     js = (FRONTEND / "js" / "app.js").read_text()
     css = (FRONTEND / "css" / "source.css").read_text()
 
     for element_id in (
         "profile-directors",
-        "profile-top-films",
         "profile-recent-films",
     ):
         marker = f'id="{element_id}" class="'
@@ -149,7 +148,7 @@ def test_common_blend_cards_show_both_ratings_and_favorite_signals():
     assert "film.rating2" in app_js
     assert "film.favorite1" in app_js
     assert "film.favorite2" in app_js
-    assert "Fav 10" in app_js
+    assert "Fav 10" not in app_js
 
 
 def test_profile_decks_are_fixed_height_with_scrollable_overviews():
@@ -157,7 +156,7 @@ def test_profile_decks_are_fixed_height_with_scrollable_overviews():
     js = (FRONTEND / "js" / "app.js").read_text()
     css = (FRONTEND / "css" / "source.css").read_text()
 
-    assert html.count("profile-dashboard-card") == 3
+    assert html.count("profile-dashboard-card") == 2
     assert 'class="film-overview-scroll mt-3 pr-2 pb-1"' in js
     assert 'data-deck-controls class="profile-carousel-controls' in js
     assert 'data-carousel-frame class="profile-carousel-frame' in js
@@ -235,7 +234,7 @@ def test_profile_boot_avoids_eager_blend_history_and_repeated_empty_aux_calls():
     assert "refreshBlendBadge();" in enter_app
     assert "loadBlendInbox(false);" not in enter_app
     assert "const BLEND_BADGE_POLL_MS = 60000" in app_js
-    assert "_topFilmsLoaded = true;\n    renderTopFilms(films);" in app_js
+    assert "top-films" not in app_js
     assert "_recentLoaded = true;\n    renderRecentFilms(films);" in app_js
     assert "_statsLoaded = true;" in app_js
 
@@ -513,7 +512,7 @@ def test_the_profile_dashboard_folds_its_heavy_sections_on_a_phone():
     app_js = (FRONTEND / "js" / "app.js").read_text()
     css = (FRONTEND / "css" / "source.css").read_text()
 
-    for section in ("kisayollar", "turler", "yonetmen", "ozet", "auteur", "basucu", "gunce"):
+    for section in ("kisayollar", "turler", "yonetmen", "ozet", "auteur", "gunce"):
         assert f'data-fold="{section}"' in html, section
         assert f"'{section}'" in app_js.split("FOLDED_ON_PHONE = [", 1)[1].split("]", 1)[0], section
     # Only phones start folded, and the reader's own choice outlives that.
@@ -615,14 +614,14 @@ def test_the_dashboard_sections_hide_their_actions_until_opened():
     """Asked for: no pencil, clapper or image icon on a closed section."""
     html = (FRONTEND / "index.html").read_text()
 
-    for fold in ("auteur", "basucu", "gunce"):
+    for fold in ("auteur", "gunce"):
         head = html.split(f'data-fold="{fold}"', 1)[1].split('<div class="fold-body">', 1)[0]
         icons = [line for line in head.splitlines() if "material-symbols-outlined" in line]
         # Only the chevron survives in a collapsed header.
         assert len(icons) == 1, (fold, icons)
         assert "fold-chevron" in icons[0], fold
     # The edit and PNG buttons moved inside, so they appear with the content.
-    for section, button in (("basucu", "profile-top-films-edit"), ("gunce", "profile-recent-share")):
+    for section, button in (("gunce", "profile-recent-share"),):
         body = html.split(f'data-fold="{section}"', 1)[1].split('<div class="fold-body">', 1)[1]
         assert f'id="{button}"' in body.split("</section>", 1)[0], section
 
@@ -851,10 +850,10 @@ def test_shell_asset_content_changes_force_a_version_bump():
     files that no longer existed.
     """
     expected = {
-        "js/app.js": "ec145e8e13317aaf635ee4a4ed407fad12876e13c74ce4b7c695ba8dd8981105",
-        "app.css": "159328be70b0763849933514a5ac25ce3c045de4430a0744894af07e29d14542",
-        "js/share-cards.js": "74d6091f83c97a0ca0a95dbfbdf2e2d53e4697d282211b85dc42efbd58449fc1",
-        "js/i18n.js": "5cb32f4f011950867c584b2eced8ae4ef08241e0d1446d15c0230649c35fc395",
+        "js/app.js": "f08e63f5be17edf0a1faf57e873edac66d192d6c6682a2065248aa16df2a54b0",
+        "app.css": "801fc89a437f3af3c5ba59177c1e3981e47c4838c295d5eb927285b6e12e5fff",
+        "js/share-cards.js": "054b7fc1fc56676b0f7d9f29743e0e1675080a57006adaa9b3b09c9fec1c002a",
+        "js/i18n.js": "a8d67c23f411457169818b14e63a3d6888936b08959544d90a70a4886c8b6830",
         "site.webmanifest": "7a7de349179ed9f226d38632dfde5a8478edd10305972ea52641b0dc6aa7f405",
         "movienotes-mark.png": "850aa9117aa52768952843f8e2c410c0c17868877d81b2058274290373b4ee1e",
         "movienotes-icon-192.png": "3b04c52ffd23799ce424f1acefd0a1d7c386b8c968b09be9bd5c87b623c6ac12",
@@ -890,24 +889,24 @@ def test_every_app_shell_asset_has_an_explicit_immutable_version():
     source_css = (FRONTEND / "css" / "source.css").read_text()
 
     dependency_version = "v=20260902.15"
-    api_version = "v=20260920.1"
-    css_version = "v=20260920.1"
+    api_version = "v=20260920.2"
+    css_version = "v=20260920.2"
     assert f"/static/app.css?{css_version}" in html
-    assert "/static/js/app.js?v=20260920.1" in html
-    assert "./i18n.js?v=20260920.1" in app_js
+    assert "/static/js/app.js?v=20260920.2" in html
+    assert "./i18n.js?v=20260920.2" in app_js
     assert app_js.count(f"?{dependency_version}") == 2
     assert f"./api.js?{api_version}" in app_js
-    assert "./recommendations.js?v=20260920.1" in app_js
-    assert "./share-cards.js?v=20260920.1" in app_js
-    assert "./auth.js?v=20260920.1" in app_js
+    assert "./recommendations.js?v=20260920.2" in app_js
+    assert "./share-cards.js?v=20260920.2" in app_js
+    assert "./auth.js?v=20260920.2" in app_js
     assert f"./dom.js?{dependency_version}" in auth_js
-    assert "./i18n.js?v=20260920.1" in auth_js
+    assert "./i18n.js?v=20260920.2" in auth_js
     assert f"./dom.js?{dependency_version}" in profile_js
-    assert "./i18n.js?v=20260920.1" in profile_js
+    assert "./i18n.js?v=20260920.2" in profile_js
     assert f"./dom.js?{dependency_version}" in recommendations_js
-    assert "./i18n.js?v=20260920.1" in recommendations_js
+    assert "./i18n.js?v=20260920.2" in recommendations_js
     assert f"./api.js?{api_version}" in share_js
-    assert "./i18n.js?v=20260920.1" in share_js
+    assert "./i18n.js?v=20260920.2" in share_js
     assert f"criterion-closet-bg.jpg?{dependency_version}" in source_css
 
 
@@ -977,7 +976,7 @@ def test_png_share_renderer_is_lazy_loaded_on_first_share_action():
 
     imports = app_js.split("// ── Cinema facts", 1)[0]
     assert "from './share-cards.js" not in imports
-    assert "import('./share-cards.js?v=20260920.1')" in imports
+    assert "import('./share-cards.js?v=20260920.2')" in imports
     assert "const shareCards = await loadShareCardsModule();" in app_js
 
 

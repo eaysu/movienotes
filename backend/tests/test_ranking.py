@@ -116,7 +116,6 @@ class RatingAwareRankingTests(unittest.TestCase):
             watched,
             watchlist,
             n=2,
-            favorite_slugs=["favorite-space"],
             favorite_four_slugs=["favorite-space"],
         )
 

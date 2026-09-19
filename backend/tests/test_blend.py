@@ -84,8 +84,6 @@ class BlendCalibrationTests(unittest.TestCase):
             second,
             favorite_four1=["shared-love"],
             favorite_four2=["shared-love"],
-            favorite_ten1=["shared-love"],
-            favorite_ten2=["shared-love"],
         )
 
         self.assertEqual(result["score"], baseline["score"] + 10)
@@ -118,28 +116,6 @@ class BlendCalibrationTests(unittest.TestCase):
 
         self.assertEqual([film.slug for film in result["films"]], ["mutual-love", "one-sided"])
         self.assertEqual(result["film_preferences"]["mutual-love"]["rating2"], 4.5)
-
-    def test_shared_curated_top10_is_a_strong_common_film_signal(self):
-        first = [
-            EnrichedFilm(title="Curated", slug="curated"),
-            EnrichedFilm(title="Plain", slug="plain", user_rating=4.0),
-        ]
-        second = [
-            EnrichedFilm(title="Curated", slug="curated"),
-            EnrichedFilm(title="Plain", slug="plain", user_rating=4.0),
-        ]
-
-        result = _calculate_blend(
-            first,
-            second,
-            top_n=2,
-            favorite_ten1=["curated"],
-            favorite_ten2=["curated"],
-        )
-
-        self.assertEqual(result["films"][0].slug, "curated")
-        self.assertEqual(result["film_preferences"]["curated"]["favorite1"], "top10")
-        self.assertEqual(result["film_preferences"]["curated"]["favorite2"], "top10")
 
 
 def _film(title, *, year=2021, genres=("Drama",), director="Someone"):

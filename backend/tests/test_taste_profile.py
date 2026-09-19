@@ -2,7 +2,7 @@ import unittest
 
 from app.enrich import EnrichedFilm
 from app.scraper import ScrapedFilm, ScrapedProfile
-from app.taste_profile import build_taste_profile, taste_source_fingerprint
+from app.taste_profile import build_taste_profile, taste_analysis_signal, taste_source_fingerprint
 
 
 class TasteProfileTests(unittest.TestCase):
@@ -86,7 +86,28 @@ class TasteProfileTests(unittest.TestCase):
         self.assertEqual(profile.favorite_director, "First")
         # A single watched film is not a "favorite director".
         self.assertNotIn("Once Only", profile.top_directors)
-        self.assertEqual(profile.algorithm_version, "taste-v3")
+        self.assertEqual(profile.algorithm_version, "taste-v4-fav4-directors")
+
+    def test_fav4_and_most_watched_directors_define_the_analysis_signal(self):
+        watched = [
+            EnrichedFilm(title="A1", slug="a1", director="Frequent A", genres=["Drama"]),
+            EnrichedFilm(title="A2", slug="a2", director="Frequent A", genres=["Drama"]),
+            EnrichedFilm(title="A3", slug="a3", director="Frequent A", genres=["Drama"]),
+            EnrichedFilm(title="B1", slug="b1", director="Frequent B", genres=["Mystery"]),
+            EnrichedFilm(title="B2", slug="b2", director="Frequent B", genres=["Mystery"]),
+            EnrichedFilm(title="C1", slug="c1", director="Frequent C", genres=["Crime"]),
+            EnrichedFilm(title="Incidental", slug="incidental", director="One-Off", genres=["Horror"]),
+        ]
+        favorites = [
+            EnrichedFilm(title="Favorite", slug="favorite", director="Favorite Director", genres=["Romance"]),
+        ]
+
+        signal = taste_analysis_signal(watched, favorites)
+        self.assertEqual({film.slug for film in signal}, {"favorite", "a1", "a2", "a3", "b1", "b2", "c1"})
+
+        profile = build_taste_profile(watched, favorites)
+        self.assertIn("Romance", profile.top_genres)
+        self.assertNotIn("Horror", profile.top_genres)
 
     def test_directors_ranked_by_watch_count_then_average_rating(self):
         watched = (

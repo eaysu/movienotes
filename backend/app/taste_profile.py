@@ -12,7 +12,7 @@ from dataclasses import asdict, dataclass, field
 
 from .enrich import EnrichedFilm
 
-TASTE_PROFILE_VERSION = "taste-v3"
+TASTE_PROFILE_VERSION = "taste-v4-fav4-directors"
 
 # Recency half-life in "films watched ago". With the full watched history now
 # feeding the profile, a flat linear taper is meaningless across thousands of
@@ -235,7 +235,7 @@ def _deterministic_analysis(
     return lines[:4]
 
 
-def build_taste_profile(watched: list[EnrichedFilm]) -> TasteProfileSnapshot:
+def _build_taste_profile(watched: list[EnrichedFilm]) -> TasteProfileSnapshot:
     """Build a stable taste summary and rating-aware favorite director."""
     if not watched:
         return TasteProfileSnapshot(
@@ -364,6 +364,61 @@ def build_taste_profile(watched: list[EnrichedFilm]) -> TasteProfileSnapshot:
         confidence_level=confidence_level,
         confidence_score=confidence_score,
     )
+
+
+def taste_analysis_signal(
+    watched: list[EnrichedFilm], favorites: list[EnrichedFilm] | None = None
+) -> list[EnrichedFilm]:
+    """Use explicit Fav 4 plus films by the most-watched directors for prose.
+
+    The full archive remains the source for counts and the director ranking.
+    Editorial taste text, however, should be anchored in the films a member
+    explicitly chose and the filmmakers they return to most often—not diluted
+    by every incidental diary entry.
+    """
+    favorites = [film for film in (favorites or [])[:4] if getattr(film, "title", "")]
+    if not watched:
+        return favorites
+
+    counts: dict[str, int] = defaultdict(int)
+    for film in watched:
+        if film.director:
+            counts[film.director] += 1
+    directors = {
+        name
+        for name, _count in sorted(
+            counts.items(), key=lambda item: (-item[1], item[0].casefold())
+        )[:3]
+    }
+    selected: list[EnrichedFilm] = []
+    seen: set[str] = set()
+    for film in [*favorites, *watched]:
+        key = film.slug or f"{film.title.casefold()}:{film.year or ''}"
+        if key in seen:
+            continue
+        if film in favorites or film.director in directors:
+            selected.append(film)
+            seen.add(key)
+    return selected or watched
+
+
+def build_taste_profile(
+    watched: list[EnrichedFilm], favorites: list[EnrichedFilm] | None = None
+) -> TasteProfileSnapshot:
+    """Build durable archive metrics and a Fav 4/director-led taste reading."""
+    profile = _build_taste_profile(watched)
+    if not favorites:
+        return profile
+
+    # Keep the full archive's sample size, rating coverage and top-director
+    # deck. Only the user-facing genre/theme prose is intentionally focused.
+    signal = taste_analysis_signal(watched, favorites)
+    focused = _build_taste_profile(signal)
+    profile.summary = focused.summary
+    profile.top_genres = focused.top_genres
+    profile.top_keywords = focused.top_keywords
+    profile.analysis = focused.analysis
+    return profile
 
 
 def taste_source_fingerprint(profile, watched: list[EnrichedFilm]) -> str:

@@ -63,7 +63,6 @@ def rank_watchlist(
     n: int = 8,
     favorite_directors: list[str] | None = None,
     director_boost: float = 0.08,
-    favorite_slugs: list[str] | set[str] | None = None,
     favorite_four_slugs: list[str] | set[str] | None = None,
 ) -> list[EnrichedFilm]:
     """Watchlist filmlerini izleme geçmişine benzerliğe göre sırala.
@@ -115,14 +114,9 @@ def rank_watchlist(
         np.clip((2.5 - ratings) / 2.5, 0.0, 1.0),
     )
 
-    # Explicit picks are a stronger preference signal than a passive watch.
-    # Fav 4 deliberately carries more weight than the wider, curated Top 10.
-    favorite_set = {slug for slug in (favorite_slugs or []) if slug}
+    # Fav 4 is an explicit preference signal stronger than a passive watch.
     favorite_four_set = {slug for slug in (favorite_four_slugs or []) if slug}
     for index, film in enumerate(watched):
-        if film.slug in favorite_set:
-            positive_weights[index] = max(positive_weights[index], 1.0) * 2.0
-            negative_weights[index] = 0.0
         if film.slug in favorite_four_set:
             positive_weights[index] = max(positive_weights[index], 1.0) * 2.0
             negative_weights[index] = 0.0
@@ -155,10 +149,10 @@ def rank_watchlist(
     if semantic_scores is not None and semantic_coverage >= 0.20:
         scores = 0.72 * scores + 0.28 * semantic_scores
 
-    # Add a bounded direct affinity bonus. This keeps the recent 100 films as
-    # the profile base while allowing explicit favorites to decide close calls.
+    # Add a bounded direct affinity bonus. This keeps the recent history as
+    # the profile base while allowing Fav 4 to decide close calls.
     favorite_indices = [
-        index for index, film in enumerate(watched) if film.slug in favorite_set
+        index for index, film in enumerate(watched) if film.slug in favorite_four_set
     ]
     favorite_four_indices = [
         index for index, film in enumerate(watched)
