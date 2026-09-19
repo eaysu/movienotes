@@ -1725,17 +1725,19 @@ async def password_reset_finish(
 
 
 async def _profile_sync_status(account: Account, service) -> dict | None:
-    """Read/resume one sync job without loading the complete profile snapshot."""
+    """Read/resume an unfinished first sync without opening a new crawl.
+
+    A profile page is opened frequently, especially from an installed app.
+    It may resume a genuinely interrupted initial full import, but must never
+    turn a normal visit into another Letterboxd crawl just because the daily
+    incremental check is due.
+    """
     job = await asyncio.to_thread(service.get_sync_job, account.id)
     if not profile_sync.is_running(account.id):
-        if profile_sync.job_is_resumable(job):
+        if job and job.get("scope") == "full" and profile_sync.job_is_resumable(job):
             # Resume-on-visit: a job whose lease/heartbeat went stale after a
-            # process restart is picked up without reloading the full profile.
+            # process restart is picked up without losing onboarding progress.
             profile_sync.start(_SyncPipeline(get_settings()), service, account)
-        elif profile_sync.incremental_due(job):
-            job = await profile_sync.ensure_started(
-                _SyncPipeline(get_settings()), service, account, scope="incremental"
-            )
     return profile_sync.progress_of(job)
 
 
@@ -2629,9 +2631,18 @@ async def _provisional_profile_sync(
     background crawl. Doing a separate 250-film scrape here duplicated the
     first pages and delayed the moment that the exhaustive crawl could start.
     """
+    # A failed incremental job records its temporary scope as "incremental".
+    # Do not mistake that bookkeeping row for a brand-new account and replace
+    # a real, durable film archive with a zero-film bootstrap snapshot.
+    stored = await asyncio.to_thread(service.get_profile, account)
+    stored_count = await asyncio.to_thread(service.count_watched_films, account.id)
+    if stored_count:
+        stored["account"] = account.__dict__
+        stored.setdefault("letterboxd_stats", account.letterboxd_stats or {})
+        return stored
+
     await asyncio.to_thread(service.mark_sync_status, account.id, "syncing")
     try:
-        stored = await asyncio.to_thread(service.get_profile, account)
         stored_taste = stored.get("taste") or {}
         # A profile page is a single small request and is the source of truth
         # for Fav 4. Never bootstrap a new account from an old DB copy.
@@ -3372,7 +3383,9 @@ def _watchlist_head_matches(cached_rows: list[dict], head: list[ScrapedFilm]) ->
     return bool(expected) and actual == expected[:len(actual)] and len(actual) == len(expected)
 
 
-async def _check_profile_watchlist_freshness(account: Account, settings, service) -> dict:
+async def _check_profile_watchlist_freshness(
+    account: Account, settings, service, *, request: Request | None = None
+) -> dict:
     """Check one cheap page and start a full refresh only when it is needed."""
     supabase_client, cache = _make_cache(settings)
     pcache = _make_persistent_cache(settings, supabase_client)
@@ -3395,6 +3408,10 @@ async def _check_profile_watchlist_freshness(account: Account, settings, service
 
     empty = False
     try:
+        # A cached head check costs no Letterboxd request and must not consume
+        # the member's heavy-request budget on every PWA resume.
+        if request is not None:
+            await _enforce_heavy_rate_limit(request)
         head, _complete = await scrape_watchlist(
             account.username,
             delay=0,
@@ -3477,11 +3494,12 @@ async def _check_profile_watchlist_freshness(account: Account, settings, service
 async def check_my_watchlist(request: Request) -> dict:
     """Non-blocking entry check: one Letterboxd page, full crawl only on change."""
     _require_csrf(request)
-    await _enforce_heavy_rate_limit(request)
     account = await _require_account(request)
     service = _auth_service()
     try:
-        result = await _check_profile_watchlist_freshness(account, get_settings(), service)
+        result = await _check_profile_watchlist_freshness(
+            account, get_settings(), service, request=request
+        )
         await _record_activity_event(
             service,
             account,
@@ -3516,7 +3534,6 @@ async def sync_my_profile(
     refresh_watchlist: bool = False,
 ) -> dict:
     _require_csrf(request)
-    await _enforce_heavy_rate_limit(request)
     account = await _require_account(request)
     settings = get_settings()
     service = _auth_service()
@@ -3540,15 +3557,13 @@ async def sync_my_profile(
     except Exception:
         full_sync_available = False
 
-    # Once the full history has been crawled once, never regress to the 100-film
-    # in-request pass — serve the stored snapshot and self-heal if it fell behind.
+    # Once film rows exist, never regress to the empty in-request bootstrap.
+    # An incremental job can fail with scope="incremental" after Letterboxd
+    # blocks a request, even though the completed archive is safely stored.
     if full_sync_available and not force:
         job = await asyncio.to_thread(service.get_sync_job, account.id)
-        crawled = int(job.get("films_processed") or 0) if job else 0
-        already_swept = bool(
-            job and job.get("scope") == "full" and crawled >= 100
-        )
-        if already_swept:
+        stored_count = await asyncio.to_thread(service.count_watched_films, account.id)
+        if stored_count:
             # A completed diary crawl must not freeze Fav 4 forever. This is
             # only one profile-page request, not another history scrape.
             refreshed = await _refresh_profile_favorites(account, settings, service)
@@ -3558,29 +3573,16 @@ async def sync_my_profile(
                     _refresh_profile_watchlist_background(account, settings, service)
                 )
                 stored["watchlist_refreshing"] = True
-            with contextlib.suppress(Exception):
-                swept_total = await asyncio.to_thread(
-                    service.count_watched_films, account.id
-                )
-                sample = int((stored.get("taste") or {}).get("sample_size") or 0)
-                snapshot_behind = swept_total and sample < swept_total * 0.9
-                if (
-                    not profile_sync.is_running(account.id)
-                    and (
-                        snapshot_behind
-                        or job.get("state") != "done"
-                        or profile_sync.job_is_resumable(job)
-                        or profile_sync.incremental_due(job)
-                    )
-                ):
-                    job = await profile_sync.ensure_started(
-                        _SyncPipeline(settings), service, account, scope="incremental"
-                    )
+            # Do not launch a daily incremental crawl from a button press or
+            # a returning-device bootstrap. The archive remains available if
+            # Letterboxd is rate-limiting us; a future explicit refresh can
+            # safely schedule work after the upstream recovers.
             stored["sync_job"] = profile_sync.progress_of(job)
             with contextlib.suppress(Exception):
                 await asyncio.to_thread(service.mark_sync_status, account.id, "ready")
             return stored
 
+    await _enforce_heavy_rate_limit(request)
     refreshed_watchlist_count: int | None = None
     if refresh_watchlist:
         try:

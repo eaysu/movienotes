@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, patch
 
 from app.auth import Account
 from app.enrich import EnrichedFilm
+from starlette.requests import Request
 from app.main import (
     _add_random_reasons,
     _diary_recent_rows,
@@ -282,19 +283,25 @@ class ProductBehaviorTests(unittest.TestCase):
 
         cache = FakeCache()
         scrape = AsyncMock()
+        heavy_limit = AsyncMock()
+        request = Request({"type": "http", "method": "POST", "path": "/api/profile/watchlist/check"})
         with (
             patch("app.main._make_cache", return_value=(None, object())),
             patch("app.main._make_persistent_cache", return_value=cache),
             patch("app.main.scrape_watchlist", new=scrape),
+            patch("app.main._enforce_heavy_rate_limit", new=heavy_limit),
         ):
             result = asyncio.run(
-                _check_profile_watchlist_freshness(account, settings, SimpleNamespace())
+                _check_profile_watchlist_freshness(
+                    account, settings, SimpleNamespace(), request=request
+                )
             )
 
         self.assertEqual(result, {"status": "deferred", "changed": False})
         self.assertEqual(cache.last_get[:2], ("watchlist_head_check", "film_fan"))
         self.assertEqual(cache.last_get[2], 30 * 60)
         scrape.assert_not_awaited()
+        heavy_limit.assert_not_awaited()
 
 
 if __name__ == "__main__":

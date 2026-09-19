@@ -277,6 +277,91 @@ def test_login_sets_http_only_session_and_readable_csrf_cookies():
     assert "HttpOnly" not in csrf and "Secure" in csrf
 
 
+def test_existing_film_archive_is_never_replaced_by_an_empty_bootstrap_snapshot():
+    """A failed incremental job must not make a mature account look new."""
+    account = _account()
+    saved = {
+        "taste": {"sample_size": 564, "algorithm_version": "taste-v3"},
+        "favorite_films": [{"slug": "a-film", "title": "A Film"}],
+    }
+    fake_service = SimpleNamespace(
+        get_profile=lambda _account: dict(saved),
+        count_watched_films=lambda _uid: 564,
+    )
+    scrape = AsyncMock()
+    with patch("app.main.scrape_profile", new=scrape):
+        restored = asyncio.run(
+            main._provisional_profile_sync(account, _settings(), fake_service, force=False)
+        )
+
+    assert restored["taste"]["sample_size"] == 564
+    assert restored["account"]["username"] == "film_fan"
+    scrape.assert_not_awaited()
+
+
+def test_existing_archive_sync_skips_heavy_limit_and_does_not_restart_incremental_crawl():
+    account = _account()
+    stored = {
+        "taste": {"sample_size": 564, "algorithm_version": "taste-v3"},
+        "favorite_films": [],
+    }
+    job = {
+        "state": "failed", "phase": "aggregate", "scope": "incremental",
+        "films_processed": 0, "films_total": 0,
+    }
+    fake_service = SimpleNamespace(
+        current_account=lambda _token: account,
+        check_schema=lambda: True,
+        check_sync_schema=lambda: True,
+        get_sync_job=lambda _uid: job,
+        count_watched_films=lambda _uid: 564,
+        mark_sync_status=lambda *_args: None,
+    )
+    favorite_refresh = AsyncMock(return_value={"changed": False, "profile": dict(stored)})
+    provisional = AsyncMock()
+    heavy_limit = AsyncMock()
+    with (
+        patch("app.main.get_settings", return_value=_settings()),
+        patch("app.main._auth_service", return_value=fake_service),
+        patch("app.main._refresh_profile_favorites", new=favorite_refresh),
+        patch("app.main._provisional_profile_sync", new=provisional),
+        patch("app.main._enforce_heavy_rate_limit", new=heavy_limit),
+        TestClient(main.app, base_url="https://testserver") as client,
+    ):
+        response = client.post(
+            "/api/profile/sync",
+            headers={
+                "Cookie": "mb_access=existing-archive-token; mb_csrf=csrf-token",
+                "X-CSRF-Token": "csrf-token",
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.json()["taste"]["sample_size"] == 564
+    favorite_refresh.assert_awaited_once()
+    provisional.assert_not_awaited()
+    heavy_limit.assert_not_awaited()
+
+
+def test_profile_visit_does_not_start_a_daily_incremental_scrape():
+    account = _account()
+    job = {
+        "state": "done", "phase": "done", "scope": "full",
+        "films_processed": 564, "films_total": 564,
+    }
+    fake_service = SimpleNamespace(get_sync_job=lambda _uid: job)
+    starter = AsyncMock()
+    with (
+        patch("app.main.profile_sync.is_running", return_value=False),
+        patch("app.main.profile_sync.incremental_due", return_value=True),
+        patch("app.main.profile_sync.ensure_started", new=starter),
+    ):
+        status = asyncio.run(main._profile_sync_status(account, fake_service))
+
+    assert status["scope"] == "full"
+    starter.assert_not_awaited()
+
+
 def test_auth_me_restores_a_remembered_device_without_a_readable_csrf_cookie():
     """A cold installed PWA must enter the app from its durable cookie alone."""
     session = AuthSession(
