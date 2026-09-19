@@ -1,5 +1,5 @@
 import { escapeHTML, safeImageURL, letterboxdFilmURL } from './dom.js?v=20260902.15';
-import { t } from './i18n.js?v=20260920.4';
+import { t } from './i18n.js?v=20260920.5';
 
 export function createRecommendationCards() {
 // Make a poster clickable through to its Letterboxd page.
@@ -33,11 +33,19 @@ function whyBlock(film) {
 // thumbnail beside the title rather than a full-bleed image above it: identity
 // on the top row, then the genres and the reasoning that earn the scroll-free
 // decision.
-function buildPickCard(film, { badge, extraMeta = '' } = {}) {
+function buildPickCard(film, { badge } = {}) {
   const title = escapeHTML(film.title);
   const director = escapeHTML(film.director);
   const year = escapeHTML(film.year);
   const posterURL = safeImageURL(film.poster_url);
+  // The crowd's average is part of deciding on a pick, so it belongs to every
+  // single-film card rather than only the random one.
+  const rating = film.vote_average && film.vote_average > 0
+    ? `<div class="mt-1.5 flex items-center gap-1 text-on-surface-variant/70">
+         <span class="material-symbols-outlined text-[14px] text-primary-container" style="font-variation-settings:'FILL' 1">star</span>
+         <span class="font-label-md text-label-md">${film.vote_average.toFixed(1)}</span>
+       </div>`
+    : '';
   const genres = (film.genres || []).slice(0, 4).map(g =>
     `<span class="px-2.5 py-1 rounded-full bg-surface-variant text-on-surface-variant font-label-sm text-label-sm border border-outline-variant/20">${escapeHTML(g)}</span>`
   ).join('');
@@ -61,7 +69,7 @@ function buildPickCard(film, { badge, extraMeta = '' } = {}) {
           <h3 class="font-headline-md text-[20px] leading-tight text-on-surface break-words">${title}</h3>
           ${film.director ? `<div class="mt-1.5 font-label-md text-label-md text-tertiary-container break-words">${director}</div>` : ''}
           ${film.year ? `<div class="mt-0.5 font-label-sm text-label-sm text-on-surface-variant/60">${year}</div>` : ''}
-          ${extraMeta}
+          ${rating}
         </div>
       </div>
       ${genres ? `<div class="flex flex-wrap gap-1.5">${genres}</div>` : ''}
@@ -117,17 +125,10 @@ function buildAltCard(film, idx) {
 
 // ── Random card builder ────────────────────────────────────────────────────
 function buildRandomCard(film) {
-  const rating = film.vote_average && film.vote_average > 0
-    ? `<div class="mt-1.5 flex items-center gap-1 text-on-surface-variant/60">
-         <span class="material-symbols-outlined text-[14px]" style="font-variation-settings:'FILL' 1">star</span>
-         <span class="font-label-md text-label-md">${film.vote_average.toFixed(1)}</span>
-       </div>`
-    : '';
   return buildPickCard(film, {
     badge: `<div class="absolute top-1.5 left-1.5 px-1.5 py-0.5 rounded-full bg-tertiary-container/90 backdrop-blur-sm">
           <span class="material-symbols-outlined text-on-tertiary-container" style="font-size:14px;font-variation-settings:'FILL' 1">shuffle</span>
         </div>`,
-    extraMeta: rating,
   });
 }
 

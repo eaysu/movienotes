@@ -12,7 +12,7 @@ from dataclasses import asdict, dataclass, field
 
 from .enrich import EnrichedFilm
 
-TASTE_PROFILE_VERSION = "taste-v4-fav4-directors"
+TASTE_PROFILE_VERSION = "taste-v5-fav4-top5-directors"
 
 # Recency half-life in "films watched ago". With the full watched history now
 # feeding the profile, a flat linear taper is meaningless across thousands of
@@ -366,6 +366,9 @@ def _build_taste_profile(watched: list[EnrichedFilm]) -> TasteProfileSnapshot:
     )
 
 
+TASTE_SIGNAL_DIRECTORS = 5
+
+
 def taste_analysis_signal(
     watched: list[EnrichedFilm], favorites: list[EnrichedFilm] | None = None
 ) -> list[EnrichedFilm]:
@@ -388,7 +391,7 @@ def taste_analysis_signal(
         name
         for name, _count in sorted(
             counts.items(), key=lambda item: (-item[1], item[0].casefold())
-        )[:3]
+        )[:TASTE_SIGNAL_DIRECTORS]
     }
     selected: list[EnrichedFilm] = []
     seen: set[str] = set()

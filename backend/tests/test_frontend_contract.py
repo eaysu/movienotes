@@ -462,6 +462,28 @@ def test_one_recommendation_fits_a_screen_without_scrolling():
     # Both single-pick surfaces share it, so neither can drift back to a hero.
     assert "md:w-[260px]" not in reco_js
     assert "return buildPickCard(film" in reco_js
+    # The crowd average belongs to every pick, not just the random one, so it
+    # is read inside the shared builder rather than injected by one caller.
+    assert "film.vote_average" in card
+    assert "film.vote_average" not in reco_js.split("function buildRandomCard", 1)[1]
+    assert "extraMeta" not in reco_js
+
+
+def test_the_random_result_fits_one_screen_with_both_next_steps():
+    """Asked for: keep the pool note, drop the "keep spinning" line, and keep
+    both buttons visible without scrolling."""
+    app_js = (FRONTEND / "js" / "app.js").read_text()
+
+    render = app_js.split("function renderInlineRandom", 1)[1].split(
+        "function _randomPoolNote", 1
+    )[0]
+    assert "Beğenmezsen çevirmeye devam et" not in app_js
+    assert "_randomPoolNote(data)" in render
+    # One row, so neither next step drops off the bottom on a phone.
+    assert 'class="mt-3 grid grid-cols-2 gap-2"' in render
+    assert "grid-cols-1 sm:grid-cols-2" not in render
+    assert 'id="profile-reco-reroll"' in render
+    assert 'id="profile-reco-totaste"' in render
 
 
 def test_profile_follow_lists_are_dialogs_and_stay_out_of_the_share_card():
@@ -937,9 +959,9 @@ def test_shell_asset_content_changes_force_a_version_bump():
     files that no longer existed.
     """
     expected = {
-        "js/app.js": "4629b96c7a2419682e32ddc33674d01e2d1b79dd0797f37e03979f0f7052720a",
-        "app.css": "3e846bd9a23e413698dae4bd3d43bf9d3157b3e1ac4b2043ed2fdc9d97f7fd42",
-        "js/share-cards.js": "7ef8f74c7d8ff8dd28da65d75675cff38d68deb4e8e5ec342b8e0b585e4b70b9",
+        "js/app.js": "526cb862bda8b3c6b06f57a1f6c83c4c278e94f856b965a69927fe2807e0d85a",
+        "app.css": "90063713545255c89ab85a9bfd44c790c10b4bf46e2f0a29ae4f3fcaca7299b9",
+        "js/share-cards.js": "4d2274d5be0fb0a85826deb351d7e0adcf9fe73714f7f6818cc91687e2ab4ad7",
         "js/i18n.js": "d4eab4d2f6dc01ded277e1c39d15dc0818d2baa15dc49f51a57a19da83e70ba1",
         "site.webmanifest": "7a7de349179ed9f226d38632dfde5a8478edd10305972ea52641b0dc6aa7f405",
         "movienotes-mark.png": "850aa9117aa52768952843f8e2c410c0c17868877d81b2058274290373b4ee1e",
@@ -976,24 +998,24 @@ def test_every_app_shell_asset_has_an_explicit_immutable_version():
     source_css = (FRONTEND / "css" / "source.css").read_text()
 
     dependency_version = "v=20260902.15"
-    api_version = "v=20260920.4"
-    css_version = "v=20260920.4"
+    api_version = "v=20260920.5"
+    css_version = "v=20260920.5"
     assert f"/static/app.css?{css_version}" in html
-    assert "/static/js/app.js?v=20260920.4" in html
-    assert "./i18n.js?v=20260920.4" in app_js
+    assert "/static/js/app.js?v=20260920.5" in html
+    assert "./i18n.js?v=20260920.5" in app_js
     assert app_js.count(f"?{dependency_version}") == 2
     assert f"./api.js?{api_version}" in app_js
-    assert "./recommendations.js?v=20260920.4" in app_js
-    assert "./share-cards.js?v=20260920.4" in app_js
-    assert "./auth.js?v=20260920.4" in app_js
+    assert "./recommendations.js?v=20260920.5" in app_js
+    assert "./share-cards.js?v=20260920.5" in app_js
+    assert "./auth.js?v=20260920.5" in app_js
     assert f"./dom.js?{dependency_version}" in auth_js
-    assert "./i18n.js?v=20260920.4" in auth_js
+    assert "./i18n.js?v=20260920.5" in auth_js
     assert f"./dom.js?{dependency_version}" in profile_js
-    assert "./i18n.js?v=20260920.4" in profile_js
+    assert "./i18n.js?v=20260920.5" in profile_js
     assert f"./dom.js?{dependency_version}" in recommendations_js
-    assert "./i18n.js?v=20260920.4" in recommendations_js
+    assert "./i18n.js?v=20260920.5" in recommendations_js
     assert f"./api.js?{api_version}" in share_js
-    assert "./i18n.js?v=20260920.4" in share_js
+    assert "./i18n.js?v=20260920.5" in share_js
     assert f"criterion-closet-bg.jpg?{dependency_version}" in source_css
 
 
@@ -1063,7 +1085,7 @@ def test_png_share_renderer_is_lazy_loaded_on_first_share_action():
 
     imports = app_js.split("// ── Cinema facts", 1)[0]
     assert "from './share-cards.js" not in imports
-    assert "import('./share-cards.js?v=20260920.4')" in imports
+    assert "import('./share-cards.js?v=20260920.5')" in imports
     assert "const shareCards = await loadShareCardsModule();" in app_js
 
 

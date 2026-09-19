@@ -86,9 +86,10 @@ class TasteProfileTests(unittest.TestCase):
         self.assertEqual(profile.favorite_director, "First")
         # A single watched film is not a "favorite director".
         self.assertNotIn("Once Only", profile.top_directors)
-        self.assertEqual(profile.algorithm_version, "taste-v4-fav4-directors")
+        self.assertEqual(profile.algorithm_version, "taste-v5-fav4-top5-directors")
 
-    def test_fav4_and_most_watched_directors_define_the_analysis_signal(self):
+    def test_fav4_and_the_five_most_watched_directors_define_the_analysis_signal(self):
+        # Six directors, so the sixth is genuinely outside the top five.
         watched = [
             EnrichedFilm(title="A1", slug="a1", director="Frequent A", genres=["Drama"]),
             EnrichedFilm(title="A2", slug="a2", director="Frequent A", genres=["Drama"]),
@@ -96,6 +97,11 @@ class TasteProfileTests(unittest.TestCase):
             EnrichedFilm(title="B1", slug="b1", director="Frequent B", genres=["Mystery"]),
             EnrichedFilm(title="B2", slug="b2", director="Frequent B", genres=["Mystery"]),
             EnrichedFilm(title="C1", slug="c1", director="Frequent C", genres=["Crime"]),
+            EnrichedFilm(title="C2", slug="c2", director="Frequent C", genres=["Crime"]),
+            EnrichedFilm(title="D1", slug="d1", director="Frequent D", genres=["Western"]),
+            EnrichedFilm(title="D2", slug="d2", director="Frequent D", genres=["Western"]),
+            EnrichedFilm(title="E1", slug="e1", director="Frequent E", genres=["Comedy"]),
+            EnrichedFilm(title="E2", slug="e2", director="Frequent E", genres=["Comedy"]),
             EnrichedFilm(title="Incidental", slug="incidental", director="One-Off", genres=["Horror"]),
         ]
         favorites = [
@@ -103,11 +109,18 @@ class TasteProfileTests(unittest.TestCase):
         ]
 
         signal = taste_analysis_signal(watched, favorites)
-        self.assertEqual({film.slug for film in signal}, {"favorite", "a1", "a2", "a3", "b1", "b2", "c1"})
+        self.assertEqual(
+            {film.slug for film in signal},
+            {"favorite", "a1", "a2", "a3", "b1", "b2", "c1", "c2", "d1", "d2", "e1", "e2"},
+        )
+        # The single incidental watch stays out of the prose's source.
+        self.assertNotIn("incidental", {film.slug for film in signal})
 
         profile = build_taste_profile(watched, favorites)
-        self.assertIn("Romance", profile.top_genres)
+        # The incidental watch shapes neither the genres nor the prose…
         self.assertNotIn("Horror", profile.top_genres)
+        # …but the archive, not the focused signal, still owns the counts.
+        self.assertEqual(profile.sample_size, len(watched))
 
     def test_directors_ranked_by_watch_count_then_average_rating(self):
         watched = (

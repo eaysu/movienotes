@@ -8,24 +8,24 @@ import {
   finishApiRequest,
   scrapeErrorMessage,
   streamErrorMessage,
-} from './api.js?v=20260920.4';
+} from './api.js?v=20260920.5';
 import {
   cookieValue,
   csrfHeaders,
   setAuthMessage,
   setAuthMode,
   setPasswordVisibility,
-} from './auth.js?v=20260920.4';
-import { directorAvatar, directorFilmGrid, directorFilmTile } from './profile.js?v=20260920.4';
+} from './auth.js?v=20260920.5';
+import { directorAvatar, directorFilmGrid, directorFilmTile } from './profile.js?v=20260920.5';
 import { animateScore, getScoreInfo } from './blend.js?v=20260902.15';
-import { createRecommendationCards } from './recommendations.js?v=20260920.4';
+import { createRecommendationCards } from './recommendations.js?v=20260920.5';
 import {
   getLocale,
   initI18n,
   localePreference,
   setLocalePreference,
   t,
-} from './i18n.js?v=20260920.4';
+} from './i18n.js?v=20260920.5';
 
 initI18n();
 
@@ -34,7 +34,7 @@ const uiLocale = () => (getLocale() === 'en' ? 'en-US' : 'tr-TR');
 let _shareCardsModule;
 function loadShareCardsModule() {
   if (!_shareCardsModule) {
-    _shareCardsModule = import('./share-cards.js?v=20260920.4');
+    _shareCardsModule = import('./share-cards.js?v=20260920.5');
   }
   return _shareCardsModule;
 }
@@ -668,11 +668,11 @@ function _showTasteReco(index) {
   $('profile-reco-body').innerHTML = `
     ${_discoverNote(o.discover)}
     <div class="line-rise reco-swipe" data-reco-swipe>${buildHeroCard(o.pool[i])}</div>
-    <p class="mt-2 text-center font-label-sm text-label-sm text-on-surface-variant/45 sm:hidden">Kartı sağa sola kaydır</p>
-    <div class="mt-4 flex items-center justify-between gap-3">
-      <button type="button" data-taste-nav="-1" ${i === 0 ? 'disabled' : ''} class="w-10 h-10 rounded-full border border-outline-variant/30 text-on-surface-variant hover:text-on-surface disabled:opacity-25 flex items-center justify-center transition-colors"><span class="material-symbols-outlined text-[20px]">chevron_left</span></button>
+    <p class="mt-1.5 text-center font-label-sm text-label-sm text-on-surface-variant/45 sm:hidden">Kartı sağa sola kaydır</p>
+    <div class="mt-2.5 flex items-center justify-between gap-3">
+      <button type="button" data-taste-nav="-1" ${i === 0 ? 'disabled' : ''} class="w-9 h-9 rounded-full border border-outline-variant/30 text-on-surface-variant hover:text-on-surface disabled:opacity-25 flex items-center justify-center transition-colors"><span class="material-symbols-outlined text-[20px]">chevron_left</span></button>
       <span class="font-label-sm text-label-sm uppercase tracking-wide text-on-surface-variant/60">${i + 1} / ${o.pool.length}</span>
-      <button type="button" data-taste-nav="1" ${i === o.pool.length - 1 ? 'disabled' : ''} class="w-10 h-10 rounded-full border border-outline-variant/30 text-on-surface-variant hover:text-on-surface disabled:opacity-25 flex items-center justify-center transition-colors"><span class="material-symbols-outlined text-[20px]">chevron_right</span></button>
+      <button type="button" data-taste-nav="1" ${i === o.pool.length - 1 ? 'disabled' : ''} class="w-9 h-9 rounded-full border border-outline-variant/30 text-on-surface-variant hover:text-on-surface disabled:opacity-25 flex items-center justify-center transition-colors"><span class="material-symbols-outlined text-[20px]">chevron_right</span></button>
     </div>
     ${i === o.pool.length - 1 ? _toRandomBtn(o.pool.length) : ''}
     ${_recoResetBtn()}`;
@@ -691,20 +691,21 @@ function renderInlineRandom(data) {
     $('profile-reco-body').innerHTML = `<div class="rounded-xl px-4 py-3 bg-error-container/30 text-error font-body-md text-body-md">Film bulunamadı.</div>${_recoResetBtn()}`;
     return;
   }
+  // One screen, no scrolling: the pool note explains where the pick came from
+  // and both next steps stay on one row beneath the card.
   $('profile-reco-body').innerHTML = `
     ${_randomPoolNote(data)}
-    <p class="mb-4 font-body-md text-body-md text-on-surface-variant">🎬 Beğenmezsen çevirmeye devam et — hak sınırı yok.</p>
     <div class="line-rise">${buildRandomCard(films[0])}</div>
-    <div class="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
-      <button type="button" id="profile-reco-reroll" class="flex items-center justify-center gap-2 rounded-xl border border-secondary-container/30 bg-secondary-container/10 py-3 font-label-md text-label-md uppercase tracking-wide text-secondary-container hover:bg-secondary-container/20 transition-colors"><span class="material-symbols-outlined text-[18px]">casino</span>Başka bir tane</button>
-      <button type="button" id="profile-reco-totaste" class="flex items-center justify-center gap-2 rounded-xl border border-primary-container/30 bg-primary-container/10 py-3 font-label-md text-label-md uppercase tracking-wide text-primary-container hover:bg-primary-container/20 transition-colors"><span class="material-symbols-outlined text-[18px]">psychology</span>Zevkime göre öner</button>
+    <div class="mt-3 grid grid-cols-2 gap-2">
+      <button type="button" id="profile-reco-reroll" class="flex items-center justify-center gap-1.5 rounded-xl border border-secondary-container/30 bg-secondary-container/10 px-2 py-2.5 text-center font-label-md text-label-md uppercase tracking-wide text-secondary-container hover:bg-secondary-container/20 transition-colors"><span class="material-symbols-outlined text-[18px] shrink-0">casino</span>Başka bir tane</button>
+      <button type="button" id="profile-reco-totaste" class="flex items-center justify-center gap-1.5 rounded-xl border border-primary-container/30 bg-primary-container/10 px-2 py-2.5 text-center font-label-md text-label-md uppercase tracking-wide text-primary-container hover:bg-primary-container/20 transition-colors"><span class="material-symbols-outlined text-[18px] shrink-0">psychology</span>Zevkime göre öner</button>
     </div>`;
 }
 
 function _randomPoolNote(data) {
   return data.discover_fallback
-    ? `<div class="mb-4 rounded-xl border border-tertiary-container/30 bg-tertiary-container/10 px-4 py-3 font-body-md text-body-md text-tertiary-container">Topluluk havuzu henüz yeterli değil — bunu TMDb'den, izlemediğin filmler arasından seçtik.</div>`
-    : `<div class="mb-4 rounded-xl border border-outline-variant/25 bg-surface-variant/40 px-4 py-3 font-body-md text-body-md text-on-surface-variant">Diğer Movienotes üyelerinin izlediği, senin izlemediğin filmler arasından.</div>`;
+    ? `<div class="mb-3 rounded-xl border border-tertiary-container/30 bg-tertiary-container/10 px-3 py-2 font-label-sm text-label-sm leading-relaxed text-tertiary-container">Topluluk havuzu henüz yeterli değil — bunu TMDb'den, izlemediğin filmler arasından seçtik.</div>`
+    : `<div class="mb-3 rounded-xl border border-outline-variant/25 bg-surface-variant/40 px-3 py-2 font-label-sm text-label-sm leading-relaxed text-on-surface-variant">Diğer Movienotes üyelerinin izlediği, senin izlemediğin filmler arasından.</div>`;
 }
 
 function runProfileWatch() {
