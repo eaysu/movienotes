@@ -48,6 +48,12 @@ class Settings(BaseSettings):
     # bypass. The route also refuses any caller that is not on this machine.
     dev_login_enabled: bool = False
     dev_login_password: str = "movienotes-dev-only"
+    # Runs the app against an in-memory stand-in for the database: any public
+    # Letterboxd name signs straight in, nothing is written anywhere, and the
+    # session dies with the process. Started by `python -m scripts.sandbox`,
+    # which also points DATA_DIR at a temporary folder it removes on exit.
+    # Never set this in a deployed environment: it has no passwords at all.
+    sandbox_mode: bool = False
 
     # --- Sinema gündemi (bülten) ---
     # Ships dark: the release layer and the venue framework are inert until this
@@ -133,7 +139,9 @@ class Settings(BaseSettings):
 
     @property
     def has_auth(self) -> bool:
-        return bool(
+        # The sandbox has accounts, just nowhere to keep them. The shell reads
+        # this to decide whether to show the sign-in screen at all.
+        return bool(self.sandbox_mode) or bool(
             self.has_supabase
             and self.supabase_anon_key.strip()
             and self.auth_identity_secret.strip()

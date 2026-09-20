@@ -29,7 +29,7 @@
 <link rel="manifest" href="/static/site.webmanifest?v=20260910.6"/>
 <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Geist:wght@400;500;600;700&display=swap" rel="stylesheet"/>
-<link rel="stylesheet" href="/static/app.css?v=20260920.16"/>
+<link rel="stylesheet" href="/static/app.css?v=20260920.17"/>
 </head>
 <body class="is-booting bg-surface-container-lowest text-on-surface min-h-screen flex flex-col selection:bg-primary-container selection:text-on-primary-container">
 
@@ -336,6 +336,15 @@
       <p class="font-body-md text-body-md text-on-surface-variant mt-2">Yalnızca Letterboxd kullanıcı adın yeterli. Verilerini kendi doğrudan scraper’ımızla okuyoruz.</p>
       <p class="mt-3 rounded-lg border border-tertiary-container/20 bg-tertiary-container/10 px-3 py-2 font-label-sm text-label-sm leading-relaxed text-on-surface-variant"><strong class="text-tertiary-container">Önemli:</strong> Bu parola yalnızca Movienotes hesabın için. Letterboxd parolanı burada kullanma; biz onu hiçbir zaman istemeyiz.</p>
     </div>
+
+    <!-- Yerel deneme oturumu (python -m scripts.sandbox). Parola yok, kayıt
+         yok: yazılan Letterboxd adı taranır, veriler yalnızca sunucu ayakta
+         kaldığı sürece bellekte durur. Yayında bu panel hiç açılmaz. -->
+    <form id="sandbox-form" class="hidden flex-col gap-3">
+      <p class="rounded-lg border border-tertiary-container/25 bg-tertiary-container/10 px-3 py-2 font-label-sm text-label-sm leading-relaxed text-on-surface-variant"><strong class="text-tertiary-container">Deneme oturumu:</strong> herhangi bir herkese açık Letterboxd adını yaz. Parola sorulmaz, hiçbir şey kaydedilmez; scripti kapattığında tüm veriler silinir.</p>
+      <input id="sandbox-username" class="auth-input w-full rounded-lg bg-surface border-outline-variant/30 text-on-surface py-3.5 px-4" placeholder="Letterboxd kullanıcı adı" autocomplete="off" autocapitalize="none" spellcheck="false" required/>
+      <button id="btn-sandbox" class="w-full bg-primary-container text-black py-3.5 rounded-lg font-label-md text-label-md uppercase tracking-wider disabled:opacity-40">Profili tara</button>
+    </form>
 
     <div id="auth-tabs" class="grid grid-cols-2 gap-2 mb-5">
       <button id="auth-tab-login" class="py-2.5 rounded-lg bg-primary-container text-black font-label-md text-label-md uppercase">Giriş</button>
@@ -1372,6 +1381,6 @@
   </div>
 </footer>
 
-<script type="module" src="/static/js/app.js?v=20260920.16"></script>
+<script type="module" src="/static/js/app.js?v=20260920.17"></script>
 </body>
 </html>

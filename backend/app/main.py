@@ -42,6 +42,7 @@ from .auth import (
     AccountExistsError,
     AuthError,
     AuthService,
+    AuthSession,
     BlendServiceError,
     InvalidCredentialsError,
     OwnershipPendingError,
@@ -55,6 +56,7 @@ from .enrich import Enricher, EnrichedFilm, close_tmdb_client
 from .llm import analyze_taste, rank_candidates
 from .recommender import rank_watchlist
 from .rate_limit import SlidingWindowRateLimiter
+from .sandbox import SandboxAuthService
 from .scraper import (
     AccessBlockedError,
     _scrape_watched_rss,
@@ -371,7 +373,14 @@ def _auth_service():
         return _auth_service_instance
     with _auth_service_lock:
         if _auth_service_instance is None or _auth_service_settings_id != settings_id:
-            _auth_service_instance = AuthService(settings)
+            # The sandbox swaps the whole storage layer for dictionaries. Doing
+            # it here means every route, the sync pipeline and the recommender
+            # run their real code against a store that dies with the process.
+            _auth_service_instance = (
+                SandboxAuthService()
+                if getattr(settings, "sandbox_mode", False)
+                else AuthService(settings)
+            )
             _auth_service_settings_id = settings_id
     return _auth_service_instance
 
@@ -1295,6 +1304,12 @@ class LoginRequest(_UsernameRequest):
     remember: bool = True
 
 
+class SandboxSessionRequest(_UsernameRequest):
+    """A Letterboxd name and nothing else: the sandbox has no passwords."""
+
+    username: str
+
+
 class PasswordResetStartRequest(_UsernameRequest):
     username: str
 
@@ -1461,6 +1476,9 @@ def health() -> dict:
         "supabase_enabled": settings.has_supabase,
         "auth_enabled": getattr(settings, "has_auth", False),
         "web_push_enabled": settings.has_web_push,
+        # The shell reads this to drop the password fields: there is no account
+        # to protect, and asking for a password nobody set would be theatre.
+        "sandbox": bool(getattr(settings, "sandbox_mode", False)),
     }
 
 
@@ -1704,6 +1722,52 @@ async def register_verify(
         "account": account.__dict__,
         "logged_in": session is not None,
     }
+
+
+if get_settings().sandbox_mode:  # pragma: no cover - local tooling only
+    log.warning(
+        "SANDBOX MODE — /api/sandbox/session signs in as any public Letterboxd "
+        "profile with no password, and nothing is written to a database. This "
+        "must never be set in a deployed environment."
+    )
+
+    @app.post("/api/sandbox/session")
+    async def sandbox_session(
+        req: SandboxSessionRequest, request: Request, response: Response
+    ) -> dict:
+        """Adopt any public Letterboxd profile for one throwaway session.
+
+        There is no password because there is no account: the name is scraped,
+        the result is held in memory, and closing the process is the delete.
+        The route refuses a caller that is not on this machine, so a stray flag
+        on a deployed host still cannot be reached from outside it.
+        """
+        client = request.client.host if request.client else ""
+        if client not in ("127.0.0.1", "::1", "localhost", "testclient"):
+            raise HTTPException(status_code=404, detail="Not found")
+        service = _auth_service()
+        if not isinstance(service, SandboxAuthService):
+            raise HTTPException(status_code=404, detail="Not found")
+        try:
+            profile = await scrape_profile(
+                req.username,
+                max_retries=get_settings().scrape_max_retries,
+                resolve_posters=False,
+            )
+        except ScrapeError as exc:
+            _raise_scrape_http(exc)
+        account, token = await asyncio.to_thread(service.open_session, profile)
+        _set_session_cookies(
+            response,
+            AuthSession(
+                account=account,
+                access_token=token,
+                refresh_token=token,
+                expires_in=60 * 60 * 24,
+            ),
+            remember=False,
+        )
+        return {"ok": True, "account": account.__dict__, "sandbox": True}
 
 
 @app.post("/api/auth/login")

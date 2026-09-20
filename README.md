@@ -99,6 +99,27 @@ PYTHONPATH=backend uvicorn app.main:app --reload
 
 http://localhost:8000
 
+### Deneme oturumu (sandbox)
+
+Onboarding'i herhangi bir Letterboxd profili üzerinde, hiçbir şey saklamadan
+izlemek için:
+
+```bash
+python -m scripts.sandbox                 # http://127.0.0.1:8765
+python -m scripts.sandbox --port 9000
+python -m scripts.sandbox --keep-cache    # taramaları çalıştırmalar arasında koru
+```
+
+Giriş ekranı yalnızca bir Letterboxd adı sorar — parola yok, çünkü ortada hesap
+yok. Yazılan ad gerçek scraper ile taranır, gerçek onboarding oynar, arka plan
+arşiv taraması gerçekten çalışır; tek fark her şeyin bellekte durması.
+Supabase'e hiç bağlanılmaz (`.env`'den yalnızca TMDb/OpenAI anahtarları
+okunur), `DATA_DIR` geçici bir klasöre bakar ve Ctrl-C o klasörü siler. Yani
+depodaki `data/cache.sqlite3` bu oturumdan hiç etkilenmez.
+
+`SANDBOX_MODE` yayında **asla** açılmamalı: parola diye bir şey yok. Uç nokta
+ayrıca kendi makinesi dışından gelen çağrıyı 404 ile reddediyor.
+
 ### Yerel geliştirme
 
 Kayıt, herkese açık bir Letterboxd bio'suna kod yazmayı gerektiriyor: üretimde

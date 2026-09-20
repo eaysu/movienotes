@@ -8,24 +8,24 @@ import {
   finishApiRequest,
   scrapeErrorMessage,
   streamErrorMessage,
-} from './api.js?v=20260920.16';
+} from './api.js?v=20260920.17';
 import {
   cookieValue,
   csrfHeaders,
   setAuthMessage,
   setAuthMode,
   setPasswordVisibility,
-} from './auth.js?v=20260920.16';
-import { directorAvatar, directorFilmGrid, directorFilmTile } from './profile.js?v=20260920.16';
+} from './auth.js?v=20260920.17';
+import { directorAvatar, directorFilmGrid, directorFilmTile } from './profile.js?v=20260920.17';
 import { animateScore, getScoreInfo } from './blend.js?v=20260902.15';
-import { createRecommendationCards } from './recommendations.js?v=20260920.16';
+import { createRecommendationCards } from './recommendations.js?v=20260920.17';
 import {
   getLocale,
   initI18n,
   localePreference,
   setLocalePreference,
   t,
-} from './i18n.js?v=20260920.16';
+} from './i18n.js?v=20260920.17';
 
 initI18n();
 
@@ -34,7 +34,7 @@ const uiLocale = () => (getLocale() === 'en' ? 'en-US' : 'tr-TR');
 let _shareCardsModule;
 function loadShareCardsModule() {
   if (!_shareCardsModule) {
-    _shareCardsModule = import('./share-cards.js?v=20260920.16');
+    _shareCardsModule = import('./share-cards.js?v=20260920.17');
   }
   return _shareCardsModule;
 }
@@ -1403,6 +1403,8 @@ async function loadPublicStats() {
 
 // ── Account & persisted profile ───────────────────────────────────────────
 let _authEnabled = false;
+// Yerel deneme oturumu: parola yok, kayıt yok, kapanınca veri yok.
+let _sandbox = false;
 let _account = null;
 let _persistedProfile = null;
 let _lastUnreadNotificationCount = null;
@@ -4517,11 +4519,13 @@ async function boot() {
     apiJSON('/api/auth/me', { cache: 'no-store' }).catch(() => null),
   ]);
   _authEnabled = Boolean(health?.auth_enabled);
+  _sandbox = Boolean(health?.sandbox);
   if (!_authEnabled) { showView('idle'); loadPublicStats(); return; }
   if (me?.account) {
     enterApp(me.account);
     return;
   }
+  if (_sandbox) { setAuthMode('sandbox'); showView('auth'); return; }
   // apiJSON normally repairs an expired access token itself. Keep this small
   // fallback for a browser that loaded an older shell just before it updated.
   if (cookieValue('mb_csrf')) {
@@ -5522,6 +5526,31 @@ async function verifyRegistration() {
   }
 }
 
+// Deneme oturumu: yazılan ad taranır ve o profil bu oturumun kimliği olur.
+// Kayıt akışının aynısı oynar — onboarding dahil — tek fark hiçbir şeyin
+// saklanmaması. Tarama uzun sürebildiği için bekleme mesajı da aynı.
+async function startSandboxSession(event) {
+  event.preventDefault();
+  const button = $('btn-sandbox');
+  button.disabled = true;
+  const clearReassurance = _scrapeWaitReassurance('Letterboxd profili taranıyor…');
+  try {
+    const data = await apiJSON('/api/sandbox/session', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: $('sandbox-username').value.trim() }),
+    });
+    clearReassurance();
+    setAuthMessage(null);
+    enterApp(data.account, { fromRegistration: true });
+  } catch (error) {
+    setAuthMessage(error.message || 'Profil taranamadı.', true);
+  } finally {
+    clearReassurance();
+    button.disabled = false;
+  }
+}
+
 async function startPasswordReset() {
   const button = $('btn-reset-start');
   button.disabled = true;
@@ -5590,9 +5619,9 @@ async function logoutAccount() {
   $('username-input').value = '';
   renderBlendBadge(0);
   slideClose($('profile-settings-menu'));
-  setAuthMode('login');
+  setAuthMode(_sandbox ? 'sandbox' : 'login');
   showView('auth');
-  loadPublicStats();
+  if (!_sandbox) loadPublicStats();
 }
 
 function toggleProfileMenu(force) {
@@ -5617,6 +5646,7 @@ function openInfoDialog(id) {
 // ── Event listeners ────────────────────────────────────────────────────────
 $('login-form').addEventListener('submit', loginAccount);
 $('register-form').addEventListener('submit', startRegistration);
+$('sandbox-form').addEventListener('submit', startSandboxSession);
 $('auth-tab-login').addEventListener('click', () => setAuthMode('login'));
 $('auth-tab-register').addEventListener('click', () => setAuthMode('register'));
 $('btn-verify').addEventListener('click', verifyRegistration);

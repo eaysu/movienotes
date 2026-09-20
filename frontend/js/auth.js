@@ -1,5 +1,5 @@
 import { $ } from './dom.js?v=20260902.15';
-import { t, getLocale } from './i18n.js?v=20260920.16';
+import { t, getLocale } from './i18n.js?v=20260920.17';
 
 export function cookieValue(name) {
   const prefix = `${name}=`;
@@ -44,6 +44,22 @@ export function resetPasswordVisibility() {
 
 export function setAuthMode(mode) {
   resetPasswordVisibility();
+  // Deneme oturumunda hesap diye bir şey yok: giriş/kayıt sekmeleri ve parola
+  // alanları tamamen kapanır, geriye tek bir kullanıcı adı kutusu kalır.
+  if (mode === 'sandbox') {
+    const title = $('auth-title');
+    if (title) title.textContent = t('Bir Letterboxd profili dene');
+    for (const id of ['login-form', 'register-form', 'verify-panel', 'reset-panel', 'auth-tabs']) {
+      $(id).classList.add('hidden');
+      $(id).classList.remove('flex');
+    }
+    $('sandbox-form').classList.remove('hidden');
+    $('sandbox-form').classList.add('flex');
+    setAuthMessage(null);
+    return;
+  }
+  $('sandbox-form').classList.add('hidden');
+  $('sandbox-form').classList.remove('flex');
   const login = mode === 'login';
   const title = $('auth-title');
   if (title) title.textContent = t(login ? 'Movienotes’a giriş yap' : 'Movienotes’da hesap oluştur');
