@@ -8,24 +8,24 @@ import {
   finishApiRequest,
   scrapeErrorMessage,
   streamErrorMessage,
-} from './api.js?v=20260920.9';
+} from './api.js?v=20260920.10';
 import {
   cookieValue,
   csrfHeaders,
   setAuthMessage,
   setAuthMode,
   setPasswordVisibility,
-} from './auth.js?v=20260920.9';
-import { directorAvatar, directorFilmGrid, directorFilmTile } from './profile.js?v=20260920.9';
+} from './auth.js?v=20260920.10';
+import { directorAvatar, directorFilmGrid, directorFilmTile } from './profile.js?v=20260920.10';
 import { animateScore, getScoreInfo } from './blend.js?v=20260902.15';
-import { createRecommendationCards } from './recommendations.js?v=20260920.9';
+import { createRecommendationCards } from './recommendations.js?v=20260920.10';
 import {
   getLocale,
   initI18n,
   localePreference,
   setLocalePreference,
   t,
-} from './i18n.js?v=20260920.9';
+} from './i18n.js?v=20260920.10';
 
 initI18n();
 
@@ -34,7 +34,7 @@ const uiLocale = () => (getLocale() === 'en' ? 'en-US' : 'tr-TR');
 let _shareCardsModule;
 function loadShareCardsModule() {
   if (!_shareCardsModule) {
-    _shareCardsModule = import('./share-cards.js?v=20260920.9');
+    _shareCardsModule = import('./share-cards.js?v=20260920.10');
   }
   return _shareCardsModule;
 }
@@ -2189,7 +2189,7 @@ function userHeaderMarkup(profile) {
   return `<div class="rounded-2xl border border-outline-variant/25 bg-surface-container/60 p-5">
     <div class="flex items-start gap-4">
       ${avatar
-        ? `<img src="${avatar}" alt="" class="h-20 w-20 shrink-0 rounded-full object-cover border border-outline-variant/30"/>`
+        ? `<img src="${avatar}" data-avatar-zoom alt="" class="h-20 w-20 shrink-0 rounded-full object-cover border border-outline-variant/30"/>`
         : `<div class="flex h-20 w-20 shrink-0 items-center justify-center rounded-full bg-surface-container text-2xl font-bold text-primary-container">${name[0] || '?'}</div>`}
       <div class="min-w-0 flex-1">
         <div class="flex items-start justify-between gap-3">
@@ -3158,7 +3158,7 @@ function renderLetterConversation(username = _openLetterThread) {
   const details = group.items.map(({ item, payload }) => letterCard(item, payload)).join('');
   // No second back arrow in here: the page's own top bar becomes "back to
   // letters" while a correspondence is open.
-  panel.innerHTML = `<div class="flex flex-col"><header class="flex items-center gap-3 border-b border-outline-variant/20 px-4 py-4"><span class="shrink-0">${peerAvatar(peer)}</span><span class="min-w-0 flex-1"><strong class="block truncate text-on-surface">${name}</strong><span class="block truncate text-xs text-on-surface-variant">@${usernameLabel} · ${group.items.length} mektup</span></span></header><div class="flex-1 space-y-3 p-4">${details}</div><div class="border-t border-outline-variant/20 p-4">${letterReplyBar(peer)}</div></div>`;
+  panel.innerHTML = `<div class="flex flex-col"><header class="flex items-center gap-3 border-b border-outline-variant/20 px-4 py-4"><span class="shrink-0">${peerAvatar(peer, { zoom: true })}</span><span class="min-w-0 flex-1"><strong class="block truncate text-on-surface">${name}</strong><span class="block truncate text-xs text-on-surface-variant">@${usernameLabel} · ${group.items.length} mektup</span></span></header><div class="flex-1 space-y-3 p-4">${details}</div><div class="border-t border-outline-variant/20 p-4">${letterReplyBar(peer)}</div></div>`;
   $('letters-list').innerHTML = _letterThreads.map(letterThreadCard).join('');
   renderLetterWorkspace();
 }
@@ -3349,11 +3349,11 @@ async function sendLetter(event) {
   } finally { button.disabled = false; }
 }
 
-function peerAvatar(peer) {
+function peerAvatar(peer, { zoom = false } = {}) {
   const poster = safeImageURL(peer?.avatar_url);
   const name = escapeHTML(peer?.display_name || peer?.username || '?');
   return poster
-    ? `<img src="${poster}" alt="${name}" class="w-11 h-11 shrink-0 rounded-full object-cover border border-outline-variant/30"/>`
+    ? `<img src="${poster}"${zoom ? ' data-avatar-zoom' : ''} alt="${name}" class="w-11 h-11 shrink-0 rounded-full object-cover border border-outline-variant/30"/>`
     : `<div class="w-11 h-11 shrink-0 rounded-full bg-surface-container flex items-center justify-center text-primary-container font-bold">${name[0] || '?'}</div>`;
 }
 
@@ -5415,6 +5415,29 @@ $('header-how-it-works').addEventListener('click', () => openInfoDialog('dialog-
 $('header-privacy').addEventListener('click', () => openInfoDialog('dialog-privacy'));
 document.querySelectorAll('[data-close-dialog]').forEach(button => {
   button.addEventListener('click', () => $(button.dataset.closeDialog)?.close());
+});
+// A portrait is 44–118px everywhere it appears, which is too small to actually
+// look at. Delegated, so avatars rendered later open the same way; only the
+// ones marked zoomable respond, leaving list avatars as navigation taps.
+document.addEventListener('click', event => {
+  const avatar = event.target.closest('[data-avatar-zoom]');
+  if (!avatar) return;
+  // The resolved property, not safeImageURL: that helper HTML-escapes for
+  // markup, and an escaped "&" would break an avatar URL's query string once
+  // assigned straight to .src.
+  const source = avatar.currentSrc || avatar.src || '';
+  if (!source.startsWith('https://')) return;
+  event.preventDefault();
+  const image = $('avatar-zoom-image');
+  image.src = source;
+  image.alt = avatar.alt || t('Profil fotoğrafı');
+  $('dialog-avatar').showModal();
+});
+$('dialog-avatar').addEventListener('click', event => {
+  // The backdrop and the padding around the portrait both dismiss it.
+  if (event.target.closest('[data-close-dialog]') || !event.target.closest('img')) {
+    $('dialog-avatar').close();
+  }
 });
 [$('dialog-how-it-works'), $('dialog-privacy'), $('dialog-share'), $('dialog-png-share'), $('dialog-letter-help'), $('dialog-letter-compose'), $('dialog-letter-followers'), $('dialog-install-app'), $('dialog-blocked-users'), $('dialog-profile-follows')].forEach(dialog => {
   dialog.addEventListener('click', event => {

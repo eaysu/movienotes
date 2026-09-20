@@ -665,6 +665,36 @@ def test_the_feed_header_gave_back_its_height():
     assert "padding: .57rem" in tab
 
 
+def test_a_profile_portrait_can_be_opened_full_size():
+    """Asked for: tapping a member's photo should show the photo.
+
+    Portraits render between 44px and 118px everywhere, which is too small to
+    actually look at.
+    """
+    html = (FRONTEND / "index.html").read_text()
+    app_js = (FRONTEND / "js" / "app.js").read_text()
+    css = (FRONTEND / "css" / "source.css").read_text()
+
+    assert 'id="dialog-avatar"' in html
+    assert 'id="avatar-zoom-image"' in html
+    assert ".avatar-zoom-dialog" in css
+    assert "[data-avatar-zoom] { cursor: zoom-in; }" in css
+
+    # Both own-profile portraits and both Blend portraits opt in.
+    for element_id in ("profile-avatar", "m-profile-avatar", "br-avatar1", "br-avatar2"):
+        assert f'id="{element_id}" data-avatar-zoom' in html, element_id
+    # …as does another member's page, and a correspondence header.
+    assert app_js.count("data-avatar-zoom") >= 2
+    assert "peerAvatar(peer, { zoom: true })" in app_js
+
+    handler = app_js.split("const avatar = event.target.closest('[data-avatar-zoom]')", 1)[1]
+    # Resolved property, not the escaping markup helper: an escaped "&" would
+    # break an avatar URL's query string.
+    assert "avatar.currentSrc || avatar.src" in handler
+    assert "safeImageURL(avatar" not in app_js
+    assert "$('dialog-avatar').showModal();" in handler
+
+
 def test_profile_follow_lists_are_dialogs_and_stay_out_of_the_share_card():
     html = (FRONTEND / "index.html").read_text()
     app_js = (FRONTEND / "js" / "app.js").read_text()
@@ -1141,10 +1171,10 @@ def test_shell_asset_content_changes_force_a_version_bump():
     files that no longer existed.
     """
     expected = {
-        "js/app.js": "5bbdf089ee2c929860100e5adb8f6c0ef5f5254e1272343b0962069021b3452f",
-        "app.css": "8d28f8cefefa89eb36f834742974d0b38ea51bf6969f495305f05845e4bfc3c1",
-        "js/share-cards.js": "0f5cf3bc807af23f2176004d08cb8a86492f28f0acc1ee38dfaaa2da9548c5c9",
-        "js/i18n.js": "de3fd6a7a1b08612a1373c3edf81c0d3e1a696fb81492660d8a239194e9527c1",
+        "js/app.js": "ace2138b32da86fe5ad6a4de5f119f6ab69692bc126426b1d422078e3c1c9c47",
+        "app.css": "db96869e3616ad61ca67a158133b4c332ac1ef55436fa78808ce6b8dad9e7598",
+        "js/share-cards.js": "163f8ea9e1f356292588b27d31a5430793e8c2c092356fa536b64ee8abe6933b",
+        "js/i18n.js": "515343c0d3770fbd64d3046ece28477b3c50f583b5339a517730f253c7df0968",
         "site.webmanifest": "7a7de349179ed9f226d38632dfde5a8478edd10305972ea52641b0dc6aa7f405",
         "movienotes-mark.png": "850aa9117aa52768952843f8e2c410c0c17868877d81b2058274290373b4ee1e",
         "movienotes-icon-192.png": "3b04c52ffd23799ce424f1acefd0a1d7c386b8c968b09be9bd5c87b623c6ac12",
@@ -1180,24 +1210,24 @@ def test_every_app_shell_asset_has_an_explicit_immutable_version():
     source_css = (FRONTEND / "css" / "source.css").read_text()
 
     dependency_version = "v=20260902.15"
-    api_version = "v=20260920.9"
-    css_version = "v=20260920.9"
+    api_version = "v=20260920.10"
+    css_version = "v=20260920.10"
     assert f"/static/app.css?{css_version}" in html
-    assert "/static/js/app.js?v=20260920.9" in html
-    assert "./i18n.js?v=20260920.9" in app_js
+    assert "/static/js/app.js?v=20260920.10" in html
+    assert "./i18n.js?v=20260920.10" in app_js
     assert app_js.count(f"?{dependency_version}") == 2
     assert f"./api.js?{api_version}" in app_js
-    assert "./recommendations.js?v=20260920.9" in app_js
-    assert "./share-cards.js?v=20260920.9" in app_js
-    assert "./auth.js?v=20260920.9" in app_js
+    assert "./recommendations.js?v=20260920.10" in app_js
+    assert "./share-cards.js?v=20260920.10" in app_js
+    assert "./auth.js?v=20260920.10" in app_js
     assert f"./dom.js?{dependency_version}" in auth_js
-    assert "./i18n.js?v=20260920.9" in auth_js
+    assert "./i18n.js?v=20260920.10" in auth_js
     assert f"./dom.js?{dependency_version}" in profile_js
-    assert "./i18n.js?v=20260920.9" in profile_js
+    assert "./i18n.js?v=20260920.10" in profile_js
     assert f"./dom.js?{dependency_version}" in recommendations_js
-    assert "./i18n.js?v=20260920.9" in recommendations_js
+    assert "./i18n.js?v=20260920.10" in recommendations_js
     assert f"./api.js?{api_version}" in share_js
-    assert "./i18n.js?v=20260920.9" in share_js
+    assert "./i18n.js?v=20260920.10" in share_js
     assert f"criterion-closet-bg.jpg?{dependency_version}" in source_css
 
 
@@ -1267,7 +1297,7 @@ def test_png_share_renderer_is_lazy_loaded_on_first_share_action():
 
     imports = app_js.split("// ── Cinema facts", 1)[0]
     assert "from './share-cards.js" not in imports
-    assert "import('./share-cards.js?v=20260920.9')" in imports
+    assert "import('./share-cards.js?v=20260920.10')" in imports
     assert "const shareCards = await loadShareCardsModule();" in app_js
 
 

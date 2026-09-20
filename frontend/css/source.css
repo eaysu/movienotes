@@ -258,6 +258,22 @@
   .sinefil-profile-dialog {
     width: min(94vw, 760px);
   }
+  /* Profil fotoğrafı büyütme: avatar listelerde 44px, burada ekran kadar. */
+  .avatar-zoom-dialog {
+    width: min(92vw, 520px);
+    max-height: calc(100dvh - 32px);
+    margin: auto;
+    padding: 0;
+    background: transparent;
+    border: 0;
+  }
+  .avatar-zoom-dialog::backdrop {
+    background: rgba(0, 0, 0, 0.82);
+    backdrop-filter: blur(6px);
+  }
+  /* Büyütülebilen avatarın tıklanabilir olduğu görünsün. */
+  [data-avatar-zoom] { cursor: zoom-in; }
+
   .auth-info-dialog::backdrop {
     background: rgba(0, 0, 0, 0.72);
     backdrop-filter: blur(5px);
