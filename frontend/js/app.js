@@ -8,24 +8,24 @@ import {
   finishApiRequest,
   scrapeErrorMessage,
   streamErrorMessage,
-} from './api.js?v=20260920.13';
+} from './api.js?v=20260920.14';
 import {
   cookieValue,
   csrfHeaders,
   setAuthMessage,
   setAuthMode,
   setPasswordVisibility,
-} from './auth.js?v=20260920.13';
-import { directorAvatar, directorFilmGrid, directorFilmTile } from './profile.js?v=20260920.13';
+} from './auth.js?v=20260920.14';
+import { directorAvatar, directorFilmGrid, directorFilmTile } from './profile.js?v=20260920.14';
 import { animateScore, getScoreInfo } from './blend.js?v=20260902.15';
-import { createRecommendationCards } from './recommendations.js?v=20260920.13';
+import { createRecommendationCards } from './recommendations.js?v=20260920.14';
 import {
   getLocale,
   initI18n,
   localePreference,
   setLocalePreference,
   t,
-} from './i18n.js?v=20260920.13';
+} from './i18n.js?v=20260920.14';
 
 initI18n();
 
@@ -34,7 +34,7 @@ const uiLocale = () => (getLocale() === 'en' ? 'en-US' : 'tr-TR');
 let _shareCardsModule;
 function loadShareCardsModule() {
   if (!_shareCardsModule) {
-    _shareCardsModule = import('./share-cards.js?v=20260920.13');
+    _shareCardsModule = import('./share-cards.js?v=20260920.14');
   }
   return _shareCardsModule;
 }
@@ -58,6 +58,32 @@ function isIOS() {
     || (/Macintosh/.test(ua) && (navigator.maxTouchPoints || 0) > 1);
 }
 
+// Safari, iPhone'da da masaüstünde de `beforeinstallprompt` göndermiyor ve
+// kurulumu kendisi başlatamıyor. Chromium'un WebKit görünmesine aldanmamak
+// için Chrome/Edge/Opera imzaları ayıklanıyor.
+function isSafari() {
+  const ua = navigator.userAgent || '';
+  return /Safari/i.test(ua) && !/Chrome|Chromium|CriOS|Edg|OPR|Android/i.test(ua);
+}
+
+// Kurulumu tarayıcı başlatamıyorsa çağrı düğme değil, adım listesi olmalı.
+function needsManualInstall() {
+  return isIOS() || isSafari();
+}
+
+const MANUAL_INSTALL_STEPS = {
+  touch: [
+    'Alttaki <strong class="text-on-surface">Paylaş</strong> düğmesine dokun',
+    '<strong class="text-on-surface">Ana Ekrana Ekle</strong>’yi seç',
+    'Sağ üstten <strong class="text-on-surface">Ekle</strong>’ye bas',
+  ],
+  desktop: [
+    'Adres çubuğundaki <strong class="text-on-surface">Paylaş</strong> düğmesine tıkla',
+    '<strong class="text-on-surface">Dock’a Ekle</strong>’yi seç',
+    'Açılan pencerede <strong class="text-on-surface">Ekle</strong>’ye bas',
+  ],
+};
+
 // Kurulum çağrısının ne zaman kapatıldığı. iOS'ta "kuruldu" sinyali yok:
 // kullanıcı ana ekrana eklese bile Safari'de açtığında `standalone` false,
 // yani hatırlamazsak çağrı her girişte yeniden çıkardı.
@@ -79,21 +105,31 @@ function showInstallAppDialog() {
   // Onboarding kilitli bir tam ekran akış: Chrome `beforeinstallprompt`'u geç
   // gönderirse bu modal onun üstüne açılıyordu. Kurulum çağrısı bekleyebilir.
   if (_shownView === 'onboarding') return;
-  const ios = isIOS();
-  if (!ios && !_deferredInstallPrompt) return;
-  if (ios && iosHintSilenced()) return;
-  // iOS'ta kurulumu tarayıcı başlatamıyor: düğme yerine paylaş menüsü adımları.
-  $('install-ios-steps').classList.toggle('hidden', !ios);
-  $('btn-install-app').classList.toggle('hidden', ios);
-  $('btn-install-dismiss').textContent = ios ? 'Anladım' : 'Şimdi değil';
-  $('btn-install-dismiss').classList.toggle('flex-1', ios);
+  const manual = needsManualInstall();
+  if (!manual && !_deferredInstallPrompt) return;
+  // No "installed" signal exists without beforeinstallprompt, so a dismissal
+  // is the only way to know the member has seen the steps.
+  if (manual && iosHintSilenced()) return;
+  // Safari cannot start an install itself, on the phone or on the desktop:
+  // the call to action is the share-menu steps rather than a button.
+  $('install-ios-steps').classList.toggle('hidden', !manual);
+  $('btn-install-app').classList.toggle('hidden', manual);
+  $('btn-install-dismiss').textContent = manual ? 'Anladım' : 'Şimdi değil';
+  $('btn-install-dismiss').classList.toggle('flex-1', manual);
+  if (manual) {
+    const steps = MANUAL_INSTALL_STEPS[isIOS() ? 'touch' : 'desktop'];
+    document.querySelectorAll('[data-install-step]').forEach(node => {
+      const step = steps[Number(node.dataset.installStep) - 1];
+      if (step) node.innerHTML = step;
+    });
+  }
   dialog.showModal();
 }
 
 // Kapatıldığı an damgalanıyor: iOS'ta kurulumun gerçekleştiğini anlamanın bir
 // yolu yok, o yüzden "gördüm" bilgisini kullanıcının kapatması veriyor.
 $('dialog-install-app').addEventListener('close', () => {
-  if (!isIOS()) return;
+  if (!needsManualInstall()) return;
   try {
     localStorage.setItem(IOS_INSTALL_HINT_KEY, String(Date.now()));
   } catch (_) {
@@ -403,7 +439,8 @@ function openProfilePanel(which) {
     // with yesterday's cards stacked below the buttons. The stored pool still
     // backs paging and swiping within the run that produced it.
   }
-  if (blend) setTimeout(() => $('profile-blend-username').focus(), 40);
+  // No autofocus: arriving at Blends used to raise the phone keyboard over
+  // half the screen before the member had asked to type anything.
 }
 
 function mountQuickTools(hostId = 'quick-tools-host') {

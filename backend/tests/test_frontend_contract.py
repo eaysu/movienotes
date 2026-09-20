@@ -807,6 +807,57 @@ def test_the_phones_back_gesture_walks_the_app_instead_of_closing_it():
     assert "_routeRestoring = false;" not in restore
 
 
+def test_the_blend_field_waits_to_be_tapped():
+    """Asked for: arriving at Blends should not raise the keyboard."""
+    html = (FRONTEND / "index.html").read_text()
+    app_js = (FRONTEND / "js" / "app.js").read_text()
+
+    assert "$('profile-blend-username').focus()" not in app_js
+    field = html.split('id="profile-blend-username"', 1)[1].split(">", 1)[0]
+    assert 'placeholder="Blend yapacağın kullanıcının adını gir"' in field
+
+
+def test_safari_is_told_how_to_install_since_it_cannot_be_asked():
+    """Reported: Safari never offered the app.
+
+    Only iOS got the manual steps, so desktop Safari — which also never fires
+    beforeinstallprompt — fell through the guard and showed nothing.
+    """
+    app_js = (FRONTEND / "js" / "app.js").read_text()
+    html = (FRONTEND / "index.html").read_text()
+
+    assert "function isSafari" in app_js
+    assert "function needsManualInstall" in app_js
+    prompt = app_js.split("function showInstallAppDialog", 1)[1].split("}\n\n", 1)[0]
+    assert "const manual = needsManualInstall();" in prompt
+    assert "if (!manual && !_deferredInstallPrompt) return;" in prompt
+    # Wording follows the platform: a phone shares, a desktop adds to the Dock.
+    assert "MANUAL_INSTALL_STEPS" in app_js
+    assert "Dock’a Ekle" in app_js
+    assert html.count("data-install-step") == 3
+
+
+def test_the_shell_reserves_the_notch_and_the_home_indicator():
+    """Asked for: it has to look right on iOS as well as Android.
+
+    Every env(safe-area-inset-*) in the stylesheet was dead: without
+    viewport-fit=cover iOS reports them all as zero.
+    """
+    html = (FRONTEND / "index.html").read_text()
+    css = (FRONTEND / "css" / "source.css").read_text()
+
+    assert "viewport-fit=cover" in html
+    assert "#app-header { padding-top: env(safe-area-inset-top); }" in css
+    # Anything measured against the tab bar grows with the home indicator.
+    assert "padding-bottom: calc(4.5rem + env(safe-area-inset-bottom))" in css
+    assert "min-height: calc(100dvh - 4.5rem - env(safe-area-inset-bottom))" in css
+    fab = css.split("#btn-letter-compose-fab {", 1)[1].split("}", 1)[0]
+    assert "env(safe-area-inset-bottom)" in fab
+    # A hard pixel floor made every short screen scroll into empty space.
+    assert "max(884px, 100dvh)" not in css
+    assert "min-height: 100dvh;" in css
+
+
 def test_profile_follow_lists_are_dialogs_and_stay_out_of_the_share_card():
     html = (FRONTEND / "index.html").read_text()
     app_js = (FRONTEND / "js" / "app.js").read_text()
@@ -923,8 +974,9 @@ def test_a_shell_page_starts_at_its_top_and_does_not_scroll_for_nothing():
     # The fixed header is hidden inside the shell, so its reserved space goes.
     assert "body.has-shell #view-profile" in css
     assert "body.has-shell #view-blend-result { padding-top: .75rem; }" in css
-    # A full-height column plus the tab bar was always 4.5rem too tall.
-    assert ".shell-column { min-height: calc(100dvh - 4.5rem); }" in css
+    # A full-height column plus the tab bar was always 4.5rem too tall — and
+    # taller still on a phone with a home indicator.
+    assert ".shell-column { min-height: calc(100dvh - 4.5rem - env(safe-area-inset-bottom)); }" in css
     assert "min-h-screen border-outline-variant/20" not in html
     # And the site footer no longer stacks under the tab bar.
     footer = app_js.split("const NO_FOOTER_VIEWS = [", 1)[1].split("]", 1)[0]
@@ -1285,10 +1337,10 @@ def test_shell_asset_content_changes_force_a_version_bump():
     files that no longer existed.
     """
     expected = {
-        "js/app.js": "191572e41a02329fc17ded51b2e93c8c92ddce4394277f7b6dcb8451b7bc1f5b",
-        "app.css": "fa99484963ab265cc5a719990859fcfb3a984cd28b738ec22c36b0f0395b9d86",
-        "js/share-cards.js": "cb5d9195d5f1503feef2cf47183a1ee8235e7706d9928ff40b416a23ee9407b7",
-        "js/i18n.js": "515343c0d3770fbd64d3046ece28477b3c50f583b5339a517730f253c7df0968",
+        "js/app.js": "30d65202a8dcb568edca9b7817d49cb55a48a61b3ed1bff96b3aefbf1f0ab4ff",
+        "app.css": "7048bbb950ac7364044784479cb49a3cd98da657b2d157ebdd51b87f3816bced",
+        "js/share-cards.js": "66ed44559e9c5dda23489e9c224a7632f7836817713a22c19e46115870f096f4",
+        "js/i18n.js": "1cfd0bf7a828ba501c8f3c48b2041be8c9137fa6ddedd948fa5d06cbd2e66629",
         "site.webmanifest": "7a7de349179ed9f226d38632dfde5a8478edd10305972ea52641b0dc6aa7f405",
         "movienotes-mark.png": "850aa9117aa52768952843f8e2c410c0c17868877d81b2058274290373b4ee1e",
         "movienotes-icon-192.png": "3b04c52ffd23799ce424f1acefd0a1d7c386b8c968b09be9bd5c87b623c6ac12",
@@ -1324,24 +1376,24 @@ def test_every_app_shell_asset_has_an_explicit_immutable_version():
     source_css = (FRONTEND / "css" / "source.css").read_text()
 
     dependency_version = "v=20260902.15"
-    api_version = "v=20260920.13"
-    css_version = "v=20260920.13"
+    api_version = "v=20260920.14"
+    css_version = "v=20260920.14"
     assert f"/static/app.css?{css_version}" in html
-    assert "/static/js/app.js?v=20260920.13" in html
-    assert "./i18n.js?v=20260920.13" in app_js
+    assert "/static/js/app.js?v=20260920.14" in html
+    assert "./i18n.js?v=20260920.14" in app_js
     assert app_js.count(f"?{dependency_version}") == 2
     assert f"./api.js?{api_version}" in app_js
-    assert "./recommendations.js?v=20260920.13" in app_js
-    assert "./share-cards.js?v=20260920.13" in app_js
-    assert "./auth.js?v=20260920.13" in app_js
+    assert "./recommendations.js?v=20260920.14" in app_js
+    assert "./share-cards.js?v=20260920.14" in app_js
+    assert "./auth.js?v=20260920.14" in app_js
     assert f"./dom.js?{dependency_version}" in auth_js
-    assert "./i18n.js?v=20260920.13" in auth_js
+    assert "./i18n.js?v=20260920.14" in auth_js
     assert f"./dom.js?{dependency_version}" in profile_js
-    assert "./i18n.js?v=20260920.13" in profile_js
+    assert "./i18n.js?v=20260920.14" in profile_js
     assert f"./dom.js?{dependency_version}" in recommendations_js
-    assert "./i18n.js?v=20260920.13" in recommendations_js
+    assert "./i18n.js?v=20260920.14" in recommendations_js
     assert f"./api.js?{api_version}" in share_js
-    assert "./i18n.js?v=20260920.13" in share_js
+    assert "./i18n.js?v=20260920.14" in share_js
     assert f"criterion-closet-bg.jpg?{dependency_version}" in source_css
 
 
@@ -1411,7 +1463,7 @@ def test_png_share_renderer_is_lazy_loaded_on_first_share_action():
 
     imports = app_js.split("// ── Cinema facts", 1)[0]
     assert "from './share-cards.js" not in imports
-    assert "import('./share-cards.js?v=20260920.13')" in imports
+    assert "import('./share-cards.js?v=20260920.14')" in imports
     assert "const shareCards = await loadShareCardsModule();" in app_js
 
 
@@ -1546,21 +1598,24 @@ def test_iphone_gets_instructions_because_ios_cannot_install_by_itself():
     assert "/iPhone|iPad|iPod/i.test(ua)" in detect
     assert "navigator.maxTouchPoints" in detect
 
+    # Desktop Safari cannot be asked either, so the guard is about the
+    # capability now rather than the platform — see
+    # test_safari_is_told_how_to_install_since_it_cannot_be_asked.
     show = app_js.split("function showInstallAppDialog()", 1)[1].split("\n}", 1)[0]
-    assert "if (!ios && !_deferredInstallPrompt) return;" in show
-    assert "$('install-ios-steps').classList.toggle('hidden', !ios)" in show
-    assert "$('btn-install-app').classList.toggle('hidden', ios)" in show
+    assert "if (!manual && !_deferredInstallPrompt) return;" in show
+    assert "$('install-ios-steps').classList.toggle('hidden', !manual)" in show
+    assert "$('btn-install-app').classList.toggle('hidden', manual)" in show
 
     # Ana ekrana ekleme adımları, sırasıyla.
     steps = html.split('id="install-ios-steps"', 1)[1].split("</ol>", 1)[0]
     assert "Paylaş" in steps and "Ana Ekrana Ekle" in steps and "Ekle</strong>’ye bas" in steps
-    # Her adımın metni tek bir <span>: flex gap'i cümlenin ortasına girmesin.
-    assert steps.count("<span>") == 3
+    # Her adımın metni tek bir span: flex gap'i cümlenin ortasına girmesin.
+    assert steps.count("data-install-step=") == 3
 
     # iOS'ta "kuruldu" sinyali yok; kapatma hatırlanmazsa çağrı her girişte çıkar.
     assert "IOS_INSTALL_HINT_DAYS = 30" in app_js
     assert "localStorage.setItem(IOS_INSTALL_HINT_KEY" in app_js
-    assert "if (ios && iosHintSilenced()) return;" in show
+    assert "if (manual && iosHintSilenced()) return;" in show
 
 
 def test_a_pydantic_field_validation_error_surfaces_its_real_message():

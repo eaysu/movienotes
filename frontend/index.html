@@ -2,7 +2,7 @@
 <html class="dark" lang="tr">
 <head>
 <meta charset="UTF-8"/>
-<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"/>
 <title>Movienotes</title>
 <meta name="description" content="Watchlist'indeki en uygun filmi bul. Yapay zeka, izleme geçmişini analiz ederek bu akşam için mükemmel filmi seçiyor."/>
 <!-- Open Graph -->
@@ -29,7 +29,7 @@
 <link rel="manifest" href="/static/site.webmanifest?v=20260910.6"/>
 <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Geist:wght@400;500;600;700&display=swap" rel="stylesheet"/>
-<link rel="stylesheet" href="/static/app.css?v=20260920.13"/>
+<link rel="stylesheet" href="/static/app.css?v=20260920.14"/>
 </head>
 <body class="is-booting bg-surface-container-lowest text-on-surface min-h-screen flex flex-col selection:bg-primary-container selection:text-on-primary-container">
 
@@ -296,9 +296,9 @@
     <!-- iPhone/iPad'de kurulumu tarayıcı değil kullanıcı başlatıyor: WebKit
          programatik kuruluma izin vermiyor, o yüzden düğme yerine adımlar. -->
     <ol id="install-ios-steps" class="hidden mt-6 space-y-3 text-sm text-on-surface-variant">
-      <li class="flex items-center gap-3"><span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-surface-container-high text-primary-container"><span class="material-symbols-outlined text-[20px]">ios_share</span></span><span>Alttaki <strong class="text-on-surface">Paylaş</strong> düğmesine dokun</span></li>
-      <li class="flex items-center gap-3"><span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-surface-container-high text-primary-container"><span class="material-symbols-outlined text-[20px]">add_box</span></span><span><strong class="text-on-surface">Ana Ekrana Ekle</strong>’yi seç</span></li>
-      <li class="flex items-center gap-3"><span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-surface-container-high text-primary-container"><span class="material-symbols-outlined text-[20px]">check</span></span><span>Sağ üstten <strong class="text-on-surface">Ekle</strong>’ye bas</span></li>
+      <li class="flex items-center gap-3"><span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-surface-container-high text-primary-container"><span class="material-symbols-outlined text-[20px]">ios_share</span></span><span data-install-step="1">Alttaki <strong class="text-on-surface">Paylaş</strong> düğmesine dokun</span></li>
+      <li class="flex items-center gap-3"><span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-surface-container-high text-primary-container"><span class="material-symbols-outlined text-[20px]">add_box</span></span><span data-install-step="2"><strong class="text-on-surface">Ana Ekrana Ekle</strong>’yi seç</span></li>
+      <li class="flex items-center gap-3"><span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-surface-container-high text-primary-container"><span class="material-symbols-outlined text-[20px]">check</span></span><span data-install-step="3">Sağ üstten <strong class="text-on-surface">Ekle</strong>’ye bas</span></li>
     </ol>
     <div class="mt-6 flex gap-3"><button id="btn-install-app" type="button" class="flex-1 rounded-xl bg-primary-container px-4 py-3 font-label-md text-label-md uppercase tracking-wide text-on-primary-container">Uygulamayı yükle</button><button id="btn-install-dismiss" type="button" data-close-dialog="dialog-install-app" class="rounded-xl border border-outline-variant/30 px-4 py-3 font-label-md text-label-md uppercase tracking-wide text-on-surface-variant">Şimdi değil</button></div>
   </div>
@@ -655,7 +655,7 @@
         <div class="relative">
           <div class="flex rounded-xl border border-outline-variant/30 bg-surface focus-within:border-secondary-container/60 transition-colors">
             <span class="absolute left-4 top-1/2 -translate-y-1/2 text-secondary-container/40 pointer-events-none"><span class="material-symbols-outlined text-[20px]">person_add</span></span>
-            <input id="profile-blend-username" class="w-full bg-transparent border-none py-3.5 pl-12 pr-4 text-on-surface font-body-md text-body-md placeholder:text-on-surface-variant/40 focus:ring-0 outline-none" placeholder="ikinci letterboxd kullanıcı adı" type="text" autocomplete="off" spellcheck="false"/>
+            <input id="profile-blend-username" class="w-full bg-transparent border-none py-3.5 pl-12 pr-4 text-on-surface font-body-md text-body-md placeholder:text-on-surface-variant/40 focus:ring-0 outline-none" placeholder="Blend yapacağın kullanıcının adını gir" type="text" autocomplete="off" spellcheck="false"/>
           </div>
           <div id="profile-blend-suggestions" class="hidden absolute top-full inset-x-0 z-30 mt-1 rounded-xl overflow-hidden bg-surface-container border border-outline-variant/30 shadow-xl text-left"></div>
         </div>
@@ -1372,6 +1372,6 @@
   </div>
 </footer>
 
-<script type="module" src="/static/js/app.js?v=20260920.13"></script>
+<script type="module" src="/static/js/app.js?v=20260920.14"></script>
 </body>
 </html>

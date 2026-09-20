@@ -127,6 +127,7 @@ const EN = Object.freeze({
   'Sinefil profil kartım': 'My cinephile profile card',
   'Puanlamamış': 'No rating', 'Letterboxd’de aç': 'Open on Letterboxd',
   'Profil fotoğrafı': 'Profile photo',
+  'Blend yapacağın kullanıcının adını gir': 'Enter the username you want to Blend with',
   'İkinizin de izleme listesinde.': 'On both of your watchlists.', '@{username} · izleme geçmişim, Fav 4’üm ve hesap özetim': '@{username} · my viewing history, Fav 4 and account summary',
   'Son izlenen film listesi henüz hazır değil.': 'Your recent-films list is not ready yet.', 'GÜNCE · SON İZLENENLER': 'DIARY · RECENT FILMS',
   'Son {count} film': 'Last {count} films', '@{username} · Letterboxd güncesi': '@{username} · Letterboxd diary',

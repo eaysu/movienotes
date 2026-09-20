@@ -112,7 +112,7 @@
 
   body {
     font-family: 'Space Grotesk', 'Geist', sans-serif;
-    min-height: max(884px, 100dvh);
+    min-height: 100dvh;
     background-color: rgb(var(--color-surface-container-lowest));
   }
 
@@ -189,6 +189,30 @@
     position: relative;
     z-index: 10;
     padding-bottom: max(2rem, calc(1rem + env(safe-area-inset-bottom)));
+  }
+
+  /* ── Çentik ve ana ekran çubuğu ───────────────────────────────────────
+     `viewport-fit=cover` ile sayfa ekranın tamamına yayılıyor; sabit
+     duran her şey kendi güvenli alanını ayırmalı, yoksa üst çubuk çentiğin
+     altına, kayan düğme de ana ekran çizgisinin üstüne biniyor. */
+  #app-header { padding-top: env(safe-area-inset-top); }
+  #app-sidebar {
+    padding-top: calc(1.25rem + env(safe-area-inset-top));
+    padding-bottom: calc(1.25rem + env(safe-area-inset-bottom));
+    padding-left: calc(.75rem + env(safe-area-inset-left));
+  }
+  #btn-compose-fab,
+  #btn-letter-compose-fab {
+    bottom: calc(5rem + env(safe-area-inset-bottom));
+    right: calc(1rem + env(safe-area-inset-right));
+  }
+  /* Yan çentikler yatay modda içeriği kesmesin. Masaüstünde sol boşluk
+     kenar çubuğuna ayrıldığı için kural yalnızca dar ekranlarda geçerli. */
+  @media (orientation: landscape) and (max-width: 1023px) {
+    body.has-shell {
+      padding-left: env(safe-area-inset-left);
+      padding-right: env(safe-area-inset-right);
+    }
   }
 
   @media (max-width: 430px) {
@@ -613,7 +637,7 @@
   .tab-item.is-active .material-symbols-outlined { font-variation-settings: 'FILL' 1; }
 
   /* Kabuk açıkken içerik gezinmenin altına girmesin. */
-  body.has-shell { padding-bottom: 4.5rem; }
+  body.has-shell { padding-bottom: calc(4.5rem + env(safe-area-inset-bottom)); }
 
   /* Kabuk açıkken üstteki sabit başlık gizleniyor; onun için ayrılmış boşluk
      da kalkmalı, yoksa her sayfa bir başlık yüksekliği kadar aşağıdan
@@ -636,7 +660,7 @@
      erişilemez hale gelmez. */
   body.tools-fixed { overflow: hidden; }
   body.tools-fixed #view-tools {
-    height: calc(100dvh - 4.5rem);
+    height: calc(100dvh - 4.5rem - env(safe-area-inset-bottom));
     display: flex;
     flex-direction: column;
     overflow: hidden;
@@ -654,7 +678,7 @@
 
   /* Sütun yüksekliği tam ekran + alt çubuk olunca sayfa içerik kısa olsa bile
      kaydırılabiliyordu; çubuğun payını düşüyoruz. */
-  .shell-column { min-height: calc(100dvh - 4.5rem); }
+  .shell-column { min-height: calc(100dvh - 4.5rem - env(safe-area-inset-bottom)); }
   @media (min-width: 1024px) {
     .shell-column { min-height: 100dvh; }
   }
