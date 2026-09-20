@@ -61,6 +61,7 @@ from .scraper import (
     ScrapedProfile,
     ScrapeError,
     scrape_diary,
+    scrape_film_rating,
     scrape_reviewed_diary,
     scrape_films,
     scrape_profile,
@@ -858,11 +859,56 @@ def _recommendation_cache_key(
     return digest
 
 
+_letterboxd_rating_cache: dict[str, tuple[float, float | None]] = {}
+_LETTERBOXD_RATING_TTL = 24 * 60 * 60
+
+
+async def _attach_letterboxd_ratings(rows: list[dict]) -> None:
+    """Fill each row's ``letterboxd_rating`` — the community average out of 5.
+
+    TMDb's ``vote_average`` is a different crowd on a ten-point scale, so it is
+    not what a Letterboxd member means by "the rating". One page per film, kept
+    for a day in-process, and every failure is silent: a missing average simply
+    does not render.
+    """
+    targets = {
+        str(row.get("slug") or ""): row
+        for row in rows
+        if row.get("slug") and not row.get("letterboxd_rating")
+    }
+    targets.pop("", None)
+    if not targets:
+        return
+    now = time.time()
+
+    async def fill(slug: str, row: dict) -> None:
+        hit = _letterboxd_rating_cache.get(slug)
+        if hit and now - hit[0] < _LETTERBOXD_RATING_TTL:
+            row["letterboxd_rating"] = hit[1]
+            return
+        rating = None
+        with contextlib.suppress(Exception):
+            rating = await scrape_film_rating(slug)
+        _letterboxd_rating_cache[slug] = (now, rating)
+        row["letterboxd_rating"] = rating
+
+    await asyncio.gather(*(fill(slug, row) for slug, row in targets.items()))
+
+
 def _response_locale(account: Account | None, request: Request) -> str:
-    """Resolve account preference, otherwise use the requesting device locale."""
+    """Resolve account preference, else the language the shell is rendering in.
+
+    The shell's own choice is stored per device and an account may sit at
+    "auto" forever, so ``Accept-Language`` is not a stand-in for it: a browser
+    that asks for English first while the app renders Turkish used to get
+    English recommendation reasons. The client states its resolved locale.
+    """
     preferred = getattr(account, "preferred_locale", "auto")
     if preferred in {"tr", "en"}:
         return preferred
+    client = request.headers.get("x-movienotes-locale", "").strip().lower()
+    if client in {"tr", "en"}:
+        return client
     return "en" if request.headers.get("accept-language", "").lower().startswith("en") else "tr"
 
 
@@ -2717,7 +2763,9 @@ def _personality_refresh_needed(stored_snapshot: dict, favorites: list) -> bool:
     )
 
 
-async def _refresh_profile_favorites(account: Account, settings, service) -> dict:
+async def _refresh_profile_favorites(
+    account: Account, settings, service, *, locale: str | None = None
+) -> dict:
     """Fetch only the public profile page and immediately expose a changed Fav 4.
 
     This deliberately does *not* crawl the diary or watchlist. It keeps a
@@ -2771,7 +2819,7 @@ async def _refresh_profile_favorites(account: Account, settings, service) -> dic
     fresh["account"] = account.__dict__
     # New favourites are an explicit taste signal. Build the prose separately
     # so the tap that triggered refresh remains fast.
-    _schedule_favorite_taste_refresh(account, force_analysis=True)
+    _schedule_favorite_taste_refresh(account, force_analysis=True, locale=locale)
     return {"changed": True, "profile": fresh}
 
 
@@ -3253,6 +3301,7 @@ class _SyncPipeline:
         use_llm: bool = True,
         repair_all: bool = True,
         force_analysis: bool = False,
+        locale: str | None = None,
     ) -> int:
         service = _auth_service()
         rows = await asyncio.to_thread(service.get_watched_films, account.id)
@@ -3423,7 +3472,13 @@ class _SyncPipeline:
         source_changed = (
             stored_taste.get("source_fingerprint") != taste.source_fingerprint
         )
-        if not source_changed and stored_taste.get("analysis"):
+        # Carrying the stored prose forward saves an LLM call when nothing about
+        # the archive moved. A forced rebuild is the one case where it must not
+        # happen: the reason for forcing is that the prose itself is stale — a
+        # new algorithm version, or an edited Fav 4 — while the watched films
+        # behind the fingerprint are unchanged. Inheriting here is what kept
+        # members looking at their old analysis after every version bump.
+        if not force_analysis and not source_changed and stored_taste.get("analysis"):
             taste.analysis = stored_taste["analysis"]
 
         # A full first snapshot gets an LLM pass. Later passes only refresh the
@@ -3435,18 +3490,30 @@ class _SyncPipeline:
             force_analysis or source_changed or not stored_taste.get("analysis")
         )
         refresh_personality = _personality_refresh_needed(stored_snapshot, favorites)
+        taste.analysis_source = "local"
         if should_analyze:
             with contextlib.suppress(Exception):
                 extra = await analyze_taste(
                     self.settings,
                     taste_analysis_signal(watched, favorites),
                     favorites,
-                    locale="en" if account.preferred_locale == "en" else "tr",
+                    locale=locale
+                    or ("en" if account.preferred_locale == "en" else "tr"),
                 )
                 if extra.get("analysis"):
                     taste.analysis = extra["analysis"]
+                    taste.analysis_source = "llm"
                 if (refresh_personality or force_analysis) and extra.get("personality"):
                     taste.personality = extra["personality"]
+            if taste.analysis_source != "llm":
+                # The deterministic lines are still current for this version, so
+                # the member is never stuck on old text — but say so loudly,
+                # because silent LLM failures used to be invisible here.
+                log.warning(
+                    "taste analysis fell back to local prose account=%s has_openai=%s",
+                    account.id,
+                    self.settings.has_openai,
+                )
         if not refresh_personality and not force_analysis and stored_taste.get("personality"):
             taste.personality = stored_taste["personality"]
         await asyncio.to_thread(
@@ -3468,7 +3535,9 @@ async def _refresh_locale_taste(account: Account) -> None:
         log.warning("locale taste refresh failed account=%s", account.id, exc_info=True)
 
 
-async def _refresh_favorite_taste(account: Account, *, force_analysis: bool = False) -> None:
+async def _refresh_favorite_taste(
+    account: Account, *, force_analysis: bool = False, locale: str | None = None
+) -> None:
     """Regenerate the stored Fav 4 + director taste read off-request."""
     try:
         await _SyncPipeline(get_settings(), use_stored_profile=True).rebuild_snapshot(
@@ -3476,6 +3545,7 @@ async def _refresh_favorite_taste(account: Account, *, force_analysis: bool = Fa
             use_llm=True,
             repair_all=False,
             force_analysis=force_analysis,
+            locale=locale,
         )
     except Exception:  # noqa: BLE001 - favourites are already safely persisted
         log.warning("favorite taste refresh failed account=%s", account.id, exc_info=True)
@@ -3485,14 +3555,14 @@ _favorite_taste_refresh_tasks: dict[int, asyncio.Task] = {}
 
 
 def _schedule_favorite_taste_refresh(
-    account: Account, *, force_analysis: bool = False
+    account: Account, *, force_analysis: bool = False, locale: str | None = None
 ) -> None:
     """Coalesce duplicate profile-page refreshes for the same account."""
     active = _favorite_taste_refresh_tasks.get(account.id)
     if active is not None and not active.done():
         return
     task = asyncio.create_task(
-        _refresh_favorite_taste(account, force_analysis=force_analysis)
+        _refresh_favorite_taste(account, force_analysis=force_analysis, locale=locale)
     )
     _favorite_taste_refresh_tasks[account.id] = task
 
@@ -3728,6 +3798,8 @@ async def sync_my_profile(
     except Exception:
         full_sync_available = False
 
+    locale = _response_locale(account, request)
+
     # Once film rows exist, never regress to the empty in-request bootstrap.
     # An incremental job can fail with scope="incremental" after Letterboxd
     # blocks a request, even though the completed archive is safely stored.
@@ -3737,13 +3809,17 @@ async def sync_my_profile(
         if stored_count:
             # A completed diary crawl must not freeze Fav 4 forever. This is
             # only one profile-page request, not another history scrape.
-            refreshed = await _refresh_profile_favorites(account, settings, service)
+            refreshed = await _refresh_profile_favorites(
+                account, settings, service, locale=locale
+            )
             stored = refreshed["profile"]
-            # v4 changes the taste source from the whole archive to Fav 4 plus
-            # the most-watched directors. Rebuild it asynchronously: opening a
-            # profile must remain instant and never trigger another crawl.
+            # A snapshot written by an older algorithm is stale prose, however
+            # unchanged the archive behind it is. Rebuild it asynchronously:
+            # opening a profile must remain instant and never trigger a crawl.
             if (stored.get("taste") or {}).get("algorithm_version") != TASTE_PROFILE_VERSION:
-                _schedule_favorite_taste_refresh(account, force_analysis=True)
+                _schedule_favorite_taste_refresh(
+                    account, force_analysis=True, locale=locale
+                )
                 stored["taste_refreshing"] = True
             if refresh_watchlist:
                 asyncio.create_task(
@@ -5137,6 +5213,9 @@ async def recommend(req: RecommendRequest, request: Request):
                             "result_count": len(cached_recommendation.get("recommendations") or []),
                         },
                     )
+                    await _attach_letterboxd_ratings(
+                        cached_recommendation["recommendations"]
+                    )
                     yield _sse({
                         "type": "result",
                         "username": req.username,
@@ -5253,6 +5332,7 @@ async def recommend(req: RecommendRequest, request: Request):
                     },
                 )
 
+                await _attach_letterboxd_ratings(result["recommendations"])
                 yield _sse({
                     "type": "result",
                     "username": req.username,
@@ -5373,13 +5453,15 @@ async def random_pick(req: RandomRequest, request: Request):
                 "discover_fallback": source == "discover",
             },
         )
+        random_rows = [f.to_dict() for f in chosen]
+        await _attach_letterboxd_ratings(random_rows)
         yield _sse({
             "type": "result",
             "username": req.username,
             "pool_source": source,
             "pool_count": len(pool),
             "discover_fallback": source == "discover",
-            "films": [f.to_dict() for f in chosen],
+            "films": random_rows,
         })
 
     return StreamingResponse(

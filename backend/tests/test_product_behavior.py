@@ -14,6 +14,7 @@ from app.main import (
     _community_random_pool,
     _community_reason,
     _personality_refresh_needed,
+    _response_locale,
     _pick_random_films,
     _refresh_profile_favorites,
     _refresh_profile_watchlist,
@@ -381,3 +382,80 @@ class RecentFilmsOrderTests(unittest.TestCase):
             endpoint.index("if watch_order:"),
             endpoint.index('pcache.set, "films_diary_recent"'),
         )
+
+
+class ResponseLocaleTests(unittest.TestCase):
+    """Reported: recommendation reasons came back in English in a Turkish app.
+
+    The shell resolves its language from a per-device preference the account
+    may never have been told about, so the server was falling through to
+    Accept-Language — which a browser can order differently from the UI.
+    """
+
+    @staticmethod
+    def _request(headers: dict) -> Request:
+        return Request({
+            "type": "http",
+            "method": "POST",
+            "path": "/api/recommend",
+            "headers": [
+                (key.lower().encode(), value.encode())
+                for key, value in headers.items()
+            ],
+        })
+
+    def test_the_shells_own_locale_beats_accept_language(self):
+        account = SimpleNamespace(preferred_locale="auto")
+        request = self._request({
+            "accept-language": "en-US,en;q=0.9,tr;q=0.8",
+            "x-movienotes-locale": "tr",
+        })
+
+        self.assertEqual(_response_locale(account, request), "tr")
+
+    def test_an_explicit_account_preference_still_wins(self):
+        account = SimpleNamespace(preferred_locale="en")
+        request = self._request({"x-movienotes-locale": "tr"})
+
+        self.assertEqual(_response_locale(account, request), "en")
+
+    def test_accept_language_remains_the_last_resort(self):
+        account = SimpleNamespace(preferred_locale="auto")
+
+        self.assertEqual(
+            _response_locale(account, self._request({"accept-language": "en-GB,en"})),
+            "en",
+        )
+        self.assertEqual(
+            _response_locale(account, self._request({"accept-language": "tr-TR,tr"})),
+            "tr",
+        )
+
+    def test_a_junk_header_does_not_override_anything(self):
+        account = SimpleNamespace(preferred_locale="auto")
+        request = self._request({
+            "accept-language": "tr-TR,tr",
+            "x-movienotes-locale": "klingon",
+        })
+
+        self.assertEqual(_response_locale(account, request), "tr")
+
+
+class ForcedTasteRebuildTests(unittest.TestCase):
+    """Reported: the taste analysis stayed on its old text after a version bump.
+
+    A rebuild inherited the stored prose whenever the watched archive had not
+    moved — which is exactly the case a forced rebuild exists to handle.
+    """
+
+    def test_a_forced_rebuild_does_not_inherit_the_stored_analysis(self):
+        source = (Path(__file__).resolve().parents[1] / "app" / "main.py").read_text()
+        rebuild = source.split("async def rebuild_snapshot", 1)[1].split(
+            "async def _refresh_locale_taste", 1
+        )[0]
+
+        assert "if not force_analysis and not source_changed and stored_taste.get(\"analysis\"):" in rebuild
+        # A silent LLM failure must be visible rather than looking like old text.
+        assert 'taste.analysis_source = "local"' in rebuild
+        assert 'taste.analysis_source = "llm"' in rebuild
+        assert "taste analysis fell back to local prose" in rebuild

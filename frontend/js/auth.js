@@ -1,5 +1,5 @@
 import { $ } from './dom.js?v=20260902.15';
-import { t } from './i18n.js?v=20260920.5';
+import { t, getLocale } from './i18n.js?v=20260920.6';
 
 export function cookieValue(name) {
   const prefix = `${name}=`;
@@ -9,7 +9,12 @@ export function cookieValue(name) {
 
 export function csrfHeaders(extra = {}) {
   const token = cookieValue('mb_csrf');
-  return token ? { ...extra, 'X-CSRF-Token': token } : extra;
+  // Prose the server writes — recommendation reasons, taste analysis — has to
+  // follow the language the app is actually rendering in. The shell resolves
+  // that from a stored preference the account may never have been told about,
+  // so Accept-Language is not a stand-in for it.
+  const headers = { ...extra, 'X-Movienotes-Locale': getLocale() };
+  return token ? { ...headers, 'X-CSRF-Token': token } : headers;
 }
 
 export function setAuthMessage(message, isError = false) {

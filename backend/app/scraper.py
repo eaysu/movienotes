@@ -625,6 +625,58 @@ async def resolve_missing_posters(films: list) -> int:
         return await _resolve_missing_posters(session, films)
 
 
+# ── Letterboxd's own average rating ─────────────────────────────────────────
+# A film page publishes its community average as schema.org JSON-LD, on the
+# five-star scale members actually rate in. TMDb's ten-point vote is a different
+# crowd on a different scale, so it cannot stand in for it.
+_LD_JSON_RE = re.compile(
+    r'<script type="application/ld\+json">(.*?)</script>', re.DOTALL
+)
+
+
+def _parse_film_rating(html: str) -> Optional[float]:
+    for block in _LD_JSON_RE.findall(html):
+        payload = block.strip()
+        # Letterboxd wraps the JSON in a CDATA comment.
+        payload = payload.removeprefix("/* <![CDATA[ */").removesuffix("/* ]]> */")
+        try:
+            data = json.loads(payload.strip())
+        except ValueError:
+            continue
+        rating = (data.get("aggregateRating") or {}).get("ratingValue")
+        try:
+            value = float(rating)
+        except (TypeError, ValueError):
+            continue
+        if 0.0 < value <= 5.0:
+            return round(value, 2)
+    return None
+
+
+async def _fetch_film_rating(slug: str) -> Optional[float]:
+    async with AsyncSession(impersonate=_DEFAULT_IMPERSONATE) as session:
+        response, status = await _fetch_with_retry(
+            session,
+            f"{BASE_URL}/film/{slug}/",
+            referer=f"{BASE_URL}/",
+            max_retries=2,
+            timeout=12.0,
+        )
+    if response is None or status != 200:
+        return None
+    return _parse_film_rating(response.text)
+
+
+async def scrape_film_rating(slug: str) -> Optional[float]:
+    """Letterboxd's community average for one film, out of 5, or None."""
+    normalized = str(slug or "").strip().strip("/").lower()
+    if not normalized:
+        return None
+    return await _coalesce_scrape(
+        (normalized, "film-rating"), lambda: _fetch_film_rating(normalized)
+    )
+
+
 def _parse_profile_page(username: str, html: str) -> ScrapedProfile:
     """Parse public profile identity and ordered Favorite films metadata."""
     soup = BeautifulSoup(html, "lxml")

@@ -30,6 +30,9 @@ class TasteProfileSnapshot:
     top_genres: list[str] = field(default_factory=list)
     top_keywords: list[str] = field(default_factory=list)
     analysis: list[str] = field(default_factory=list)
+    # "llm" once a model has written the prose, "local" while it is the
+    # deterministic fallback. Without it a silent LLM failure is invisible.
+    analysis_source: str = "local"
     personality: str = ""
     sample_size: int = 0
     rated_count: int = 0

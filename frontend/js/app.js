@@ -8,24 +8,24 @@ import {
   finishApiRequest,
   scrapeErrorMessage,
   streamErrorMessage,
-} from './api.js?v=20260920.5';
+} from './api.js?v=20260920.6';
 import {
   cookieValue,
   csrfHeaders,
   setAuthMessage,
   setAuthMode,
   setPasswordVisibility,
-} from './auth.js?v=20260920.5';
-import { directorAvatar, directorFilmGrid, directorFilmTile } from './profile.js?v=20260920.5';
+} from './auth.js?v=20260920.6';
+import { directorAvatar, directorFilmGrid, directorFilmTile } from './profile.js?v=20260920.6';
 import { animateScore, getScoreInfo } from './blend.js?v=20260902.15';
-import { createRecommendationCards } from './recommendations.js?v=20260920.5';
+import { createRecommendationCards } from './recommendations.js?v=20260920.6';
 import {
   getLocale,
   initI18n,
   localePreference,
   setLocalePreference,
   t,
-} from './i18n.js?v=20260920.5';
+} from './i18n.js?v=20260920.6';
 
 initI18n();
 
@@ -34,7 +34,7 @@ const uiLocale = () => (getLocale() === 'en' ? 'en-US' : 'tr-TR');
 let _shareCardsModule;
 function loadShareCardsModule() {
   if (!_shareCardsModule) {
-    _shareCardsModule = import('./share-cards.js?v=20260920.5');
+    _shareCardsModule = import('./share-cards.js?v=20260920.6');
   }
   return _shareCardsModule;
 }
@@ -569,7 +569,7 @@ function _recoLoadingHTML(mode) {
 }
 
 function _recoResetBtn() {
-  return `<button type="button" id="profile-reco-again" class="mt-4 w-full flex items-center justify-center gap-2 rounded-xl border border-outline-variant/25 bg-surface-container/40 py-3 font-label-md text-label-md uppercase tracking-wide text-on-surface-variant hover:text-on-surface hover:bg-surface-container/70 transition-colors"><span class="material-symbols-outlined text-[18px]">refresh</span>Yeni öneri</button>`;
+  return `<button type="button" id="profile-reco-again" class="mt-2.5 w-full flex items-center justify-center gap-2 rounded-xl border border-outline-variant/25 bg-surface-container/40 py-2.5 font-label-md text-label-md uppercase tracking-wide text-on-surface-variant hover:text-on-surface hover:bg-surface-container/70 transition-colors"><span class="material-symbols-outlined text-[18px]">refresh</span>Yeni öneri</button>`;
 }
 
 async function startInlineReco(mode, { preserveViewport = false } = {}) {
@@ -681,7 +681,7 @@ function _showTasteReco(index) {
 
 // Son öneriyi de beğenmediyse çıkmaz sokak olmasın: rastgeleye devam.
 function _toRandomBtn(total) {
-  return `<button type="button" id="profile-reco-torandom" class="mt-4 w-full flex items-center justify-center gap-2 rounded-xl border border-secondary-container/30 bg-secondary-container/10 py-3 font-label-md text-label-md uppercase tracking-wide text-secondary-container hover:bg-secondary-container/20 transition-colors"><span class="material-symbols-outlined text-[18px]">casino</span>${total} filmi de beğenmedin mi? Rastgeleye geç</button>`;
+  return `<button type="button" id="profile-reco-torandom" class="mt-2.5 w-full flex items-center justify-center gap-2 rounded-xl border border-secondary-container/30 bg-secondary-container/10 py-2.5 font-label-md text-label-md uppercase tracking-wide text-secondary-container hover:bg-secondary-container/20 transition-colors"><span class="material-symbols-outlined text-[18px]">casino</span>${total} filmi de beğenmedin mi? Rastgeleye geç</button>`;
 }
 
 // Rastgele: sınırsız. Havuz, topluluğun izlediği ama senin izlemediğin filmler.

@@ -462,10 +462,11 @@ def test_one_recommendation_fits_a_screen_without_scrolling():
     # Both single-pick surfaces share it, so neither can drift back to a hero.
     assert "md:w-[260px]" not in reco_js
     assert "return buildPickCard(film" in reco_js
-    # The crowd average belongs to every pick, not just the random one, so it
-    # is read inside the shared builder rather than injected by one caller.
-    assert "film.vote_average" in card
-    assert "film.vote_average" not in reco_js.split("function buildRandomCard", 1)[1]
+    # The average belongs to every pick, not just the random one, so it is read
+    # inside the shared builder rather than injected by one caller. It is
+    # Letterboxd's five-star community score, never TMDb's ten-point vote.
+    assert "film.letterboxd_rating" in card
+    assert "vote_average" not in reco_js
     assert "extraMeta" not in reco_js
 
 
@@ -959,9 +960,9 @@ def test_shell_asset_content_changes_force_a_version_bump():
     files that no longer existed.
     """
     expected = {
-        "js/app.js": "526cb862bda8b3c6b06f57a1f6c83c4c278e94f856b965a69927fe2807e0d85a",
-        "app.css": "90063713545255c89ab85a9bfd44c790c10b4bf46e2f0a29ae4f3fcaca7299b9",
-        "js/share-cards.js": "4d2274d5be0fb0a85826deb351d7e0adcf9fe73714f7f6818cc91687e2ab4ad7",
+        "js/app.js": "2e5da6b3f01470495ad59d1324388a9a48d3075282c539675f822dd5f0b2c099",
+        "app.css": "7a7c45070dda9074baf076df309d775ede7fb204735438f9c6ba677b1b87660a",
+        "js/share-cards.js": "ddd1f2e1f5bfb48f65bc3f1944d3931d9801ec32a5f2450705f3c4e66959f87f",
         "js/i18n.js": "d4eab4d2f6dc01ded277e1c39d15dc0818d2baa15dc49f51a57a19da83e70ba1",
         "site.webmanifest": "7a7de349179ed9f226d38632dfde5a8478edd10305972ea52641b0dc6aa7f405",
         "movienotes-mark.png": "850aa9117aa52768952843f8e2c410c0c17868877d81b2058274290373b4ee1e",
@@ -998,24 +999,24 @@ def test_every_app_shell_asset_has_an_explicit_immutable_version():
     source_css = (FRONTEND / "css" / "source.css").read_text()
 
     dependency_version = "v=20260902.15"
-    api_version = "v=20260920.5"
-    css_version = "v=20260920.5"
+    api_version = "v=20260920.6"
+    css_version = "v=20260920.6"
     assert f"/static/app.css?{css_version}" in html
-    assert "/static/js/app.js?v=20260920.5" in html
-    assert "./i18n.js?v=20260920.5" in app_js
+    assert "/static/js/app.js?v=20260920.6" in html
+    assert "./i18n.js?v=20260920.6" in app_js
     assert app_js.count(f"?{dependency_version}") == 2
     assert f"./api.js?{api_version}" in app_js
-    assert "./recommendations.js?v=20260920.5" in app_js
-    assert "./share-cards.js?v=20260920.5" in app_js
-    assert "./auth.js?v=20260920.5" in app_js
+    assert "./recommendations.js?v=20260920.6" in app_js
+    assert "./share-cards.js?v=20260920.6" in app_js
+    assert "./auth.js?v=20260920.6" in app_js
     assert f"./dom.js?{dependency_version}" in auth_js
-    assert "./i18n.js?v=20260920.5" in auth_js
+    assert "./i18n.js?v=20260920.6" in auth_js
     assert f"./dom.js?{dependency_version}" in profile_js
-    assert "./i18n.js?v=20260920.5" in profile_js
+    assert "./i18n.js?v=20260920.6" in profile_js
     assert f"./dom.js?{dependency_version}" in recommendations_js
-    assert "./i18n.js?v=20260920.5" in recommendations_js
+    assert "./i18n.js?v=20260920.6" in recommendations_js
     assert f"./api.js?{api_version}" in share_js
-    assert "./i18n.js?v=20260920.5" in share_js
+    assert "./i18n.js?v=20260920.6" in share_js
     assert f"criterion-closet-bg.jpg?{dependency_version}" in source_css
 
 
@@ -1085,7 +1086,7 @@ def test_png_share_renderer_is_lazy_loaded_on_first_share_action():
 
     imports = app_js.split("// ── Cinema facts", 1)[0]
     assert "from './share-cards.js" not in imports
-    assert "import('./share-cards.js?v=20260920.5')" in imports
+    assert "import('./share-cards.js?v=20260920.6')" in imports
     assert "const shareCards = await loadShareCardsModule();" in app_js
 
 

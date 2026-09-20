@@ -1,4 +1,4 @@
-import { t } from './i18n.js?v=20260920.5';
+import { t, getLocale } from './i18n.js?v=20260920.6';
 
 export const API_BASE = window.__API_BASE__ || '';
 
@@ -87,6 +87,8 @@ export async function apiJSON(path, options = {}, attempt = 0, recovered = false
       // logout or a refresh-token rotation.
       cache: path.startsWith('/api/auth/') ? 'no-store' : options.cache,
       ...options,
+      // Reads generate prose too, so the shell's language travels with them.
+      headers: { 'X-Movienotes-Locale': getLocale(), ...(options.headers || {}) },
     });
   } catch (error) {
     // A waking PWA can beat Render's first live connection by a few hundred

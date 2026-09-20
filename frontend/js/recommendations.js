@@ -1,5 +1,5 @@
 import { escapeHTML, safeImageURL, letterboxdFilmURL } from './dom.js?v=20260902.15';
-import { t } from './i18n.js?v=20260920.5';
+import { t } from './i18n.js?v=20260920.6';
 
 export function createRecommendationCards() {
 // Make a poster clickable through to its Letterboxd page.
@@ -25,7 +25,7 @@ function whyBlock(film) {
       <p class="flex items-center gap-2 font-label-sm text-label-sm uppercase tracking-[.18em] text-primary-container mb-1">
         <span class="material-symbols-outlined text-[15px]" style="font-variation-settings:'FILL' 1">auto_awesome</span>${t('Sana neden önerdik?')}
       </p>
-      <p class="font-body-md text-body-md text-on-surface leading-relaxed">${escapeHTML(film.reason)}</p>
+      <p class="font-body-md text-body-md text-on-surface leading-relaxed line-clamp-5">${escapeHTML(film.reason)}</p>
     </div>`;
 }
 // ── Compact pick card ─────────────────────────────────────────────────────
@@ -38,12 +38,15 @@ function buildPickCard(film, { badge } = {}) {
   const director = escapeHTML(film.director);
   const year = escapeHTML(film.year);
   const posterURL = safeImageURL(film.poster_url);
-  // The crowd's average is part of deciding on a pick, so it belongs to every
-  // single-film card rather than only the random one.
-  const rating = film.vote_average && film.vote_average > 0
+  // Letterboxd's own community average, on the five-star scale members rate
+  // in. TMDb's ten-point vote is a different crowd, so it is not shown as a
+  // stand-in when the Letterboxd page could not be read.
+  const average = Number(film.letterboxd_rating);
+  const rating = average > 0
     ? `<div class="mt-1.5 flex items-center gap-1 text-on-surface-variant/70">
          <span class="material-symbols-outlined text-[14px] text-primary-container" style="font-variation-settings:'FILL' 1">star</span>
-         <span class="font-label-md text-label-md">${film.vote_average.toFixed(1)}</span>
+         <span class="font-label-md text-label-md">${average.toFixed(1)}<span class="text-on-surface-variant/45">/5</span></span>
+         <span class="font-label-sm text-label-sm text-on-surface-variant/45">Letterboxd</span>
        </div>`
     : '';
   const genres = (film.genres || []).slice(0, 4).map(g =>

@@ -10,6 +10,7 @@ from app.scraper import (
     _LetterboxdRequestBudget,
     _empty_page_error,
     _fetch_profile_with_fresh_sessions,
+    _parse_film_rating,
     _parse_page,
     _parse_profile_page,
     _scrape_list,
@@ -318,6 +319,41 @@ class ProfileRetryTests(unittest.IsolatedAsyncioTestCase):
             [entry.review for entry in entries],
             ["complete letterboxd-review-101", "complete letterboxd-review-102"],
         )
+
+
+class FilmRatingParsingTests(unittest.TestCase):
+    """Asked for: the Letterboxd average, out of five, not TMDb's ten-point vote."""
+
+    CDATA_PAGE = """
+    <script type="application/ld+json">
+    /* <![CDATA[ */
+    {"@type":"Movie","name":"Parasite",
+     "aggregateRating":{"@type":"AggregateRating","ratingValue":4.55,
+     "bestRating":5,"ratingCount":1200000}}
+    /* ]]> */
+    </script>
+    """
+
+    def test_reads_the_average_out_of_the_cdata_wrapped_json_ld(self):
+        self.assertEqual(_parse_film_rating(self.CDATA_PAGE), 4.55)
+
+    def test_a_page_without_json_ld_has_no_average(self):
+        self.assertIsNone(_parse_film_rating("<html><body>no ld here</body></html>"))
+
+    def test_unrated_and_out_of_scale_values_are_rejected(self):
+        # A ten-point number here would mean the markup changed meaning; showing
+        # it as "8.1/5" would be worse than showing nothing.
+        for payload in ('{"aggregateRating":{"ratingValue":8.1}}',
+                        '{"aggregateRating":{"ratingValue":0}}',
+                        '{"aggregateRating":{"ratingValue":"n/a"}}',
+                        '{"name":"No rating yet"}'):
+            with self.subTest(payload=payload):
+                html = f'<script type="application/ld+json">{payload}</script>'
+                self.assertIsNone(_parse_film_rating(html))
+
+    def test_malformed_json_does_not_raise(self):
+        html = '<script type="application/ld+json">{not json</script>'
+        self.assertIsNone(_parse_film_rating(html))
 
 
 if __name__ == "__main__":
