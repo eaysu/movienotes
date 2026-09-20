@@ -105,9 +105,17 @@ Onboarding'i herhangi bir Letterboxd profili üzerinde, hiçbir şey saklamadan
 izlemek için:
 
 ```bash
-python -m scripts.sandbox                 # http://127.0.0.1:8765
-python -m scripts.sandbox --port 9000
-python -m scripts.sandbox --keep-cache    # taramaları çalıştırmalar arasında koru
+./run-test.sh                 # sunucuyu açar, hazır olunca Chrome'u getirir
+./run-test.sh --port 9000
+./run-test.sh --keep-cache    # taramaları çalıştırmalar arasında koru
+```
+
+`run-test.sh` yalnızca bir sarmalayıcı: bağımlılıkları kurulu Python'u kendi
+buluyor, sağlık ucu yanıt verene kadar bekliyor ve ancak sonra tarayıcıyı
+açıyor. Doğrudan da çalıştırılabilir:
+
+```bash
+python -m scripts.sandbox --no-browser --port 9000
 ```
 
 Giriş ekranı yalnızca bir Letterboxd adı sorar — parola yok, çünkü ortada hesap

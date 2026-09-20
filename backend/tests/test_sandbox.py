@@ -276,5 +276,44 @@ class SandboxSignInScreenTests(unittest.TestCase):
         self.assertIn("fromRegistration: true", block)
 
 
+class RunTestScriptTests(unittest.TestCase):
+    """./run-test.sh is the one command, so it carries the same promises."""
+
+    def setUp(self):
+        self.path = ROOT.parent / "run-test.sh"
+        self.source = self.path.read_text()
+
+    def test_it_is_executable_and_parses(self):
+        import subprocess
+
+        self.assertTrue(os.access(self.path, os.X_OK), "run-test.sh is not executable")
+        parsed = subprocess.run(["bash", "-n", str(self.path)], capture_output=True, text=True)
+        self.assertEqual(parsed.returncode, 0, parsed.stderr)
+
+    def test_the_interpreter_is_chosen_by_what_it_can_import(self):
+        """Caught live: `python3` on macOS is Xcode's, with no dependencies.
+
+        Picking by name gave a traceback about pydantic_settings, which reads
+        as a broken script rather than as the wrong Python.
+        """
+        self.assertIn("import fastapi, uvicorn, pydantic_settings", self.source)
+        self.assertIn("Bağımlılıkları kurulu bir Python bulunamadı", self.source)
+
+    def test_chrome_opens_only_once_the_server_answers(self):
+        """A fixed sleep hands the visitor a "site can't be reached" page."""
+        block = self.source.split("open_browser()", 1)[1].split("\n}", 1)[0]
+
+        self.assertIn("/api/health", block)
+        self.assertIn('open -a "Google Chrome"', block)
+        # And a machine without Chrome still gets a browser.
+        self.assertIn("google-chrome", block)
+        self.assertIn("xdg-open", block)
+
+    def test_the_server_runs_in_the_foreground_so_ctrl_c_cleans_up(self):
+        """`exec` or a background server would strand the temporary folder."""
+        self.assertNotIn("exec ", self.source)
+        self.assertIn("--no-browser", self.source)
+
+
 if __name__ == "__main__":
     unittest.main()
