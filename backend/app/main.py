@@ -24,6 +24,7 @@ import threading
 import time
 import uuid
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import urljoin, urlsplit
@@ -43,6 +44,7 @@ from .auth import (
     AuthService,
     BlendServiceError,
     InvalidCredentialsError,
+    OwnershipPendingError,
     TransientStorageError,
     VerificationError,
     validate_password,
@@ -81,10 +83,25 @@ from .taste_profile import (
 from . import profile_sync
 
 
+# Every handler reaches Supabase through ``asyncio.to_thread``, and the default
+# executor is sized for CPU work: ``cpu_count + 4``. On a one-core host that is
+# five threads for the entire application, so five members waiting on Supabase
+# leave the sixth queued behind them — a ceiling set by the size of the box
+# rather than by anything the work needs. These threads are asleep on a socket,
+# not computing, so they are sized for round trips in flight.
+WORKER_THREADS = int(os.environ.get("WORKER_THREADS", "48"))
+_worker_pool: ThreadPoolExecutor | None = None
+
+
 @contextlib.asynccontextmanager
 async def _lifespan(_app):
+    global _worker_pool
     schedulers: list[asyncio.Task] = []
     settings = get_settings()
+    _worker_pool = ThreadPoolExecutor(
+        max_workers=max(8, WORKER_THREADS), thread_name_prefix="movienotes"
+    )
+    asyncio.get_running_loop().set_default_executor(_worker_pool)
     if getattr(settings, "bulletin_enabled", False) and getattr(settings, "has_tmdb", False):
         schedulers.append(asyncio.create_task(_bulletin_refresh_loop()))
     # Günce taraması hesaplardan bağımsız çalışamaz: üye listesi Supabase'de.
@@ -160,10 +177,13 @@ _delete_rate_limiter = SlidingWindowRateLimiter(
 )
 # Random picks are meant to be spun until something clicks, and they cost one
 # indexed query instead of a scrape, so the ceiling only exists to stop scripts.
+# A card lands in about a second, so someone flipping through taps about that
+# often; a burst of twelve per fifteen seconds refused one spin in five of an
+# ordinary sitting. The ten-minute ceiling is what actually bounds the cost.
 _random_rate_limiter = SlidingWindowRateLimiter(
     limit=180,
     window_seconds=10 * 60,
-    burst=12,
+    burst=20,
     burst_seconds=15,
 )
 
@@ -189,10 +209,33 @@ def _count_registered_users(settings) -> int:
     return max(0, int(getattr(result, "count", 0) or 0))
 
 
+# Signing up costs requests, and a first-timer spends more of them than anyone:
+# one to start, then a verify for every time they come back before the bio edit
+# has saved on Letterboxd's side. Charging all of that against a small quota
+# stranded people mid-registration — password chosen, code issued, and nothing
+# to do but wait. So the ceiling on *attempts* is only here to stop a flood,
+# while the tight quota is spent by *failures* alone, which is what brute force
+# is made of. An honest signup, however clumsy, never pays it.
 _auth_rate_limiter = SlidingWindowRateLimiter(
+    limit=40,
+    window_seconds=15 * 60,
+    burst=12,
+    burst_seconds=30,
+)
+_auth_failure_limiter = SlidingWindowRateLimiter(
     limit=8,
     window_seconds=15 * 60,
-    burst=3,
+    burst=5,
+    burst_seconds=30,
+)
+# Letters, Blend invites, blocks and reports used to draw on the signup quota,
+# so five letters could leave a member unable to block anyone — and, being keyed
+# by address, one person on a shared connection spent everyone else's budget.
+# These are ordinary member actions: bounded per session, generously.
+_member_action_limiter = SlidingWindowRateLimiter(
+    limit=30,
+    window_seconds=10 * 60,
+    burst=8,
     burst_seconds=30,
 )
 _readiness_lock = asyncio.Lock()
@@ -263,13 +306,53 @@ async def _enforce_delete_rate_limit(request: Request) -> None:
         )
 
 
+def _session_key(request: Request) -> str:
+    """Identify the caller by their session when they have one, else by address.
+
+    Carrier NAT and campus Wi-Fi put strangers behind a single address, so an
+    address-keyed quota lets one busy member spend everybody else's. A signed-in
+    caller carries their own credential; anonymous traffic has nothing but the
+    address, which is also where brute force has to be counted.
+    """
+    token = request.cookies.get(ACCESS_COOKIE) or request.cookies.get(REFRESH_COOKIE)
+    if token:
+        return "s:" + hashlib.sha256(token.encode("utf-8")).hexdigest()[:32]
+    return "ip:" + _client_ip(request)
+
+
+def _raise_rate_limited(detail: str, retry_after: int) -> None:
+    raise HTTPException(
+        status_code=429, detail=detail, headers={"Retry-After": str(retry_after)}
+    )
+
+
+_AUTH_LIMIT_DETAIL = "Çok fazla hesap isteği gönderildi. Lütfen biraz sonra tekrar dene."
+
+
 async def _enforce_auth_rate_limit(request: Request) -> None:
-    allowed, retry_after = await _auth_rate_limiter.check(_client_ip(request))
+    """Allow an honest signup to be clumsy; stop a caller who keeps failing."""
+    key = _client_ip(request)
+    has_room, retry_after = await _auth_failure_limiter.peek(key)
+    if not has_room:
+        _raise_rate_limited(
+            "Çok fazla başarısız deneme yapıldı. Lütfen biraz sonra tekrar dene.",
+            retry_after,
+        )
+    allowed, retry_after = await _auth_rate_limiter.check(key)
     if not allowed:
-        raise HTTPException(
-            status_code=429,
-            detail="Çok fazla hesap isteği gönderildi. Lütfen biraz sonra tekrar dene.",
-            headers={"Retry-After": str(retry_after)},
+        _raise_rate_limited(_AUTH_LIMIT_DETAIL, retry_after)
+
+
+async def _record_auth_failure(request: Request) -> None:
+    """Charge one failed credential or ownership attempt to the strict quota."""
+    await _auth_failure_limiter.check(_client_ip(request))
+
+
+async def _enforce_member_action_limit(request: Request) -> None:
+    allowed, retry_after = await _member_action_limiter.check(_session_key(request))
+    if not allowed:
+        _raise_rate_limited(
+            "Çok hızlı ilerliyorsun; birkaç dakika sonra tekrar dene.", retry_after
         )
 
 
@@ -350,22 +433,40 @@ def _ip_hash(request: Request) -> str:
     ).hexdigest()
 
 
+# Scheduled telemetry writes, held so the garbage collector cannot drop a task
+# that is still in flight.
+_activity_tasks: set[asyncio.Task] = set()
+
+
 async def _record_activity_event(
     service: AuthService | None,
     account: Account | None,
     event_type: str,
     metadata: dict | None = None,
 ) -> None:
-    """Best-effort product telemetry that never blocks a user flow forever."""
+    """Best-effort product telemetry, kept off the response path.
+
+    Twenty-five endpoints record an event, and awaiting the write put a whole
+    Supabase round trip between the member and their page — measurably, opening
+    the Sinefil directory cost as much in analytics as it did in content. No
+    response depends on the result, so the write is scheduled and left to
+    finish on its own.
+    """
     if service is None or account is None:
         return
-    with contextlib.suppress(Exception):
-        await asyncio.to_thread(
-            service.record_activity_event,
-            account.id,
-            event_type,
-            metadata or {},
-        )
+
+    async def write() -> None:
+        with contextlib.suppress(Exception):
+            await asyncio.to_thread(
+                service.record_activity_event,
+                account.id,
+                event_type,
+                metadata or {},
+            )
+
+    task = asyncio.create_task(write())
+    _activity_tasks.add(task)
+    task.add_done_callback(_activity_tasks.discard)
 
 
 def _set_session_cookies(response: Response, session, *, remember: bool = True) -> str:
@@ -1585,6 +1686,15 @@ async def register_verify(
         _raise_scrape_http(exc)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except OwnershipPendingError as exc:
+        # Checking back before the bio saved is the normal way to use this
+        # screen, so it costs nothing: no attempt, no quota, just a clearer
+        # instruction and an invitation to try again.
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except VerificationError as exc:
+        # A wrong code is the only thing here worth counting against a guesser.
+        await _record_auth_failure(request)
+        _raise_auth_http(exc)
     except AuthError as exc:
         _raise_auth_http(exc)
     if session is not None:
@@ -1606,6 +1716,9 @@ async def login(req: LoginRequest, request: Request, response: Response) -> dict
             req.password,
             ip_hash=_ip_hash(request),
         )
+    except InvalidCredentialsError as exc:
+        await _record_auth_failure(request)
+        _raise_auth_http(exc)
     except AuthError as exc:
         _raise_auth_http(exc)
     _set_session_cookies(response, session, remember=req.remember)
@@ -1768,6 +1881,12 @@ async def password_reset_finish(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except ScrapeError as exc:
         _raise_scrape_http(exc)
+    except OwnershipPendingError as exc:
+        # Same as registration: waiting for a bio edit is not a failed attempt.
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except VerificationError as exc:
+        await _record_auth_failure(request)
+        _raise_auth_http(exc)
     except AuthError as exc:
         _raise_auth_http(exc)
     return {"ok": True}
@@ -1794,13 +1913,22 @@ async def _profile_sync_status(account: Account, service) -> dict | None:
 async def profile_me(request: Request) -> dict:
     account = await _require_account(request)
     service = _auth_service()
-    profile = await asyncio.to_thread(service.get_profile, account)
+    # The snapshot and the sync job are two independent reads, and this is the
+    # first request the app makes after entry — overlapping them takes a full
+    # round trip off the profile's time to paint.
+    profile, sync_job = await asyncio.gather(
+        asyncio.to_thread(service.get_profile, account),
+        _profile_sync_status(account, service),
+        return_exceptions=True,
+    )
+    if isinstance(profile, BaseException):
+        raise profile
     profile["needs_refresh"] = bool(
         not profile.get("taste")
         or profile["taste"].get("algorithm_version") != TASTE_PROFILE_VERSION
     )
-    with contextlib.suppress(Exception):
-        profile["sync_job"] = await _profile_sync_status(account, service)
+    if not isinstance(sync_job, BaseException):
+        profile["sync_job"] = sync_job
     return profile
 
 
@@ -1999,7 +2127,7 @@ async def letter_send_status(request: Request, recipient_username: str = "") -> 
 @app.post("/api/letters")
 async def send_letter(req: SendLetterRequest, request: Request) -> dict:
     _require_csrf(request)
-    await _enforce_auth_rate_limit(request)
+    await _enforce_member_action_limit(request)
     account = await _require_account(request)
     try:
         letter_id = await asyncio.to_thread(
@@ -4311,7 +4439,7 @@ async def unlike_post(post_id: str, request: Request) -> dict:
 @app.post("/api/posts/{post_id}/report")
 async def report_post(post_id: str, req: ReportUserRequest, request: Request) -> dict:
     _require_csrf(request)
-    await _enforce_auth_rate_limit(request)
+    await _enforce_member_action_limit(request)
     account = await _require_account(request)
     try:
         report_id = await asyncio.to_thread(
@@ -4375,8 +4503,13 @@ async def decide_follow_request(
 async def read_notifications(request: Request) -> dict:
     account = await _require_account(request)
     service = _auth_service()
-    items = await asyncio.to_thread(service.list_notifications, account)
-    await asyncio.to_thread(service.mark_notifications_read, account)
+    # Clearing the badge does not depend on the list, and the member is about
+    # to see everything in it either way, so the two round trips overlap
+    # instead of queueing.
+    items, _ = await asyncio.gather(
+        asyncio.to_thread(service.list_notifications, account),
+        asyncio.to_thread(service.mark_notifications_read, account),
+    )
     return {"notifications": items}
 
 
@@ -4458,7 +4591,7 @@ async def _follow_list(username: str, request: Request, kind: str) -> dict:
 @app.post("/api/users/{username}/block")
 async def block_registered_user(username: str, request: Request) -> dict:
     _require_csrf(request)
-    await _enforce_auth_rate_limit(request)
+    await _enforce_member_action_limit(request)
     account = await _require_account(request)
     try:
         normalized = _normalize_username(username)
@@ -4489,7 +4622,7 @@ async def report_registered_user(
     username: str, req: ReportUserRequest, request: Request
 ) -> dict:
     _require_csrf(request)
-    await _enforce_auth_rate_limit(request)
+    await _enforce_member_action_limit(request)
     account = await _require_account(request)
     try:
         normalized = _normalize_username(username)
@@ -4510,7 +4643,7 @@ async def report_registered_user(
 @app.post("/api/blends/requests")
 async def create_blend_invite(req: CreateBlendRequest, request: Request) -> dict:
     _require_csrf(request)
-    await _enforce_auth_rate_limit(request)
+    await _enforce_member_action_limit(request)
     account = await _require_account(request)
     service = _auth_service()
     existing = await asyncio.to_thread(

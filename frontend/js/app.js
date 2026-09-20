@@ -8,24 +8,24 @@ import {
   finishApiRequest,
   scrapeErrorMessage,
   streamErrorMessage,
-} from './api.js?v=20260920.14';
+} from './api.js?v=20260920.15';
 import {
   cookieValue,
   csrfHeaders,
   setAuthMessage,
   setAuthMode,
   setPasswordVisibility,
-} from './auth.js?v=20260920.14';
-import { directorAvatar, directorFilmGrid, directorFilmTile } from './profile.js?v=20260920.14';
+} from './auth.js?v=20260920.15';
+import { directorAvatar, directorFilmGrid, directorFilmTile } from './profile.js?v=20260920.15';
 import { animateScore, getScoreInfo } from './blend.js?v=20260902.15';
-import { createRecommendationCards } from './recommendations.js?v=20260920.14';
+import { createRecommendationCards } from './recommendations.js?v=20260920.15';
 import {
   getLocale,
   initI18n,
   localePreference,
   setLocalePreference,
   t,
-} from './i18n.js?v=20260920.14';
+} from './i18n.js?v=20260920.15';
 
 initI18n();
 
@@ -34,7 +34,7 @@ const uiLocale = () => (getLocale() === 'en' ? 'en-US' : 'tr-TR');
 let _shareCardsModule;
 function loadShareCardsModule() {
   if (!_shareCardsModule) {
-    _shareCardsModule = import('./share-cards.js?v=20260920.14');
+    _shareCardsModule = import('./share-cards.js?v=20260920.15');
   }
   return _shareCardsModule;
 }
@@ -4056,13 +4056,39 @@ let _obToken = 0;             // her yeni çalışma bu sayacı artırır — as
 let _obSlideTimer = null;     // slayt otomatik ilerleme
 let _obFactTimer = null;      // bilgi kartı rotasyonu
 let _obReveal = null;         // { slides:[fn], index, token } — sunum durumu
+let _obEscapeTimer = null;    // bekleme uzarsa "uygulamaya geç" çıkışını açar
+let _obEscapeOnly = false;    // buton sunumu bitirmiyor, sadece uygulamaya alıyor
 const OB_SLIDE_MS = 15000;
 const OB_FACT_MS = 7000;
+const OB_ESCAPE_MS = 7000;
+const OB_MAX_RETRIES = 3;
 
 function _obClearTimers() {
   if (_obSlideTimer) { clearTimeout(_obSlideTimer); _obSlideTimer = null; }
   if (_obFactTimer)  { clearInterval(_obFactTimer); _obFactTimer = null; }
+  if (_obEscapeTimer) { clearTimeout(_obEscapeTimer); _obEscapeTimer = null; }
   _obReveal = null;
+}
+
+// Onboarding, Letterboxd'den tek bir profil isteğine bağlı — ve o istek
+// Render'ın IP'sinden bazen dakikalarca takılıyor. Sunum hazır olmadan çıkış
+// yolu yoksa, yeni kaydolmuş bir üye kendi hesabına giremeden dönen bir bilgi
+// kartına kilitleniyor. Bekleme uzarsa kapıyı açıyoruz: slaytları görmeden
+// girmek, hiç girememekten iyidir. Sunum "tamamlandı" sayılmadığı için bir
+// sonraki girişte tekrar oynar.
+function _obOfferEscape(note) {
+  _obEscapeOnly = true;
+  $('ob-skip-label').textContent = 'Uygulamaya geç';
+  $('ob-skip').classList.remove('hidden');
+  if (note) $('ob-bg-note').textContent = note;
+}
+
+function _obArmEscape() {
+  if (_obEscapeTimer) clearTimeout(_obEscapeTimer);
+  _obEscapeTimer = setTimeout(
+    () => _obOfferEscape('Beklemek istemiyorsan uygulamaya şimdi geçebilirsin.'),
+    OB_ESCAPE_MS,
+  );
 }
 
 // Bu onboarding çalışması hâlâ geçerli mi? Değilse timer'ları da temizler.
@@ -4074,6 +4100,7 @@ function _obLive(token) {
 
 function finishOnboarding() {
   _obToken += 1;
+  _obEscapeOnly = false;
   _obClearTimers();
   if (_account) sessionStorage.setItem(_onboardKey(_account), '1');
   $('ob-skip').classList.add('hidden');
@@ -4282,6 +4309,8 @@ function _obShowRevealSlide(i) {
   $('ob-prev').classList.toggle('hidden', r.index === 0);
   $('ob-next').classList.toggle('hidden', last);
   $('ob-skip').classList.toggle('hidden', !last);
+  // Sunum başladıysa çıkış butonu yine "bitir" anlamına döner.
+  if (last) _obEscapeOnly = false;
   $('ob-bg-note').textContent = last
     ? 'Arşiv taraman arka planda sürüyor.'
     : 'İleri / geri gezinebilirsin.';
@@ -4295,16 +4324,21 @@ function _obRevealNav(delta) {
   if (_obReveal) _obShowRevealSlide(_obReveal.index + delta);
 }
 
-async function startOnboarding() {
+async function startOnboarding(retry = 0) {
   const token = ++_obToken;
   _obClearTimers();
   showView('onboarding');
-  $('ob-skip').classList.add('hidden');
   $('ob-prev').classList.add('hidden');
   $('ob-next').classList.add('hidden');
   $('ob-skip-label').textContent = 'Uygulamaya geç';
   $('ob-bg-note').textContent = 'Favori dörtlün hazırlanıyor…';
   $('ob-dots').innerHTML = '';
+  // Bir kez açılan çıkış kapısı yeniden denemelerde kapanmaz.
+  if (retry === 0) {
+    _obEscapeOnly = false;
+    $('ob-skip').classList.add('hidden');
+    _obArmEscape();
+  }
 
   // Sadece tek küçük profil isteği ve Fav 4 enrichment'i beklenir. Tam
   // Letterboxd geçmişi _SyncPipeline'da ayrı çalışır; kayıt deneyimini
@@ -4320,10 +4354,17 @@ async function startOnboarding() {
   const data = await syncProfile();       // bootstrap: kimlik bilgileri + tam sweep'i başlatır
   if (!_obLive(token)) return;
   if (!data) {
+    // Letterboxd bize kapalıysa tekrar denemek işe yarayabilir, ama sonsuza
+    // kadar değil: birkaç denemeden sonra üyeyi burada tutmanın anlamı yok.
     _obRenderWaiting('Bağlantı yeniden kuruluyor');
-    $('ob-bg-note').textContent = 'Profil bağlantısı yeniden kuruluyor.';
+    if (retry >= OB_MAX_RETRIES) {
+      _obStopFacts();
+      _obOfferEscape('Letterboxd şu an yanıt vermiyor; profilin arka planda tamamlanacak.');
+      return;
+    }
+    _obOfferEscape('Profil bağlantısı yeniden kuruluyor.');
     _obSlideTimer = setTimeout(() => {
-      if (_obLive(token)) startOnboarding();
+      if (_obLive(token)) startOnboarding(retry + 1);
     }, 8000);
     return;
   }
@@ -5921,7 +5962,9 @@ $('btn-share-common').addEventListener('click', event => {
 $('btn-share-watchlist').addEventListener('click', event => {
   buildAndOpenShareCard(event.currentTarget, shareCards => shareCards.renderBlendShareCard(_currentBlendResult, 'watchlist'));
 });
-$('ob-skip').addEventListener('click', completeOnboarding);
+// Sunum hiç başlamadıysa buton onboarding'i "tamamlandı" saymaz: üye yalnızca
+// uygulamaya girer, slaytlar bir sonraki açılışta hakkı olarak geri gelir.
+$('ob-skip').addEventListener('click', () => (_obEscapeOnly ? finishOnboarding() : completeOnboarding()));
 $('ob-prev').addEventListener('click', () => _obRevealNav(-1));
 $('ob-next').addEventListener('click', () => _obRevealNav(1));
 document.addEventListener('keydown', event => {

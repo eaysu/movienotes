@@ -80,6 +80,16 @@ class VerificationExpiredError(VerificationError):
     code = "verification_expired"
 
 
+class OwnershipPendingError(VerificationError):
+    """The code is the right one; it just is not on the Letterboxd page yet.
+
+    This is the ordinary signup moment, not a failed attempt: the member holds
+    a code only this server issued, and the bio edit has simply not landed.
+    Counting it as an attempt burned through the challenge — five impatient
+    checks killed a registration that was never wrong about anything.
+    """
+
+
 class OwnershipProofError(VerificationError):
     code = "ownership_proof_missing"
 
@@ -551,13 +561,18 @@ class AuthService:
         valid_code = hmac.compare_digest(
             challenge["code_hash"], self.challenge_hash(code)
         )
-        proof_found = code.upper() in profile.bio.upper()
-        if not (valid_code and proof_found):
+        if not valid_code:
             service.table("auth_challenges").update(
                 {"attempts": int(challenge.get("attempts") or 0) + 1}
             ).eq("id", challenge["id"]).execute()
-            raise OwnershipProofError(
-                "Doğrulama kodu Letterboxd bio alanında bulunamadı."
+            raise OwnershipProofError("Doğrulama kodu geçersiz.")
+        if code.upper() not in profile.bio.upper():
+            # Right code, bio not updated yet. Nothing was attempted and
+            # nothing failed, so the attempt budget stays untouched — only the
+            # message changes, to say which half of the step is missing.
+            raise OwnershipPendingError(
+                "Kodu Letterboxd biyografinde henüz göremedik. Bio’yu "
+                "kaydettikten sonra tekrar dene."
             )
 
         now = datetime.now(timezone.utc).isoformat()

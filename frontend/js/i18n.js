@@ -98,6 +98,8 @@ const EN = Object.freeze({
   'Favori dörtlünden ilk okuma': 'A first read from your Fav 4',
   'Favori dörtlün hazırlanıyor…': 'Your Fav 4 is being prepared…',
   'Profil bağlantısı yeniden kuruluyor.': 'Reconnecting your profile.',
+  'Beklemek istemiyorsan uygulamaya şimdi geçebilirsin.': 'You can enter the app now if you would rather not wait.',
+  'Letterboxd şu an yanıt vermiyor; profilin arka planda tamamlanacak.': 'Letterboxd is not responding right now; your profile will finish in the background.',
   'Tüm geçmişin arka planda taranıyor. Profilin tarama ilerledikçe kendiliğinden zenginleşecek; şimdi uygulamaya girebilirsin.': 'Your full history is being scanned in the background. Your profile will fill itself in as it progresses; you can enter the app now.',
   'Favori yönetmenlerin': 'Your favourite directors', 'Henüz belirleniyor': 'Still figuring it out',
   'Profili güncelle': 'Refresh profile', 'Profile dön': 'Back to profile',

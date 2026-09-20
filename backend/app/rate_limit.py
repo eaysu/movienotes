@@ -28,25 +28,41 @@ class SlidingWindowRateLimiter:
         self._lock = asyncio.Lock()
         self._checks = 0
 
+    def _retry_after(self, bucket: deque[float], now: float) -> float:
+        """Seconds until this bucket has room again; 0 when it has room now."""
+        cutoff = now - self.window_seconds
+        while bucket and bucket[0] <= cutoff:
+            bucket.popleft()
+
+        if len(bucket) >= self.limit:
+            return bucket[0] + self.window_seconds - now
+        burst_cutoff = now - self.burst_seconds
+        recent = sum(timestamp > burst_cutoff for timestamp in bucket)
+        if recent >= self.burst:
+            return bucket[-self.burst] + self.burst_seconds - now
+        return 0.0
+
+    async def peek(self, key: str) -> tuple[bool, int]:
+        """Report whether ``key`` has room, without spending any of it.
+
+        A quota that only failures pay into still has to be read on every
+        attempt; reading it must not itself be an attempt.
+        """
+        async with self._lock:
+            retry_after = self._retry_after(
+                self._buckets.setdefault(key, deque()), self._clock()
+            )
+        if retry_after > 0:
+            return False, max(1, math.ceil(retry_after))
+        return True, 0
+
     async def check(self, key: str) -> tuple[bool, int]:
         """Return ``(allowed, retry_after_seconds)`` and consume allowed calls."""
         now = self._clock()
         async with self._lock:
             self._checks += 1
             bucket = self._buckets.setdefault(key, deque())
-            cutoff = now - self.window_seconds
-            while bucket and bucket[0] <= cutoff:
-                bucket.popleft()
-
-            retry_after = 0.0
-            if len(bucket) >= self.limit:
-                retry_after = bucket[0] + self.window_seconds - now
-            else:
-                burst_cutoff = now - self.burst_seconds
-                recent = sum(timestamp > burst_cutoff for timestamp in bucket)
-                if recent >= self.burst:
-                    burst_start = bucket[-self.burst]
-                    retry_after = burst_start + self.burst_seconds - now
+            retry_after = self._retry_after(bucket, now)
 
             if retry_after > 0:
                 return False, max(1, math.ceil(retry_after))
