@@ -8,24 +8,24 @@ import {
   finishApiRequest,
   scrapeErrorMessage,
   streamErrorMessage,
-} from './api.js?v=20260920.6';
+} from './api.js?v=20260920.7';
 import {
   cookieValue,
   csrfHeaders,
   setAuthMessage,
   setAuthMode,
   setPasswordVisibility,
-} from './auth.js?v=20260920.6';
-import { directorAvatar, directorFilmGrid, directorFilmTile } from './profile.js?v=20260920.6';
+} from './auth.js?v=20260920.7';
+import { directorAvatar, directorFilmGrid, directorFilmTile } from './profile.js?v=20260920.7';
 import { animateScore, getScoreInfo } from './blend.js?v=20260902.15';
-import { createRecommendationCards } from './recommendations.js?v=20260920.6';
+import { createRecommendationCards } from './recommendations.js?v=20260920.7';
 import {
   getLocale,
   initI18n,
   localePreference,
   setLocalePreference,
   t,
-} from './i18n.js?v=20260920.6';
+} from './i18n.js?v=20260920.7';
 
 initI18n();
 
@@ -34,7 +34,7 @@ const uiLocale = () => (getLocale() === 'en' ? 'en-US' : 'tr-TR');
 let _shareCardsModule;
 function loadShareCardsModule() {
   if (!_shareCardsModule) {
-    _shareCardsModule = import('./share-cards.js?v=20260920.6');
+    _shareCardsModule = import('./share-cards.js?v=20260920.7');
   }
   return _shareCardsModule;
 }
@@ -398,9 +398,10 @@ function openProfilePanel(which) {
   profileActionError(null);
   if (watch) {
     setProfileWatchMode(_profileWatchMode);
-    // Bugünün zevk önerisi hâlâ geçerliyse paneli kapatma, geri yükle.
-    const cached = _loadTasteReco();
-    if (cached) _showTasteReco(cached.at || 0);
+    // The panel opens on its chooser, never on an earlier answer. Replaying
+    // the last pick here made "Ne izlesem?" look like it had already decided,
+    // with yesterday's cards stacked below the buttons. The stored pool still
+    // backs paging and swiping within the run that produced it.
   }
   if (blend) setTimeout(() => $('profile-blend-username').focus(), 40);
 }
@@ -614,7 +615,7 @@ async function startInlineReco(mode, { preserveViewport = false } = {}) {
 
 function _discoverNote(on) {
   return on
-    ? `<div class="mb-4 rounded-xl border border-tertiary-container/30 bg-tertiary-container/10 px-4 py-3 font-body-md text-body-md text-tertiary-container">Watchlist'inde öneri için yeterli film yoktu — eksikleri TMDb'den, daha önce izlemediğin filmlerden tamamladık.</div>`
+    ? `<div class="mb-3 rounded-xl border border-tertiary-container/30 bg-tertiary-container/10 px-3 py-2 font-label-sm text-label-sm leading-relaxed text-tertiary-container">Watchlist'inde öneri için yeterli film yoktu — eksikleri TMDb'den, daha önce izlemediğin filmlerden tamamladık.</div>`
     : '';
 }
 
@@ -674,8 +675,7 @@ function _showTasteReco(index) {
       <span class="font-label-sm text-label-sm uppercase tracking-wide text-on-surface-variant/60">${i + 1} / ${o.pool.length}</span>
       <button type="button" data-taste-nav="1" ${i === o.pool.length - 1 ? 'disabled' : ''} class="w-9 h-9 rounded-full border border-outline-variant/30 text-on-surface-variant hover:text-on-surface disabled:opacity-25 flex items-center justify-center transition-colors"><span class="material-symbols-outlined text-[20px]">chevron_right</span></button>
     </div>
-    ${i === o.pool.length - 1 ? _toRandomBtn(o.pool.length) : ''}
-    ${_recoResetBtn()}`;
+    ${i === o.pool.length - 1 ? _toRandomBtn(o.pool.length) : ''}`;
   bindRecoSwipe($('profile-reco-body'));
 }
 
@@ -691,21 +691,15 @@ function renderInlineRandom(data) {
     $('profile-reco-body').innerHTML = `<div class="rounded-xl px-4 py-3 bg-error-container/30 text-error font-body-md text-body-md">Film bulunamadı.</div>${_recoResetBtn()}`;
     return;
   }
-  // One screen, no scrolling: the pool note explains where the pick came from
-  // and both next steps stay on one row beneath the card.
+  // The card and its two next steps are the whole screen. Where the pool came
+  // from is not the reader's problem; the film's own reason line already says
+  // why it surfaced.
   $('profile-reco-body').innerHTML = `
-    ${_randomPoolNote(data)}
     <div class="line-rise">${buildRandomCard(films[0])}</div>
     <div class="mt-3 grid grid-cols-2 gap-2">
       <button type="button" id="profile-reco-reroll" class="flex items-center justify-center gap-1.5 rounded-xl border border-secondary-container/30 bg-secondary-container/10 px-2 py-2.5 text-center font-label-md text-label-md uppercase tracking-wide text-secondary-container hover:bg-secondary-container/20 transition-colors"><span class="material-symbols-outlined text-[18px] shrink-0">casino</span>Başka bir tane</button>
       <button type="button" id="profile-reco-totaste" class="flex items-center justify-center gap-1.5 rounded-xl border border-primary-container/30 bg-primary-container/10 px-2 py-2.5 text-center font-label-md text-label-md uppercase tracking-wide text-primary-container hover:bg-primary-container/20 transition-colors"><span class="material-symbols-outlined text-[18px] shrink-0">psychology</span>Zevkime göre öner</button>
     </div>`;
-}
-
-function _randomPoolNote(data) {
-  return data.discover_fallback
-    ? `<div class="mb-3 rounded-xl border border-tertiary-container/30 bg-tertiary-container/10 px-3 py-2 font-label-sm text-label-sm leading-relaxed text-tertiary-container">Topluluk havuzu henüz yeterli değil — bunu TMDb'den, izlemediğin filmler arasından seçtik.</div>`
-    : `<div class="mb-3 rounded-xl border border-outline-variant/25 bg-surface-variant/40 px-3 py-2 font-label-sm text-label-sm leading-relaxed text-on-surface-variant">Diğer Movienotes üyelerinin izlediği, senin izlemediğin filmler arasından.</div>`;
 }
 
 function runProfileWatch() {
@@ -880,6 +874,10 @@ function showView(name) {
     $(`view-${v}`).classList.toggle('hidden', v !== name);
   });
   $('main-footer').classList.toggle('hidden', NO_FOOTER_VIEWS.includes(name));
+  // Ne izlesem? is a single-screen decision, so its page does not scroll.
+  // Scoped to the view and cleared on the way out — an overflow:hidden body
+  // left behind would freeze every other screen.
+  document.body.classList.toggle('tools-fixed', name === 'tools');
   // Onboarding is a locked, full-screen takeover — no header to click away with.
   $('app-header').classList.toggle(
     'hidden', name === 'onboarding' || (Boolean(_account) && SHELL_VIEWS.includes(name)),
@@ -3101,8 +3099,8 @@ function letterFilmMarkup(film, { link = true } = {}) {
   const director = escapeHTML(film.director || '');
   const poster = safeImageURL(film.poster_url);
   const href = letterboxdFilmURL(film.slug || film.film_slug);
-  const text = `<span class="min-w-0"><strong class="block truncate">${title}${year ? ` <span class="text-on-surface-variant">(${escapeHTML(year)})</span>` : ''}</strong>${director ? `<span class="mt-0.5 block truncate text-xs text-on-surface-variant">${director}</span>` : ''}</span>`;
-  return `<div class="flex min-w-0 items-center gap-3">${poster ? `<img src="${poster}" alt="" class="h-12 w-9 rounded object-cover"/>` : ''}${link && href ? `<a href="${href}" target="_blank" rel="noopener" class="min-w-0 hover:underline">${text}</a>` : text}</div>`;
+  const text = `<span class="block min-w-0 flex-1"><strong class="block truncate">${title}${year ? ` <span class="text-on-surface-variant">(${escapeHTML(year)})</span>` : ''}</strong>${director ? `<span class="mt-0.5 block truncate text-xs text-on-surface-variant">${director}</span>` : ''}</span>`;
+  return `<div class="flex min-w-0 items-center gap-3">${poster ? `<img src="${poster}" alt="" class="h-12 w-9 shrink-0 rounded object-cover"/>` : ''}${link && href ? `<a href="${href}" target="_blank" rel="noopener" class="min-w-0 flex-1 hover:underline">${text}</a>` : text}</div>`;
 }
 
 function letterCard(item, payload) {
@@ -3308,7 +3306,10 @@ async function openLetterCompose(username) {
 function renderPickedLetterFilm() {
   const target = $('letter-film-picked');
   if (!_letterPickedFilm) { target.classList.add('hidden'); target.innerHTML = ''; return; }
-  target.innerHTML = `<div class="flex items-center justify-between gap-3"><div>${letterFilmMarkup(_letterPickedFilm, { link: false })}</div><button type="button" data-letter-film-clear class="rounded-md px-2 py-1 text-xs text-tertiary-container">Kaldır</button></div>`;
+  // A flex child defaults to min-width:auto, so without min-w-0 the title's
+  // own width wins and pushes "Kaldır" off the card — leaving no way to
+  // detach a film once it was attached.
+  target.innerHTML = `<div class="flex items-center justify-between gap-3"><div class="min-w-0 flex-1">${letterFilmMarkup(_letterPickedFilm, { link: false })}</div><button type="button" data-letter-film-clear class="shrink-0 rounded-md px-2 py-1 text-xs text-tertiary-container">Kaldır</button></div>`;
   target.classList.remove('hidden');
 }
 

@@ -459,3 +459,43 @@ class ForcedTasteRebuildTests(unittest.TestCase):
         assert 'taste.analysis_source = "local"' in rebuild
         assert 'taste.analysis_source = "llm"' in rebuild
         assert "taste analysis fell back to local prose" in rebuild
+
+
+class RandomRatingFloorTests(unittest.TestCase):
+    """Asked for: a spin should aim above 3.5 on the five-star scale."""
+
+    @staticmethod
+    def _row(slug: str, avg):
+        return {
+            "film_slug": slug, "title": slug.title(), "release_year": 2000,
+            "tmdb_id": 1, "avg_rating": avg, "watcher_count": 5,
+        }
+
+    def _pool(self, rows):
+        service = SimpleNamespace(community_random_films=lambda *_a, **_k: rows)
+        account = SimpleNamespace(id=1)
+        return asyncio.run(_community_random_pool(service, account))
+
+    def test_films_the_membership_rated_below_the_floor_are_dropped(self):
+        slugs = {f.slug for f in self._pool([
+            self._row("loved", 4.4),
+            self._row("fine", 3.5),
+            self._row("poor", 2.1),
+        ])}
+
+        self.assertEqual(slugs, {"loved", "fine"})
+
+    def test_an_unrated_film_is_not_treated_as_a_bad_one(self):
+        slugs = {f.slug for f in self._pool([
+            self._row("loved", 4.4), self._row("unseen", None),
+        ])}
+
+        self.assertEqual(slugs, {"loved", "unseen"})
+
+    def test_an_all_low_pool_still_returns_something(self):
+        # An empty random mode is worse than a mediocre film.
+        slugs = {f.slug for f in self._pool([
+            self._row("meh", 2.0), self._row("worse", 1.2),
+        ])}
+
+        self.assertEqual(slugs, {"meh", "worse"})

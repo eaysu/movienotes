@@ -616,6 +616,29 @@
   body.has-shell #view-random-result,
   body.has-shell #view-blend-result { padding-top: .75rem; }
 
+  /* "Ne izlesem?" tek ekranlık bir karar ekranı: kart, gezinme ve düğmeler
+     aynı anda görünmeli, sayfa aşağı kaydırılmamalı. Sayfayı sabitliyoruz ama
+     içeriği hapsetmiyoruz — beklenmedik bir taşmada (çok küçük ekran, büyük
+     yazı tipi) yalnızca sonuç alanı kendi içinde kayar, hiçbir düğme
+     erişilemez hale gelmez. */
+  body.tools-fixed { overflow: hidden; }
+  body.tools-fixed #view-tools {
+    height: calc(100dvh - 4.5rem);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    padding-bottom: 0;
+  }
+  body.tools-fixed #quick-tools-host {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  @media (min-width: 1024px) {
+    body.tools-fixed #view-tools { height: 100dvh; }
+  }
+
   /* Sütun yüksekliği tam ekran + alt çubuk olunca sayfa içerik kısa olsa bile
      kaydırılabiliyordu; çubuğun payını düşüyoruz. */
   .shell-column { min-height: calc(100dvh - 4.5rem); }

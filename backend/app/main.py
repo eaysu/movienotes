@@ -2240,14 +2240,19 @@ def _guess_lb_slug(title: str) -> str:
 
 
 async def _discover_fallback_films(
-    enricher, service, account, watched_films, *, genre_names=None, limit=40
+    enricher, service, account, watched_films, *, genre_names=None, limit=40,
+    min_vote_average: float = 6.0,
 ):
     """TMDb Discover films the user hasn't watched — for an empty watchlist."""
     if enricher is None:
         return []
     pool = []
     with contextlib.suppress(Exception):
-        pool = await enricher.discover_pool(genre_names=genre_names, limit=limit + 25)
+        pool = await enricher.discover_pool(
+            genre_names=genre_names,
+            limit=limit + 25,
+            min_vote_average=min_vote_average,
+        )
     if not pool:
         return []
     watched_slugs: set[str] = set()
@@ -2276,6 +2281,9 @@ async def _discover_fallback_films(
 
 
 RANDOM_POOL_SAMPLE = 40   # rows requested from the community pool per call
+# A spin is meant to be worth taking, so it aims above this five-star average.
+# It is an aim, not a guarantee: an empty pool is worse than a mediocre film.
+RANDOM_MIN_AVERAGE = 3.5
 RANDOM_PICK_COUNT = 3
 
 
@@ -2309,6 +2317,16 @@ async def _community_random_pool(service, account, limit=RANDOM_POOL_SAMPLE) -> 
     if service is None or account is None:
         return []
     rows = await asyncio.to_thread(service.community_random_films, account.id, limit)
+    # The membership's own average is already on the five-star scale, so a spin
+    # can prefer the films they rated well. Unrated films keep their place —
+    # "no one has scored it yet" is not the same as "it scored badly".
+    well_rated = [
+        row for row in (rows or [])
+        if row.get("avg_rating") is None
+        or float(row.get("avg_rating") or 0) >= RANDOM_MIN_AVERAGE
+    ]
+    # Never trade an empty result for a stricter bar.
+    rows = well_rated or rows
     films = []
     for row in rows or []:
         slug = row.get("film_slug") or ""
@@ -2364,7 +2382,10 @@ async def _random_discover_pool(settings, service, account, cache, limit=RANDOM_
         return []
     enricher = Enricher(settings.tmdb_api_key, cache, asset_store=service)
     return await _discover_fallback_films(
-        enricher, service, account, [], genre_names=None, limit=limit
+        enricher, service, account, [], genre_names=None, limit=limit,
+        # A spin should be worth taking: RANDOM_MIN_AVERAGE on the five-star
+        # scale, stated to TMDb in its own ten-point terms.
+        min_vote_average=RANDOM_MIN_AVERAGE * 2,
     )
 
 

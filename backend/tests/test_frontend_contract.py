@@ -470,21 +470,72 @@ def test_one_recommendation_fits_a_screen_without_scrolling():
     assert "extraMeta" not in reco_js
 
 
-def test_the_random_result_fits_one_screen_with_both_next_steps():
-    """Asked for: keep the pool note, drop the "keep spinning" line, and keep
-    both buttons visible without scrolling."""
+def test_the_random_result_is_one_card_and_two_next_steps():
+    """Asked for: no explanatory cards above the pick, nothing below the two
+    buttons, and no page scroll on either single-pick screen."""
     app_js = (FRONTEND / "js" / "app.js").read_text()
+    css = (FRONTEND / "css" / "source.css").read_text()
 
     render = app_js.split("function renderInlineRandom", 1)[1].split(
-        "function _randomPoolNote", 1
+        "function runProfileWatch", 1
     )[0]
     assert "Beğenmezsen çevirmeye devam et" not in app_js
-    assert "_randomPoolNote(data)" in render
+    # The pool note is gone: where the pick came from is not the reader's job.
+    assert "_randomPoolNote" not in app_js
+    assert "Diğer Movienotes üyelerinin" not in app_js
     # One row, so neither next step drops off the bottom on a phone.
     assert 'class="mt-3 grid grid-cols-2 gap-2"' in render
     assert "grid-cols-1 sm:grid-cols-2" not in render
     assert 'id="profile-reco-reroll"' in render
     assert 'id="profile-reco-totaste"' in render
+
+    # The page itself is pinned to the viewport, but the result area keeps an
+    # internal scroll so an overflow can never trap a button off-screen.
+    assert "body.tools-fixed { overflow: hidden; }" in css
+    assert "body.tools-fixed #view-tools" in css
+    assert "body.tools-fixed #quick-tools-host" in css
+    assert "overflow-y: auto" in css.split("body.tools-fixed #quick-tools-host", 1)[1]
+    assert "classList.toggle('tools-fixed', name === 'tools')" in app_js
+
+
+def test_the_taste_pick_panel_opens_on_its_chooser_not_an_old_answer():
+    """Reported: entering "Ne izlesem?" showed the previous run's cards below
+    the buttons, with a reset button nobody needed under them."""
+    app_js = (FRONTEND / "js" / "app.js").read_text()
+
+    panel = app_js.split("function openProfilePanel", 1)[1].split(
+        "function mountQuickTools", 1
+    )[0]
+    assert "_showTasteReco" not in panel
+    assert "_loadTasteReco" not in panel
+
+    show = app_js.split("function _showTasteReco", 1)[1].split(
+        "function _toRandomBtn", 1
+    )[0]
+    assert "_recoResetBtn()" not in show
+    # It still backs paging and swiping inside the run that produced it.
+    assert "_loadTasteReco" in show
+    # Errors keep a way out, so the button itself must not disappear entirely.
+    assert "function _recoResetBtn" in app_js
+
+
+def test_an_attached_letter_film_can_always_be_detached():
+    """Reported: a long title pushed "Kaldır" off the card, so an attached film
+    could not be removed. A flex child defaults to min-width:auto, so the title
+    won the row unless it is told it may shrink."""
+    app_js = (FRONTEND / "js" / "app.js").read_text()
+
+    picked = app_js.split("data-letter-film-clear", 1)[0].rsplit(
+        "target.innerHTML", 1
+    )[1]
+    assert 'class="min-w-0 flex-1"' in picked
+    markup = app_js.split("function letterFilmMarkup", 1)[1].split(
+        "function letterCard", 1
+    )[0]
+    assert "truncate" in markup
+    assert "min-w-0 flex-1" in markup
+    assert "shrink-0 rounded object-cover" in markup
+    assert "shrink-0 rounded-md" in app_js
 
 
 def test_profile_follow_lists_are_dialogs_and_stay_out_of_the_share_card():
@@ -960,9 +1011,9 @@ def test_shell_asset_content_changes_force_a_version_bump():
     files that no longer existed.
     """
     expected = {
-        "js/app.js": "2e5da6b3f01470495ad59d1324388a9a48d3075282c539675f822dd5f0b2c099",
-        "app.css": "7a7c45070dda9074baf076df309d775ede7fb204735438f9c6ba677b1b87660a",
-        "js/share-cards.js": "ddd1f2e1f5bfb48f65bc3f1944d3931d9801ec32a5f2450705f3c4e66959f87f",
+        "js/app.js": "2f0a91f737ea1e0300f2d8b7a941504fd3f43e89658e21da0023ee2020851041",
+        "app.css": "fe2da4761c150adf89c648f9a1e228b9ec935606a37c899c36c089fc09ad66c1",
+        "js/share-cards.js": "34bb3b39c6530c47344a60d7939c49382a228d698e5610fb08286262f7f5d368",
         "js/i18n.js": "d4eab4d2f6dc01ded277e1c39d15dc0818d2baa15dc49f51a57a19da83e70ba1",
         "site.webmanifest": "7a7de349179ed9f226d38632dfde5a8478edd10305972ea52641b0dc6aa7f405",
         "movienotes-mark.png": "850aa9117aa52768952843f8e2c410c0c17868877d81b2058274290373b4ee1e",
@@ -999,24 +1050,24 @@ def test_every_app_shell_asset_has_an_explicit_immutable_version():
     source_css = (FRONTEND / "css" / "source.css").read_text()
 
     dependency_version = "v=20260902.15"
-    api_version = "v=20260920.6"
-    css_version = "v=20260920.6"
+    api_version = "v=20260920.7"
+    css_version = "v=20260920.7"
     assert f"/static/app.css?{css_version}" in html
-    assert "/static/js/app.js?v=20260920.6" in html
-    assert "./i18n.js?v=20260920.6" in app_js
+    assert "/static/js/app.js?v=20260920.7" in html
+    assert "./i18n.js?v=20260920.7" in app_js
     assert app_js.count(f"?{dependency_version}") == 2
     assert f"./api.js?{api_version}" in app_js
-    assert "./recommendations.js?v=20260920.6" in app_js
-    assert "./share-cards.js?v=20260920.6" in app_js
-    assert "./auth.js?v=20260920.6" in app_js
+    assert "./recommendations.js?v=20260920.7" in app_js
+    assert "./share-cards.js?v=20260920.7" in app_js
+    assert "./auth.js?v=20260920.7" in app_js
     assert f"./dom.js?{dependency_version}" in auth_js
-    assert "./i18n.js?v=20260920.6" in auth_js
+    assert "./i18n.js?v=20260920.7" in auth_js
     assert f"./dom.js?{dependency_version}" in profile_js
-    assert "./i18n.js?v=20260920.6" in profile_js
+    assert "./i18n.js?v=20260920.7" in profile_js
     assert f"./dom.js?{dependency_version}" in recommendations_js
-    assert "./i18n.js?v=20260920.6" in recommendations_js
+    assert "./i18n.js?v=20260920.7" in recommendations_js
     assert f"./api.js?{api_version}" in share_js
-    assert "./i18n.js?v=20260920.6" in share_js
+    assert "./i18n.js?v=20260920.7" in share_js
     assert f"criterion-closet-bg.jpg?{dependency_version}" in source_css
 
 
@@ -1086,7 +1137,7 @@ def test_png_share_renderer_is_lazy_loaded_on_first_share_action():
 
     imports = app_js.split("// ── Cinema facts", 1)[0]
     assert "from './share-cards.js" not in imports
-    assert "import('./share-cards.js?v=20260920.6')" in imports
+    assert "import('./share-cards.js?v=20260920.7')" in imports
     assert "const shareCards = await loadShareCardsModule();" in app_js
 
 

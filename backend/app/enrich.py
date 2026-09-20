@@ -295,7 +295,11 @@ class Enricher:
         return out
 
     async def discover_pool(
-        self, *, genre_names: Optional[list[str]] = None, limit: int = 50
+        self,
+        *,
+        genre_names: Optional[list[str]] = None,
+        limit: int = 50,
+        min_vote_average: float = 6.0,
     ) -> list["EnrichedFilm"]:
         """Well-known films from TMDb Discover, for cold-start fallbacks.
 
@@ -316,7 +320,7 @@ class Enricher:
             params = {
                 "sort_by": "popularity.desc",
                 "vote_count.gte": 400,
-                "vote_average.gte": 6.0,
+                "vote_average.gte": float(min_vote_average),
                 "include_adult": "false",
                 "language": "en-US",
                 "page": page,
