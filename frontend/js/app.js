@@ -8,24 +8,24 @@ import {
   finishApiRequest,
   scrapeErrorMessage,
   streamErrorMessage,
-} from './api.js?v=20260920.21';
+} from './api.js?v=20260920.22';
 import {
   cookieValue,
   csrfHeaders,
   setAuthMessage,
   setAuthMode,
   setPasswordVisibility,
-} from './auth.js?v=20260920.21';
-import { directorAvatar, directorFilmGrid, directorFilmTile } from './profile.js?v=20260920.21';
+} from './auth.js?v=20260920.22';
+import { directorAvatar, directorFilmGrid, directorFilmTile } from './profile.js?v=20260920.22';
 import { animateScore, getScoreInfo } from './blend.js?v=20260902.15';
-import { createRecommendationCards } from './recommendations.js?v=20260920.21';
+import { createRecommendationCards } from './recommendations.js?v=20260920.22';
 import {
   getLocale,
   initI18n,
   localePreference,
   setLocalePreference,
   t,
-} from './i18n.js?v=20260920.21';
+} from './i18n.js?v=20260920.22';
 
 initI18n();
 
@@ -34,7 +34,7 @@ const uiLocale = () => (getLocale() === 'en' ? 'en-US' : 'tr-TR');
 let _shareCardsModule;
 function loadShareCardsModule() {
   if (!_shareCardsModule) {
-    _shareCardsModule = import('./share-cards.js?v=20260920.21');
+    _shareCardsModule = import('./share-cards.js?v=20260920.22');
   }
   return _shareCardsModule;
 }
@@ -865,11 +865,11 @@ function openShareSheet(opts = {}) {
   const notFound = (opts.notFoundUsername || '').replace(/^@/, '');
   const url = SITE_URL;
   const message = notFound
-    ? `Movienotes'da film zevkimizi karşılaştıralım (Blend) — kaydol: ${url}`
-    : `Letterboxd zevkine göre film öneren Movienotes'u dene: ${url}`;
+    ? t('Movienotes’da film zevkimizi karşılaştıralım (Blend) — kaydol: {url}', { url })
+    : t('Letterboxd zevkine göre film öneren Movienotes’u dene: {url}', { url });
 
   $('share-title').textContent = notFound
-    ? `@${notFound} sitemize kaydolmamış 😔`
+    ? t('@{username} sitemize kaydolmamış 😔', { username: notFound })
     : 'Bir arkadaşını davet et';
   $('share-subtitle').textContent = notFound
     ? 'Davet etmek ister misin? Linki kopyala ya da bir uygulamadan gönder.'
@@ -978,7 +978,7 @@ async function refreshFeedBadge() {
       && 'Notification' in window
       && Notification.permission === 'granted') {
       new Notification('Movienotes', {
-        body: `${count - _lastUnreadNotificationCount} yeni bildirimin var.`,
+        body: t('{count} yeni bildirimin var.', { count: count - _lastUnreadNotificationCount }),
         icon: '/static/movienotes-notify-192.png?v=20260910.6',
       });
     }
@@ -1816,7 +1816,7 @@ function renderPersistedProfile(data) {
     const favoriteDirector = dirRows[0] || null;
     $('profile-favorite-director-name').textContent = favoriteDirector?.name || 'Henüz belirleniyor';
     $('profile-favorite-director-note').textContent = favoriteDirector?.count
-      ? `${favoriteDirector.count} film ve puanlarınla öne çıkan yönetmen.`
+      ? t('{count} film ve puanlarınla öne çıkan yönetmen.', { count: favoriteDirector.count })
       : favoriteDirector ? 'İzleme sıklığın ve verdiğin puanlarla öne çıkıyor.'
       : sweeping ? 'Arşivin taranıyor; yönetmen sıralaman tarama ilerledikçe oluşacak.'
       : 'Yeterli yönetmen verisi oluştuğunda burada görünecek.';
@@ -2781,7 +2781,7 @@ function paintBulletin() {
 
   $('bulletin-body').innerHTML = `
     <p class="mb-3 text-xs text-on-surface-variant/60">${films.length} film${
-      highlighted.length ? ` · ${highlighted.length} tanesi seninle ilgili, önde` : ''
+      highlighted.length ? ' · ' + t('{count} tanesi seninle ilgili, önde', { count: highlighted.length }) : ''
     }</p>
     <div id="bulletin-strip" class="bulletin-strip">
       ${shown.map(bulletinFilmCard).join('')}
@@ -3296,7 +3296,7 @@ function renderBlendBadge(rawCount) {
   button.classList.toggle('text-secondary-container', count > 0);
   button.setAttribute(
     'aria-label',
-    count ? `Gelen kutusu, ${count} yeni öğe` : 'Gelen kutusu',
+    count ? t('Gelen kutusu, {count} yeni öğe', { count }) : 'Gelen kutusu',
   );
   paintNavBadge('inbox', count);
 }
@@ -3370,8 +3370,10 @@ function renderLetterCooldown() {
   const blocked = !_letterSendStatus.can_send && remaining > 0;
   const notice = $('letter-compose-cooldown');
   const send = $('btn-letter-send');
-  const recipient = _letterSendStatus.recipient_username ? `@${_letterSendStatus.recipient_username} için ` : '';
-  notice.textContent = blocked ? `${recipient}yeni mektup hakkın ${formatLetterCooldown(remaining)} sonra açılacak. Bu arada başka bir sinefile yazabilirsin.` : '';
+  const recipient = _letterSendStatus.recipient_username ? t('@{username} için', { username: _letterSendStatus.recipient_username }) + ' ' : '';
+  notice.textContent = blocked
+    ? recipient + t('yeni mektup hakkın {when} sonra açılacak. Bu arada başka bir sinefile yazabilirsin.', { when: formatLetterCooldown(remaining) })
+    : '';
   notice.classList.toggle('hidden', !blocked);
   send.disabled = blocked;
   if (_letterCooldownTimer) clearInterval(_letterCooldownTimer);
@@ -3513,7 +3515,7 @@ async function loadLetters() {
           unreadCount = Math.max(0, unreadCount - legacyLetters.filter(
             item => item.direction === 'received' && !item.read_at,
           ).length);
-          letterMessage('notice', `${purge.deleted} eski, cihaz-anahtarlı mektup kaldırıldı. Yeni mektupların mobilde ve webde açılır.`);
+          letterMessage('notice', t('{count} eski, cihaz-anahtarlı mektup kaldırıldı. Yeni mektupların mobilde ve webde açılır.', { count: purge.deleted }));
         }
       } catch (_) {
         // A retry on the next inbox visit is safer than letting an old broken
@@ -3598,9 +3600,9 @@ async function openLetterCompose(username) {
   }
   _letterRecipient = { username };
   _letterPickedFilm = null;
-  $('letter-compose-title').textContent = `@${username} için mektup`;
+  $('letter-compose-title').textContent = t('@{username} için mektup', { username });
   $('letter-compose-body').value = '';
-  $('letter-compose-count').textContent = '600 karakter kaldı';
+  $('letter-compose-count').textContent = t('{count} karakter kaldı', { count: 600 });
   $('letter-film-search').value = '';
   $('letter-film-results').innerHTML = '';
   $('letter-film-picked').classList.add('hidden');
@@ -3652,7 +3654,7 @@ async function sendLetter(event) {
     });
     _letterSendStatus = { can_send: false, seconds_remaining: 24 * 60 * 60, recipient_username: recipient.username };
     $('dialog-letter-compose').close();
-    letterMessage('notice', `Mektubun @${recipient.username} adresine gönderildi.`);
+    letterMessage('notice', t('Mektubun @{username} adresine gönderildi.', { username: recipient.username }));
     await loadLetters();
   } catch (error) {
     $('letter-compose-error').textContent = error.message || 'Mektup gönderilemedi.';
@@ -3950,10 +3952,10 @@ async function handleBlendInboxAction(event) {
     }
     if (!username) return;
     if (action === 'block') {
-      if (!window.confirm(`@${username} engellensin mi? Aranızdaki mektuplar iki taraftan da silinir.`)) return;
+      if (!window.confirm(t('@{username} engellensin mi? Aranızdaki mektuplar iki taraftan da silinir.', { username }))) return;
       try {
         await apiJSON(`/api/users/${encodeURIComponent(username)}/block`, { method: 'POST', headers: csrfHeaders() });
-        letterMessage('notice', `@${username} engellendi; mektuplar kaldırıldı.`);
+        letterMessage('notice', t('@{username} engellendi; mektuplar kaldırıldı.', { username }));
         await loadLetters();
       } catch (error) { letterMessage('error', error.message || 'Kullanıcı engellenemedi.'); }
       return;
@@ -3980,7 +3982,7 @@ async function handleBlendInboxAction(event) {
   actionNotice?.classList.add('hidden');
   $('blends-notice').classList.add('hidden');
   if (action === 'block') {
-    if (!peerUsername || !window.confirm(`@${peerUsername} engellensin mi? Bekleyen Blend istekleri de iptal edilir.`)) return;
+    if (!peerUsername || !window.confirm(t('@{username} engellensin mi? Bekleyen Blend istekleri de iptal edilir.', { username: peerUsername }))) return;
     button.disabled = true;
     try {
       await apiJSON(`/api/users/${encodeURIComponent(peerUsername)}/block`, {
@@ -4003,7 +4005,7 @@ async function handleBlendInboxAction(event) {
         method: 'DELETE', headers: csrfHeaders(),
       });
       await loadBlockedUsers();
-      $('blocked-users-notice').textContent = `@${peerUsername} engeli kaldırıldı.`;
+      $('blocked-users-notice').textContent = t('@{username} engeli kaldırıldı.', { username: peerUsername });
       $('blocked-users-notice').classList.remove('hidden');
     } catch (error) {
       $('blocked-users-error').textContent = error.message || 'Engel kaldırılamadı.';
@@ -4063,9 +4065,9 @@ async function handleBlendInboxAction(event) {
     return;
   }
   if (action === 'delete-result') {
-    const who = peerUsername ? `@${peerUsername} ile olan ` : '';
+    const who = peerUsername ? t('@{username} ile olan', { username: peerUsername }) + ' ' : '';
     const confirmed = window.confirm(
-      `${who}Blend kalıcı olarak silinsin mi? Bu işlem Blend'i iki tarafın geçmişinden de kaldırır.`
+      who + t('Blend kalıcı olarak silinsin mi? Bu işlem Blend’i iki tarafın geçmişinden de kaldırır.')
     );
     if (!confirmed) return;
   }
@@ -4973,7 +4975,7 @@ function renderBlendWatchlist(payload = {}) {
   if (combined.length > 0 && common.length > 0) {
     title.textContent = 'Birlikte İzlemek İstedikleriniz';
     if (bridge.length > 0) {
-      sub.textContent = `${common.length} ortak film ve zevklerinizi buluşturan ${combined.length - common.length} öneri.`;
+      sub.textContent = t('{shared} ortak film ve zevklerinizi buluşturan {extra} öneri.', { shared: common.length, extra: combined.length - common.length });
       sub.classList.remove('hidden');
     } else {
       sub.classList.add('hidden');
@@ -4981,7 +4983,7 @@ function renderBlendWatchlist(payload = {}) {
     }
     show(combined);
   } else if (combined.length > 0) {
-    title.textContent = `Sizi Birleştirecek ${combined.length} Film`;
+    title.textContent = t('Sizi Birleştirecek {count} Film', { count: combined.length });
     sub.textContent = 'Watchlist’lerinizde ortak film çıkmadı — ikinizin zevkini buluşturacak, henüz kimsenin izlemediği filmler.';
     sub.classList.remove('hidden');
     show(combined);
@@ -5117,7 +5119,7 @@ async function requestSinefilBlend(username, button) {
     });
     if (data.existing) { await routeToExistingBlend(data); return; }
     button.textContent = 'İstek gönderildi';
-    sinefilMessage('notice', `@${data.recipient_username} kullanıcısına Blend isteği gönderildi.`);
+    sinefilMessage('notice', t('@{username} kullanıcısına Blend isteği gönderildi.', { username: data.recipient_username }));
   } catch (error) {
     sinefilMessage('error', error.message || 'Blend isteği gönderilemedi.');
   } finally { button.disabled = false; }
@@ -5167,7 +5169,7 @@ async function blendRequestFlow(opts = {}) {
       await routeToExistingBlend(data);
       return;
     }
-    notify(`@${data.recipient_username} kullanıcısına Blend isteği gönderildi.`);
+    notify(t('@{username} kullanıcısına Blend isteği gönderildi.', { username: data.recipient_username }));
     loadBlendInbox(false);
   } catch (error) {
     if ((error.code === 'recipient_not_found' || error.status === 404) && opts.onNotFound) {
@@ -5291,7 +5293,7 @@ function renderRandomResult() {
 
   tryAgainBtn.disabled = false;
   infoEl.textContent = remaining > 0
-    ? `Bu turdan ${remaining} film daha var.`
+    ? t('Bu turdan {count} film daha var.', { count: remaining })
     : 'Bu tur bitti — beğenmediysen yeni bir tur çekelim.';
 
   showView('random-result');
@@ -5485,8 +5487,8 @@ async function deleteMyData() {
   }
   const confirmed = window.confirm(
     _authEnabled
-      ? `@${username.replace(/^@/, '')} hesabı ve saklanan tüm Movienotes verileri kalıcı olarak silinsin mi?`
-      : `@${username.replace(/^@/, '')} için saklanan profil ve öneri cache'i silinsin mi? ` +
+      ? t('@{username} hesabı ve saklanan tüm Movienotes verileri kalıcı olarak silinsin mi?', { username: username.replace(/^@/, '') })
+      : t('@{username} için saklanan profil ve öneri cache’i silinsin mi?', { username: username.replace(/^@/, '') }) + ' ' +
         'Yeni bir analiz başlatırsan public veriler tekrar oluşturulur.'
   );
   if (!confirmed) return;
@@ -5504,7 +5506,7 @@ async function deleteMyData() {
     try { payload = await response.json(); } catch { /* empty error response */ }
     if (!response.ok) {
       const retryAfter = response.headers.get('Retry-After');
-      const suffix = retryAfter ? ` (${retryAfter} saniye sonra tekrar dene.)` : '';
+      const suffix = retryAfter ? ' (' + t('{seconds} saniye sonra tekrar dene.', { seconds: retryAfter }) + ')' : '';
       throw new Error((payload.detail || 'Veri silinemedi.') + suffix);
     }
     $('username-input').value = '';
@@ -5513,9 +5515,9 @@ async function deleteMyData() {
       _account = null;
       setAuthMode('login');
       showView('auth');
-      setAuthMessage(`@${payload.username} hesabı ve saklanan veriler silindi.`);
+      setAuthMessage(t('@{username} hesabı ve saklanan veriler silindi.', { username: payload.username }));
     } else {
-      setIdleNotice(`@${payload.username} için saklanan veriler silindi.`);
+      setIdleNotice(t('@{username} için saklanan veriler silindi.', { username: payload.username }));
     }
   } catch (error) {
     showActionError(error.message || 'Veri silinemedi. Lütfen tekrar dene.');
@@ -6299,7 +6301,7 @@ $('btn-letter-enable-confirm').addEventListener('click', async () => {
   } finally { button.disabled = false; }
 });
 $('letter-compose-form').addEventListener('submit', sendLetter);
-$('letter-compose-body').addEventListener('input', () => { $('letter-compose-count').textContent = `${600 - $('letter-compose-body').value.length} karakter kaldı`; });
+$('letter-compose-body').addEventListener('input', () => { $('letter-compose-count').textContent = t('{count} karakter kaldı', { count: 600 - $('letter-compose-body').value.length }); });
 $('letter-film-search').addEventListener('input', () => { clearTimeout(_letterSearchTimer); _letterSearchTimer = setTimeout(searchLetterFilms, 250); });
 $('letter-film-results').addEventListener('click', event => {
   const pick = event.target.closest('[data-letter-film-index]');

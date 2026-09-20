@@ -1,4 +1,4 @@
-import { t, getLocale } from './i18n.js?v=20260920.21';
+import { t, getLocale } from './i18n.js?v=20260920.22';
 
 export const API_BASE = window.__API_BASE__ || '';
 
@@ -160,10 +160,10 @@ export async function assertStreamResponse(response) {
     try { detail = errorDetailMessage(await response.json()); } catch (_) {}
     if (response.status === 429) {
       const retry = Number(response.headers.get('Retry-After') || 0);
-      const suffix = retry > 0 ? ` Yaklaşık ${retry} saniye sonra tekrar dene.` : '';
+      const suffix = retry > 0 ? ' ' + t('Yaklaşık {seconds} saniye sonra tekrar dene.', { seconds: retry }) : '';
       throw new Error((detail || 'İstek sınırına ulaşıldı.') + suffix);
     }
-    throw new Error(detail || `Sunucu HTTP ${response.status} hatası döndürdü.`);
+    throw new Error(detail || t('Sunucu HTTP {status} hatası döndürdü.', { status: response.status }));
   }
   if (!response.body) throw new Error('Yanıt akışı başlatılamadı.');
 }

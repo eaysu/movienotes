@@ -2106,7 +2106,9 @@ async def update_profile_locale(
     account.preferred_locale = locale
     # Rebuild prose from the already-saved film catalogue. This avoids a new
     # Letterboxd crawl solely because the member changed app language.
-    asyncio.create_task(_refresh_locale_taste(account))
+    asyncio.create_task(
+        _refresh_locale_taste(account, _response_locale(account, request))
+    )
     await _record_activity_event(
         _auth_service(), account, "locale_changed", {"locale": locale}
     )
@@ -2486,20 +2488,61 @@ RANDOM_MIN_AVERAGE = 3.5
 RANDOM_PICK_COUNT = 3
 
 
-def _community_reason(watchers: int, rating) -> str:
+# The random mode writes its own explanations rather than paying for an LLM
+# call per spin, so they have to be translated here like any other copy.
+_RANDOM_REASONS: dict[str, dict[str, str]] = {
+    "community_rated": {
+        "tr": "Movienotes'da {watchers} sinefil izlemiş, ortalama {average} vermişler; senin listende yok.",
+        "en": "{watchers} cinephiles on Movienotes have seen it and rated it {average} on average; it is not on your list.",
+    },
+    "community": {
+        "tr": "Movienotes'da {watchers} sinefilin izlediği, senin listende olmayan bir film.",
+        "en": "A film {watchers} cinephiles on Movienotes have seen and you have not listed.",
+    },
+    "community_one": {
+        "tr": "Başka bir Movienotes üyesinin izlediği, senin listende olmayan bir film.",
+        "en": "A film another Movienotes member has seen and you have not listed.",
+    },
+    "discover": {
+        "tr": "Topluluk havuzu yetmedi; bunu TMDb'den, henüz izlemediklerin arasından seçtik.",
+        "en": "The community pool came up short, so this one is from TMDb, among films you have not seen.",
+    },
+    "unlisted": {
+        "tr": "Senin listende olmayan filmler arasından çıktı.",
+        "en": "It came out of the films that are not on your list.",
+    },
+    "director": {
+        "tr": " {director} imzalı olması da seçime küçük bir karakter katıyor.",
+        "en": " Being a {director} film gives the pick a little character of its own.",
+    },
+    "genre": {
+        "tr": " {genre} tarafında farklı bir ruh hâline alan açabilir.",
+        "en": " On the {genre} side it might open room for a different mood.",
+    },
+    "chance": {
+        "tr": " Kararsız kaldığın bir anda şansı bu filme bırakabilirsin.",
+        "en": " When you cannot decide, you could leave it to chance and take this one.",
+    },
+}
+
+
+def _random_reason(key: str, locale: str, **values) -> str:
+    return _RANDOM_REASONS[key]["en" if locale == "en" else "tr"].format(**values)
+
+
+def _community_reason(watchers: int, rating, locale: str = "tr") -> str:
     """Honest lead for a pick that came from what other members have watched."""
     try:
         average = float(rating) if rating is not None else 0.0
     except (TypeError, ValueError):
         average = 0.0
     if watchers >= 2 and average > 0:
-        return (
-            f"Movienotes'da {watchers} sinefil izlemiş, ortalama "
-            f"{average:.1f} vermişler; senin listende yok."
+        return _random_reason(
+            "community_rated", locale, watchers=watchers, average=f"{average:.1f}"
         )
     if watchers >= 2:
-        return f"Movienotes'da {watchers} sinefilin izlediği, senin listende olmayan bir film."
-    return "Başka bir Movienotes üyesinin izlediği, senin listende olmayan bir film."
+        return _random_reason("community", locale, watchers=watchers)
+    return _random_reason("community_one", locale)
 
 
 def _pick_random_films(
@@ -2546,7 +2589,9 @@ def _pick_random_films(
     return picked
 
 
-async def _community_random_pool(service, account, limit=RANDOM_POOL_SAMPLE) -> list:
+async def _community_random_pool(
+    service, account, limit=RANDOM_POOL_SAMPLE, *, locale: str = "tr"
+) -> list:
     """Films the membership watched and this account has not, watchlist-independent."""
     if service is None or account is None:
         return []
@@ -2580,28 +2625,26 @@ async def _community_random_pool(service, account, limit=RANDOM_POOL_SAMPLE) -> 
             matched=bool(row.get("tmdb_id")),
         )
         film.reason = _community_reason(
-            int(row.get("watcher_count") or 0), row.get("avg_rating")
+            int(row.get("watcher_count") or 0), row.get("avg_rating"), locale
         )
         films.append(film)
     return films
 
 
-def _add_random_reasons(films: list, *, source: str) -> list:
+def _add_random_reasons(films: list, *, source: str, locale: str = "tr") -> list:
     """Fill in the explanation for picks that did not come with one."""
     for film in films:
         director = getattr(film, "director", "") or ""
         genres = getattr(film, "genres", None) or []
-        lead = getattr(film, "reason", "") or (
-            "Topluluk havuzu yetmedi; bunu TMDb'den, henüz izlemediklerin arasından seçtik."
-            if source == "discover"
-            else "Senin listende olmayan filmler arasından çıktı."
+        lead = getattr(film, "reason", "") or _random_reason(
+            "discover" if source == "discover" else "unlisted", locale
         )
         if director:
-            detail = f" {director} imzalı olması da seçime küçük bir karakter katıyor."
+            detail = _random_reason("director", locale, director=director)
         elif genres:
-            detail = f" {genres[0]} tarafında farklı bir ruh hâline alan açabilir."
+            detail = _random_reason("genre", locale, genre=genres[0])
         else:
-            detail = " Kararsız kaldığın bir anda şansı bu filme bırakabilirsin."
+            detail = _random_reason("chance", locale)
         film.reason = lead + detail
     return films
 
@@ -3787,14 +3830,20 @@ class _SyncPipeline:
         return len(watched)
 
 
-async def _refresh_locale_taste(account: Account) -> None:
-    """Regenerate only account prose after a language change, off-request."""
+async def _refresh_locale_taste(account: Account, locale: str) -> None:
+    """Regenerate only account prose after a language change, off-request.
+
+    The locale is resolved at the request, not here: a member who leaves the
+    setting on "auto" has no stored preference to read, so the prose used to
+    fall back to Turkish while the whole interface around it was English.
+    """
     try:
         await _SyncPipeline(get_settings(), use_stored_profile=True).rebuild_snapshot(
             account,
             use_llm=True,
             repair_all=False,
             force_analysis=True,
+            locale=locale,
         )
     except Exception:  # noqa: BLE001 - the existing data remains usable
         log.warning("locale taste refresh failed account=%s", account.id, exc_info=True)
@@ -5676,6 +5725,9 @@ async def random_pick(req: RandomRequest, request: Request):
     """
     account = await _enforce_account_username(request, req.username)
     await _enforce_random_rate_limit(request)
+    # Resolved out here: the generator runs after the response has started and
+    # no longer has a request to read the language off.
+    response_locale = _response_locale(account, request)
 
     async def generate():
         settings = get_settings()
@@ -5683,7 +5735,7 @@ async def random_pick(req: RandomRequest, request: Request):
         supabase_client, cache = _make_cache(settings)
 
         yield _sse({"type": "step", "step": "enriching"})
-        pool = await _community_random_pool(service, account)
+        pool = await _community_random_pool(service, account, locale=response_locale)
         source = "community"
         if not pool:
             # No community history yet (or no account): fall back to TMDb Discover.
@@ -5733,7 +5785,7 @@ async def random_pick(req: RandomRequest, request: Request):
             with contextlib.suppress(Exception):
                 await resolve_missing_posters(still_missing)
 
-        _add_random_reasons(chosen, source=source)
+        _add_random_reasons(chosen, source=source, locale=response_locale)
         await _record_activity_event(
             service,
             account,
