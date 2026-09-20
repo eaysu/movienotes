@@ -410,5 +410,56 @@ class SharedAssetLookupTests(unittest.TestCase):
         assert "await asyncio.to_thread(asset_getter, wanted) or {}" in block
 
 
+class SandboxBulletinTests(unittest.TestCase):
+    """Reported: the cinema guide never appeared on the profile.
+
+    It had been switched off in the sandbox, which showed a page the product
+    does not have. TMDb's "now playing" needs no venue list, so the guide works
+    from an API key alone — it only needed somewhere to put the rows.
+    """
+
+    def setUp(self):
+        self.service = SandboxAuthService()
+        self.account, _ = self.service.open_session(_profile())
+
+    def test_a_programme_can_be_written_and_read_back(self):
+        written = self.service.upsert_screenings("tr-vizyon", [
+            {"title_raw": "Dune: Part Two", "year": 2024, "tmdb_id": 693134,
+             "match_status": "matched", "poster_url": "", "url": ""},
+            {"title_raw": "Anora", "year": 2024, "tmdb_id": 1064213,
+             "match_status": "matched", "poster_url": "", "url": ""},
+        ], "run-1")
+
+        self.assertEqual(written, 2)
+        rows = self.service.list_screenings()
+        self.assertEqual({row["title_raw"] for row in rows}, {"Dune: Part Two", "Anora"})
+        # The release layer is nationwide, so a city filter must not hide it.
+        self.assertEqual(len(self.service.list_screenings(city="İstanbul")), 2)
+
+    def test_a_fresh_run_replaces_yesterday_s_programme(self):
+        """A film that left cinemas must stop being advertised as showing."""
+        self.service.upsert_screenings("tr-vizyon", [
+            {"title_raw": "Gone Now", "match_status": "matched"},
+        ], "run-1")
+
+        self.service.upsert_screenings("tr-vizyon", [
+            {"title_raw": "Showing Now", "match_status": "matched"},
+        ], "run-2")
+
+        self.assertEqual(
+            [row["title_raw"] for row in self.service.list_screenings()],
+            ["Showing Now"],
+        )
+
+    def test_the_ingest_lease_stops_a_second_run_from_piling_on(self):
+        self.assertTrue(self.service.claim_venue_ingest("tr-vizyon", "t1", 600, 600))
+        self.assertFalse(self.service.claim_venue_ingest("tr-vizyon", "t2", 600, 600))
+
+    def test_the_script_leaves_the_cinema_guide_on(self):
+        source = (ROOT.parent / "scripts" / "sandbox.py").read_text()
+
+        self.assertIn('"BULLETIN_ENABLED": "true"', source)
+
+
 if __name__ == "__main__":
     unittest.main()

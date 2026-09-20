@@ -81,13 +81,16 @@ def main() -> int:
         # allowed to travel without TLS.
         "AUTH_COOKIE_SECURE": "false",
         "DEV_LOGIN_ENABLED": "false",
-        # One person, one profile: the scheduled sweeps have no cohort to
-        # serve and would only add noise. The on-entry diary read still runs,
-        # and keeps more than the production three so the feed has something
-        # to show in a session that lasts minutes rather than weeks.
-        "BULLETIN_ENABLED": "false",
+        # The hourly diary sweep has no cohort to serve here and would only
+        # add noise; the on-entry read still runs, and keeps more than the
+        # production three so the feed has something to show in a session that
+        # lasts minutes rather than weeks.
         "DIARY_SCAN_ENABLED": "false",
         "DIARY_SCAN_ENTRIES": "12",
+        # The cinema guide is part of the profile, so a sandbox that switches
+        # it off shows a page the product does not have. TMDb's "now playing"
+        # needs no venue list, so it works from a key alone.
+        "BULLETIN_ENABLED": "true",
     })
 
     sys.path.insert(0, str(BACKEND))

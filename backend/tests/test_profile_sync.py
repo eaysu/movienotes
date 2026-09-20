@@ -487,5 +487,116 @@ class RunnerTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(profile_sync.is_running(7))
 
 
+class TruncatedCrawlTests(unittest.IsolatedAsyncioTestCase):
+    """Reported: "it could not scrape all the films."
+
+    A rate-limited Letterboxd request answers 200 with a page that has no film
+    grid on it. That parses as an empty list, which is exactly what the real
+    last page looks like, so the sweep called itself finished — and because the
+    run then counted as authoritative, `finalize_sync_run` retired every film
+    it never reached. A short archive, reported as complete.
+    """
+
+    def _pipeline(self, pages):
+        class _Pipeline:
+            def __init__(self):
+                self.calls = []
+
+            async def scrape_watched_window(self, _username, cursor):
+                self.calls.append(cursor)
+                return pages[cursor]
+
+            async def hydrate_catalog(self, films):
+                return films
+
+            async def enrich_details(self, batch):
+                return batch
+
+            async def rebuild_snapshot(self, _account):
+                return 0
+
+        return _Pipeline()
+
+    def _service(self):
+        store = {"films": {}, "job": {}, "finalized": []}
+
+        def save(_uid, films):
+            for film in films:
+                store["films"][film["slug"]] = film
+            return len(films)
+
+        return SimpleNamespace(
+            get_sync_job=lambda _uid: dict(store["job"]),
+            upsert_sync_job=lambda _uid, **f: store["job"].update(f) or dict(store["job"]),
+            touch_sync_job=lambda _uid, **f: store["job"].update(
+                {k: v for k, v in f.items() if not k.startswith("_")}) or True,
+            claim_sync_job=lambda *_a, **_k: True,
+            get_watched_slugs=lambda _uid: set(store["films"]),
+            get_watched_films=lambda _uid: list(store["films"].values()),
+            save_watched_films=save,
+            finalize_sync_run=lambda _uid, run: store["finalized"].append(run) or 0,
+            record_activity_event=lambda *_a, **_k: None,
+        ), store
+
+    @staticmethod
+    def _window(films, next_page, *, exhausted=False):
+        return profile_sync.ScrapeWindow(
+            films=films, next_page=next_page, exhausted=exhausted, complete=True
+        )
+
+    def _films(self, start, count):
+        return [{"slug": f"film-{n}", "title": f"Film {n}"} for n in range(start, start + count)]
+
+    async def test_an_empty_page_far_below_the_known_total_is_not_the_end(self):
+        account = SimpleNamespace(
+            id=1, username="gokcnen", letterboxd_stats={"films": 934}
+        )
+        pages = {
+            1: self._window(self._films(0, 288), 5),
+            5: self._window([], 6, exhausted=True),   # served without a grid
+        }
+        pipeline = self._pipeline(pages)
+        service, store = self._service()
+
+        with self.assertRaises(profile_sync.IncompleteScrapeError) as caught:
+            await profile_sync._crawl(pipeline, service, account)
+
+        # It says where it stopped and against what, so the log is diagnosable.
+        self.assertIn("288/934", str(caught.exception))
+        # And nothing was retired on the strength of a page that never loaded.
+        self.assertEqual(store["finalized"], [])
+
+    async def test_a_genuine_last_page_still_ends_the_crawl(self):
+        account = SimpleNamespace(
+            id=1, username="gokcnen", letterboxd_stats={"films": 300}
+        )
+        pages = {
+            1: self._window(self._films(0, 288), 5),
+            5: self._window([], 6, exhausted=True),
+        }
+        pipeline = self._pipeline(pages)
+        service, store = self._service()
+
+        await profile_sync._crawl(pipeline, service, account)
+
+        # 288 of a published 300 is the end of the grid, not a blocked page.
+        self.assertEqual(store["job"]["state"], "done")
+        self.assertEqual(len(store["finalized"]), 1)
+
+    async def test_a_profile_with_no_published_count_is_taken_at_its_word(self):
+        """Nothing to check against is not a reason to refuse to finish."""
+        account = SimpleNamespace(id=1, username="gokcnen", letterboxd_stats={})
+        pages = {
+            1: self._window(self._films(0, 40), 5),
+            5: self._window([], 6, exhausted=True),
+        }
+        pipeline = self._pipeline(pages)
+        service, store = self._service()
+
+        await profile_sync._crawl(pipeline, service, account)
+
+        self.assertEqual(store["job"]["state"], "done")
+
+
 if __name__ == "__main__":
     unittest.main()

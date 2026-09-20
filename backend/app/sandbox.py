@@ -51,6 +51,9 @@ class SandboxAuthService:
         self._job: dict | None = None
         self._posters: dict[str, dict] = {}
         self._posts: dict[str, dict] = {}
+        self._screenings: dict[str, dict] = {}
+        self._digests: dict[tuple, dict] = {}
+        self._venue_runs: dict[str, datetime] = {}
 
     # ── session ───────────────────────────────────────────────────────────
     def open_session(self, profile) -> tuple[Account, str]:
@@ -451,6 +454,85 @@ class SandboxAuthService:
                     row["is_active"] = False
                     dropped += 1
         return dropped
+
+    # ── cinema programme ──────────────────────────────────────────────────
+    # The bulletin needs somewhere to put what TMDb says is in cinemas now.
+    # Without it the card on the profile stays empty, which reads as a broken
+    # feature rather than a switched-off one.
+    def claim_venue_ingest(self, slug: str, token: str, lease_seconds: int,
+                           min_age_seconds: int) -> bool:
+        with self._lock:
+            last = self._venue_runs.get(slug)
+            now = datetime.now(timezone.utc)
+            if last and (now - last).total_seconds() < max(0, min_age_seconds):
+                return False
+            self._venue_runs[slug] = now
+            return True
+
+    def upsert_screenings(self, slug: str, rows: list[dict], run_id: str) -> int:
+        """Replace this venue's programme, exactly as the SQL guard does."""
+        now = _now()
+        with self._lock:
+            self._screenings = {
+                key: row for key, row in self._screenings.items()
+                if row.get("venue_slug") != slug
+            }
+            for row in rows or []:
+                title = (row.get("title_raw") or "").strip()
+                if not title:
+                    continue
+                self._screenings[f"{slug}:{title}:{row.get('starts_at') or ''}"] = {
+                    **row,
+                    "venue_slug": slug,
+                    "venue_name": "Vizyondakiler" if slug == "tr-vizyon" else slug,
+                    "venue_city": "",
+                    "venue_kind": "release" if slug == "tr-vizyon" else "cinema",
+                    "venue_source_url": "",
+                    "run_id": run_id,
+                    "updated_at": now,
+                }
+        return len(rows or [])
+
+    def list_screenings(self, *, city: str = "", limit: int = 400) -> list[dict]:
+        with self._lock:
+            rows = [dict(row) for row in self._screenings.values()]
+        rows = [row for row in rows if row.get("match_status") == "matched"]
+        if city:
+            rows = [r for r in rows if r["venue_kind"] == "release" or r["venue_city"] == city]
+        # The real service resolves slug/genres/director from the shared
+        # catalog; here that catalog is whatever this session has seen.
+        with self._lock:
+            catalog = {
+                int(row["tmdb_id"]): row
+                for row in self._posters.values() if row.get("tmdb_id")
+            }
+        for row in rows:
+            known = catalog.get(int(row["tmdb_id"])) if row.get("tmdb_id") else None
+            if known:
+                row.setdefault("film_slug", known.get("slug") or "")
+                row["genres"] = known.get("genres") or []
+                row["director"] = known.get("director") or ""
+        return rows[:limit]
+
+    def list_active_venues(self, kind: str | None = None) -> list[dict]:
+        return []
+
+    def record_venue_failure(self, slug: str, error: str) -> None:
+        return None
+
+    def get_bulletin_digest(self, user_id: int, week_start: str, city: str) -> dict | None:
+        with self._lock:
+            return self._digests.get((user_id, week_start, city))
+
+    def save_bulletin_digest(self, user_id: int, week_start: str, city: str, payload: dict) -> None:
+        with self._lock:
+            self._digests[(user_id, week_start, city)] = dict(payload)
+
+    def clear_bulletin_digests(self, week_start: str) -> None:
+        with self._lock:
+            self._digests = {
+                key: value for key, value in self._digests.items() if key[1] != week_start
+            }
 
     # ── shared film catalog ───────────────────────────────────────────────
     def save_film_posters(self, rows: list[dict]) -> None:

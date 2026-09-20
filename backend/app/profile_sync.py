@@ -46,6 +46,21 @@ _job_sem = asyncio.Semaphore(MAX_CONCURRENT_JOBS)
 _tasks: dict[int, asyncio.Task] = {}
 
 
+# Letterboxd publishes the member's own film count on their profile header,
+# and the grid the sweep walks lists that same set. A crawl that declares
+# itself finished far below it did not reach the end. The margin is loose on
+# purpose: the published figure lags its own diary slightly, and a sweep that
+# retried a complete archive forever would be its own kind of failure.
+SWEEP_COMPLETE_RATIO = 0.9
+
+
+def _reached_the_end(processed: int, expected_total: int) -> bool:
+    """Is an "empty page" the end of the grid, or a page without one?"""
+    if expected_total <= 0:
+        return True          # nothing to check it against; take it at its word
+    return processed >= expected_total * SWEEP_COMPLETE_RATIO
+
+
 @dataclass
 class ScrapeWindow:
     """One persisted crawl window and the exact page that follows it."""
@@ -362,10 +377,23 @@ async def _crawl(pipeline, service, account, *, lease_token: str | None = None) 
             exhausted = not window
             complete = True
         if not window:
-            if exhausted:
+            if exhausted and _reached_the_end(processed, expected_total):
                 phase = "enrich"
                 natural_end = True
                 break
+            if exhausted:
+                # The grid said it had ended, but the member's own film count
+                # says otherwise. A rate-limited Letterboxd request answers 200
+                # with a page that has no film grid on it, which parses as an
+                # empty list and is indistinguishable from the real last page.
+                # Believing it truncates the archive and — because the run is
+                # then treated as authoritative — retires every film the crawl
+                # never reached. Retry from this cursor instead.
+                raise IncompleteScrapeError(
+                    f"Letterboxd taraması @{account.username} için sayfa {cursor}'de "
+                    f"bitti göründü ama {processed}/{expected_total} filmde duruyor; "
+                    "kaldığı yerden yeniden denenecek."
+                )
             raise IncompleteScrapeError(
                 f"Letterboxd taraması @{account.username} için sayfa {cursor}'de veri döndürmedi."
             )
