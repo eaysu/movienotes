@@ -8,24 +8,24 @@ import {
   finishApiRequest,
   scrapeErrorMessage,
   streamErrorMessage,
-} from './api.js?v=20260920.17';
+} from './api.js?v=20260920.18';
 import {
   cookieValue,
   csrfHeaders,
   setAuthMessage,
   setAuthMode,
   setPasswordVisibility,
-} from './auth.js?v=20260920.17';
-import { directorAvatar, directorFilmGrid, directorFilmTile } from './profile.js?v=20260920.17';
+} from './auth.js?v=20260920.18';
+import { directorAvatar, directorFilmGrid, directorFilmTile } from './profile.js?v=20260920.18';
 import { animateScore, getScoreInfo } from './blend.js?v=20260902.15';
-import { createRecommendationCards } from './recommendations.js?v=20260920.17';
+import { createRecommendationCards } from './recommendations.js?v=20260920.18';
 import {
   getLocale,
   initI18n,
   localePreference,
   setLocalePreference,
   t,
-} from './i18n.js?v=20260920.17';
+} from './i18n.js?v=20260920.18';
 
 initI18n();
 
@@ -34,7 +34,7 @@ const uiLocale = () => (getLocale() === 'en' ? 'en-US' : 'tr-TR');
 let _shareCardsModule;
 function loadShareCardsModule() {
   if (!_shareCardsModule) {
-    _shareCardsModule = import('./share-cards.js?v=20260920.17');
+    _shareCardsModule = import('./share-cards.js?v=20260920.18');
   }
   return _shareCardsModule;
 }

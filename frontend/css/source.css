@@ -617,12 +617,18 @@
   /* ── Twitter-şeklinde kabuk: sol gezinme, alt sekme çubuğu ────────────
      Gezinme her ekranda aynı yerde durur; hangi ekranın açık olduğu
      `.is-active` ile işaretlenir. */
+  /* Kenar çubuğu tek sütun: bir etiket sığmazsa satır atlayabilir, ama
+     ortalanamaz. Buton varsayılanı `text-align: center` olduğu için sarılan
+     tek öğe (İngilizcede "What to watch?") diğerlerinin hizasından çıkıp
+     ortada duruyordu. Simge de asla daralmamalı. */
   .nav-item {
     display: flex; align-items: center; gap: .75rem;
     border-radius: 9999px; padding: .7rem .85rem;
     font-size: 1rem; color: rgb(var(--color-on-surface));
+    text-align: left;
     transition: background-color .15s ease, color .15s ease;
   }
+  .nav-item > .material-symbols-outlined { flex: 0 0 auto; }
   .nav-item:hover { background: rgb(var(--color-surface-container) / .8); }
   .nav-item.is-active { font-weight: 700; color: rgb(var(--color-primary-container)); }
   .nav-item.is-active .material-symbols-outlined { font-variation-settings: 'FILL' 1; }

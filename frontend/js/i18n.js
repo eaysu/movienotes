@@ -6,7 +6,7 @@ const SUPPORTED = new Set(['tr', 'en']);
 // both server-rendered nodes and nodes created later by the app.
 const EN = Object.freeze({
   'Akış': 'Feed', 'Akışa dön': 'Back to feed', 'Ayarlar': 'Settings',
-  'Bildirimler': 'Notifications', 'Mektuplar': 'Letters', 'Ne izlesem?': 'What should I watch?',
+  'Bildirimler': 'Notifications', 'Mektuplar': 'Letters', 'Ne izlesem?': 'What to watch?',
   'Blend': 'Blend', 'Profil': 'Profile', 'Profilim': 'My profile',
   'Not yaz': 'Write a note', 'Gizlilik': 'Privacy', 'Program nasıl çalışır?': 'How does it work?',
   'Giriş': 'Sign in', 'Giriş yap': 'Sign in', 'Girişe dön': 'Back to sign in',
@@ -196,7 +196,7 @@ const EN = Object.freeze({
   'Zevkine göre bir film bul ya da takip ettiğin biriyle ortak bir liste çıkar.': 'Find a film for your taste or create a shared list with someone you follow.',
   'İzleme listende': 'In your watchlist', 'İzleme geçmişine ve film zevkine bakarak bu akşam sana iyi gelecek filmi bulur.': 'Finds a film that will suit your evening using your viewing history and taste.',
   'Sıraya alındınız — önünüzde': 'You are in the queue — ahead of you:', 'kişi var': 'people',
-  'Ne izlesem? bölümüne dön': 'Back to What should I watch?', 'En İyi Öneri': 'Top recommendation',
+  'Ne izlesem? bölümüne dön': 'Back to What to watch', 'En İyi Öneri': 'Top recommendation',
   'Diğer Seçenekler': 'Other options', 'ortak yönetmen': 'shared director',
   'Ortak İzledikleriniz': 'Films you both watched', 'Ama zevk analizi yapıldı!': 'But the taste analysis is complete!',
   'Ortak watchlist taranıyor…': 'Scanning shared watchlist…', 'Birlikte İzlemek İstedikleriniz': 'Films you both want to watch',

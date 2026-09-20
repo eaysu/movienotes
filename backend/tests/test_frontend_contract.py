@@ -1337,6 +1337,25 @@ def test_cinema_bulletin_scrolls_horizontally_only():
     assert "openBulletinVenues" in js
 
 
+def test_a_sidebar_label_that_wraps_still_lines_up_with_the_others():
+    """Reported with a screenshot: "What should I watch?" broke the column.
+
+    A button centres its own text, so the one item long enough to wrap sat
+    centred while every other label started at the same left edge. The English
+    label is now short enough to fit, and the rule holds whatever the label.
+    """
+    css = (FRONTEND / "css" / "source.css").read_text()
+    en = (FRONTEND / "js" / "i18n.js").read_text()
+
+    block = css.split(".nav-item {", 1)[1].split("}", 1)[0]
+    assert "text-align: left" in block
+    # And the icon keeps its size instead of being squeezed by a long label.
+    assert ".nav-item > .material-symbols-outlined { flex: 0 0 auto; }" in css
+
+    assert "'Ne izlesem?': 'What to watch?'" in en
+    assert "What should I watch?" not in en.split("'Ne izlesem?'", 1)[1][:80]
+
+
 def test_shell_asset_content_changes_force_a_version_bump():
     """Guard against shipping edits that browsers never fetch.
 
@@ -1353,10 +1372,10 @@ def test_shell_asset_content_changes_force_a_version_bump():
     files that no longer existed.
     """
     expected = {
-        "js/app.js": "95e6ff752cde27184539f2223498759e1fbebd119a08c70a872c21d5c144e9e4",
-        "app.css": "7048bbb950ac7364044784479cb49a3cd98da657b2d157ebdd51b87f3816bced",
-        "js/share-cards.js": "e1412f5f17830772836931eec0c5c0e8bc3d855bd5384f2d61675734ccf3c367",
-        "js/i18n.js": "f4abeb6262ca0b8f2239a1fc35ae124431ed7e9daa36374a92729bb550ccae92",
+        "js/app.js": "b4204188fa7dd0f7f92cf1b837a8e932cdee7e8b16b005ab64b34a3279f75a48",
+        "app.css": "e0d4d0a3da619f189f862d86a9fbd32e2ebdf6799b83b0ad8a7f4cfd7fce38d7",
+        "js/share-cards.js": "9ac000cac59ace221527eee456e70234e32355a0e3ad6925d7d573dd8b018a96",
+        "js/i18n.js": "9e790514aada1b67e511f5084585b2df4aa3e95b66c1bb43a29a040dab1c5e34",
         "site.webmanifest": "7a7de349179ed9f226d38632dfde5a8478edd10305972ea52641b0dc6aa7f405",
         "movienotes-mark.png": "850aa9117aa52768952843f8e2c410c0c17868877d81b2058274290373b4ee1e",
         "movienotes-icon-192.png": "3b04c52ffd23799ce424f1acefd0a1d7c386b8c968b09be9bd5c87b623c6ac12",
@@ -1392,24 +1411,24 @@ def test_every_app_shell_asset_has_an_explicit_immutable_version():
     source_css = (FRONTEND / "css" / "source.css").read_text()
 
     dependency_version = "v=20260902.15"
-    api_version = "v=20260920.17"
-    css_version = "v=20260920.17"
+    api_version = "v=20260920.18"
+    css_version = "v=20260920.18"
     assert f"/static/app.css?{css_version}" in html
-    assert "/static/js/app.js?v=20260920.17" in html
-    assert "./i18n.js?v=20260920.17" in app_js
+    assert "/static/js/app.js?v=20260920.18" in html
+    assert "./i18n.js?v=20260920.18" in app_js
     assert app_js.count(f"?{dependency_version}") == 2
     assert f"./api.js?{api_version}" in app_js
-    assert "./recommendations.js?v=20260920.17" in app_js
-    assert "./share-cards.js?v=20260920.17" in app_js
-    assert "./auth.js?v=20260920.17" in app_js
+    assert "./recommendations.js?v=20260920.18" in app_js
+    assert "./share-cards.js?v=20260920.18" in app_js
+    assert "./auth.js?v=20260920.18" in app_js
     assert f"./dom.js?{dependency_version}" in auth_js
-    assert "./i18n.js?v=20260920.17" in auth_js
+    assert "./i18n.js?v=20260920.18" in auth_js
     assert f"./dom.js?{dependency_version}" in profile_js
-    assert "./i18n.js?v=20260920.17" in profile_js
+    assert "./i18n.js?v=20260920.18" in profile_js
     assert f"./dom.js?{dependency_version}" in recommendations_js
-    assert "./i18n.js?v=20260920.17" in recommendations_js
+    assert "./i18n.js?v=20260920.18" in recommendations_js
     assert f"./api.js?{api_version}" in share_js
-    assert "./i18n.js?v=20260920.17" in share_js
+    assert "./i18n.js?v=20260920.18" in share_js
     assert f"criterion-closet-bg.jpg?{dependency_version}" in source_css
 
 
@@ -1479,7 +1498,7 @@ def test_png_share_renderer_is_lazy_loaded_on_first_share_action():
 
     imports = app_js.split("// ── Cinema facts", 1)[0]
     assert "from './share-cards.js" not in imports
-    assert "import('./share-cards.js?v=20260920.17')" in imports
+    assert "import('./share-cards.js?v=20260920.18')" in imports
     assert "const shareCards = await loadShareCardsModule();" in app_js
 
 
