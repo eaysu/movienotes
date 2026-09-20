@@ -746,7 +746,7 @@ ENTRY_SYNC_MIN_INTERVAL = 15 * 60
 FINGERPRINT_FILM_LIMIT = 28
 TTL_RECOMMENDATION = 30 * 24 * 3600
 RECOMMENDER_VERSION = "v5-last100-fav4-directors"
-BLEND_VERSION = "blend-v8-warmer-curve"
+BLEND_VERSION = "blend-v9-director-photo"
 
 
 def _make_persistent_cache(settings, client):
@@ -2303,13 +2303,48 @@ def _community_reason(watchers: int, rating) -> str:
     return "Başka bir Movienotes üyesinin izlediği, senin listende olmayan bir film."
 
 
-def _pick_random_films(pool: list, n: int) -> list:
-    """A fresh sample on every call — the random mode has no daily quota."""
+def _pick_random_films(
+    pool: list, n: int, *, favorite_directors=None, favorite_genres=None
+) -> list:
+    """A fresh sample on every call — the random mode has no daily quota.
+
+    The draw is weighted rather than uniform: a film by a director the member
+    returns to, or in a genre they watch most, is likelier to come up. It stays
+    a draw, so the same spin never gives the same answer and nothing outside
+    their taste is excluded — "random" that only ever offers the top of a
+    ranking is just a slow recommendation.
+    """
     if not pool:
         return []
     with_poster = [film for film in pool if getattr(film, "poster_url", "")]
     source = with_poster if len(with_poster) >= n else pool
-    return _random.sample(source, min(n, len(source)))
+    directors = {
+        str(name).strip().casefold() for name in (favorite_directors or []) if name
+    }
+    genres = {
+        str(name).strip().casefold() for name in (favorite_genres or []) if name
+    }
+    if not directors and not genres:
+        return _random.sample(source, min(n, len(source)))
+
+    def weight(film) -> float:
+        value = 1.0
+        if directors and str(getattr(film, "director", "") or "").strip().casefold() in directors:
+            value += 2.0
+        if genres and genres & {
+            str(genre).strip().casefold() for genre in (getattr(film, "genres", None) or [])
+        }:
+            value += 1.0
+        return value
+
+    remaining = list(source)
+    weights = [weight(film) for film in remaining]
+    picked: list = []
+    for _ in range(min(n, len(remaining))):
+        choice = _random.choices(range(len(remaining)), weights=weights, k=1)[0]
+        picked.append(remaining.pop(choice))
+        weights.pop(choice)
+    return picked
 
 
 async def _community_random_pool(service, account, limit=RANDOM_POOL_SAMPLE) -> list:
@@ -5294,6 +5329,8 @@ async def recommend(req: RecommendRequest, request: Request):
                     favorite_directors=favorite_directors,
                     director_boost=getattr(settings, "favorite_director_boost", 0.08),
                     favorite_four_slugs=favorite_four_slugs,
+                    favorite_genres=top_genres,
+                    genre_boost=getattr(settings, "favorite_genre_boost", 0.06),
                     locale=response_locale,
                 )
                 if enricher is not None:
@@ -5305,6 +5342,8 @@ async def recommend(req: RecommendRequest, request: Request):
                     favorite_directors=favorite_directors,
                     director_boost=getattr(settings, "favorite_director_boost", 0.08),
                     favorite_four_slugs=favorite_four_slugs,
+                    favorite_genres=top_genres,
+                    genre_boost=getattr(settings, "favorite_genre_boost", 0.06),
                     # This pass writes the reasons the member actually reads
                     # whenever the LLM is unavailable, so it needs the locale too.
                     locale=response_locale,
@@ -5459,7 +5498,23 @@ async def random_pick(req: RandomRequest, request: Request):
             })
             return
 
-        chosen = _pick_random_films(pool, RANDOM_PICK_COUNT)
+        # A spin should still feel like this member's shelf, so their stored
+        # directors and genres tilt the draw.
+        taste_directors: list[str] = []
+        taste_genres: list[str] = []
+        if service is not None and account is not None:
+            with contextlib.suppress(Exception):
+                stored_taste = (
+                    await asyncio.to_thread(service.get_profile, account)
+                ).get("taste") or {}
+                taste_directors = [n for n in stored_taste.get("top_directors", []) if n]
+                taste_genres = [g for g in stored_taste.get("top_genres", []) if g]
+        chosen = _pick_random_films(
+            pool,
+            RANDOM_PICK_COUNT,
+            favorite_directors=taste_directors,
+            favorite_genres=taste_genres,
+        )
         missing_details = [
             film for film in chosen if not film.poster_url or not film.overview
         ]

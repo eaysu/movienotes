@@ -1,10 +1,11 @@
 import asyncio
+import random as _random
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
-from app.auth import Account
+from app.auth import Account, sinefil_match_score
 from app.enrich import EnrichedFilm
 from starlette.requests import Request
 from app.main import (
@@ -499,3 +500,95 @@ class RandomRatingFloorTests(unittest.TestCase):
         ])}
 
         self.assertEqual(slugs, {"meh", "worse"})
+
+
+class WeightedRandomPickTests(unittest.TestCase):
+    """Asked for: a spin should still feel like this member's shelf."""
+
+    @staticmethod
+    def _film(slug, director="", genres=()):
+        return EnrichedFilm(
+            title=slug.title(), slug=slug, director=director,
+            genres=list(genres), poster_url="https://img/x.jpg",
+        )
+
+    def _draws(self, **kwargs):
+        pool = [
+            self._film("auteur", director="Loved Director"),
+            self._film("genre", genres=["Horror"]),
+            self._film("stranger"),
+        ]
+        counts = {"auteur": 0, "genre": 0, "stranger": 0}
+        for seed in range(300):
+            _random.seed(seed)
+            counts[_pick_random_films(list(pool), 1, **kwargs)[0].slug] += 1
+        return counts
+
+    def test_a_loved_director_comes_up_more_often_than_a_stranger(self):
+        counts = self._draws(
+            favorite_directors=["Loved Director"], favorite_genres=["Horror"],
+        )
+
+        self.assertGreater(counts["auteur"], counts["genre"])
+        self.assertGreater(counts["genre"], counts["stranger"])
+
+    def test_nothing_is_excluded_by_taste(self):
+        # It stays a draw: a film outside their taste still surfaces.
+        counts = self._draws(favorite_directors=["Loved Director"])
+
+        self.assertGreater(counts["stranger"], 0)
+
+    def test_a_member_without_a_taste_profile_gets_an_even_draw(self):
+        counts = self._draws()
+
+        self.assertTrue(all(count > 60 for count in counts.values()), counts)
+
+
+class SinefilMatchScoreTests(unittest.TestCase):
+    """Asked for: Fav 4, the ranked ten directors and genres all carry weight.
+
+    One shared favourite used to be worth 42 while five shared directors were
+    worth 30, so a single coincidence outranked a wholly overlapping shelf.
+    """
+
+    def test_an_overlapping_shelf_beats_one_coincidental_favourite(self):
+        coincidence = sinefil_match_score(
+            shared_fav4=1, shared_directors=0, shared_genres=0, shared_keywords=0,
+        )
+        shelf = sinefil_match_score(
+            shared_fav4=0, shared_directors=5, shared_genres=3, shared_keywords=0,
+        )
+
+        self.assertGreater(shelf, coincidence)
+
+    def test_no_single_signal_can_reach_the_top_alone(self):
+        for kind in ("shared_fav4", "shared_directors", "shared_genres", "shared_keywords"):
+            with self.subTest(kind=kind):
+                counts = dict.fromkeys(
+                    ("shared_fav4", "shared_directors", "shared_genres", "shared_keywords"), 0
+                )
+                counts[kind] = 50
+                self.assertLessEqual(sinefil_match_score(**counts), 60)
+
+    def test_a_thin_semantic_read_is_ignored(self):
+        common = dict(shared_fav4=1, shared_directors=1, shared_genres=1, shared_keywords=0)
+        thin = sinefil_match_score(**common, semantic_score=0.9, semantic_coverage=0.1)
+        solid = sinefil_match_score(**common, semantic_score=0.9, semantic_coverage=0.5)
+
+        self.assertEqual(thin, sinefil_match_score(**common))
+        self.assertGreater(solid, thin)
+
+    def test_the_score_stays_inside_its_bounds(self):
+        self.assertEqual(
+            sinefil_match_score(
+                shared_fav4=0, shared_directors=0, shared_genres=0, shared_keywords=0,
+            ),
+            0,
+        )
+        self.assertEqual(
+            sinefil_match_score(
+                shared_fav4=9, shared_directors=99, shared_genres=99,
+                shared_keywords=99, semantic_score=1.0, semantic_coverage=1.0,
+            ),
+            100,
+        )

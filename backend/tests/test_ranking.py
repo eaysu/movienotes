@@ -166,5 +166,48 @@ class RatingAwareRankingTests(unittest.TestCase):
         self.assertGreater(ranked[0].similarity, ranked[1].similarity)
 
 
+class TasteWeightTests(unittest.TestCase):
+    """Asked for: the genres and directors a member returns to should weigh in."""
+
+    def _watchlist(self):
+        return [
+            EnrichedFilm(title="Horror One", slug="horror-one", genres=["Horror"], keywords=["dread"]),
+            EnrichedFilm(title="Drama One", slug="drama-one", genres=["Drama"], keywords=["dread"]),
+        ]
+
+    def test_a_favourite_genre_breaks_an_otherwise_even_match(self):
+        # Identical keywords, so TF-IDF alone cannot separate the two.
+        watched = [EnrichedFilm(title="Seen", genres=["Horror", "Drama"], keywords=["dread"])]
+
+        neutral = rank_watchlist(watched, self._watchlist(), n=2)
+        tilted = rank_watchlist(watched, self._watchlist(), n=2, favorite_genres=["Horror"])
+
+        self.assertEqual(tilted[0].slug, "horror-one")
+        # And it is a nudge, not a takeover: the other film still ranks.
+        self.assertEqual({film.slug for film in tilted}, {film.slug for film in neutral})
+
+    def test_only_the_best_matching_genre_counts(self):
+        """A film tagged with three favourites is not three times the signal."""
+        watched = [EnrichedFilm(title="Seen", genres=["Horror"], keywords=["dread"])]
+
+        def score(favourites):
+            film = [EnrichedFilm(title="Three", slug="three",
+                                 genres=["Horror", "Drama", "Crime"], keywords=["dread"])]
+            return rank_watchlist(watched, film, n=1, favorite_genres=favourites)[0].similarity
+
+        # Horror is the top favourite either way, so the bonus is identical.
+        self.assertAlmostEqual(score(["Horror"]), score(["Horror", "Drama", "Crime"]), places=4)
+
+    def test_genres_outside_the_top_three_earn_nothing(self):
+        watched = [EnrichedFilm(title="Seen", genres=["Western"], keywords=["dust"])]
+        film = [EnrichedFilm(title="W", slug="w", genres=["Western"], keywords=["dust"])]
+        far = ["Horror", "Drama", "Crime", "Western"]
+
+        plain = rank_watchlist(watched, [EnrichedFilm(title="W", slug="w", genres=["Western"], keywords=["dust"])], n=1)
+        ranked = rank_watchlist(watched, film, n=1, favorite_genres=far)
+
+        self.assertAlmostEqual(plain[0].similarity, ranked[0].similarity, places=4)
+
+
 if __name__ == "__main__":
     unittest.main()

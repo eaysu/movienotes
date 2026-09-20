@@ -82,6 +82,8 @@ def rank_watchlist(
     favorite_directors: list[str] | None = None,
     director_boost: float = 0.08,
     favorite_four_slugs: list[str] | set[str] | None = None,
+    favorite_genres: list[str] | None = None,
+    genre_boost: float = 0.06,
     locale: str = "tr",
 ) -> list[EnrichedFilm]:
     """Watchlist filmlerini izleme geçmişine benzerliğe göre sırala.
@@ -197,10 +199,29 @@ def rank_watchlist(
         for rank, name in enumerate((favorite_directors or [])[:3])
         if name and name.strip()
     }
+    # The same treatment for the genres a member actually returns to. TF-IDF
+    # already sees the genre words, but a synopsis full of shared vocabulary
+    # could outrank a film in the one genre they watch most; a bounded, ranked
+    # bonus keeps that preference visible without letting it decide alone.
+    genre_rank = {
+        str(name).strip().casefold(): rank
+        for rank, name in enumerate((favorite_genres or [])[:3])
+        if name and str(name).strip()
+    }
     for index, film in enumerate(watchlist):
         rank = favorite_rank.get((film.director or "").strip().casefold())
         if rank is not None:
             scores[index] += max(0.0, float(director_boost)) * (1.0 - rank * 0.3)
+        if genre_rank:
+            ranks = [
+                genre_rank[name] for name in (
+                    str(genre).strip().casefold() for genre in (film.genres or [])
+                ) if name in genre_rank
+            ]
+            if ranks:
+                # Best-matching genre only: a film tagged with three of them is
+                # not three times the signal.
+                scores[index] += max(0.0, float(genre_boost)) * (1.0 - min(ranks) * 0.3)
 
     ranked_idx = _mmr_indices(scores, watchlist_matrix, n)
 

@@ -858,6 +858,22 @@ def test_the_shell_reserves_the_notch_and_the_home_indicator():
     assert "min-height: 100dvh;" in css
 
 
+def test_the_tools_card_does_not_also_sit_on_the_profile_page():
+    """Reported: the "Ne izlesem?" card was still on the desktop profile.
+
+    It is moved into the tools page on demand, but md:block showed it on the
+    dashboard until that first visit re-parented it away.
+    """
+    html = (FRONTEND / "index.html").read_text()
+    app_js = (FRONTEND / "js" / "app.js").read_text()
+
+    classes = html.split('id="profile-quick-tools" class="', 1)[1].split('"', 1)[0]
+    assert "hidden" in classes
+    assert "md:block" not in classes
+    # Visibility is decided by the tools flow, which owns the card.
+    assert "$('profile-quick-tools')?.classList.remove('hidden')" in app_js
+
+
 def test_profile_follow_lists_are_dialogs_and_stay_out_of_the_share_card():
     html = (FRONTEND / "index.html").read_text()
     app_js = (FRONTEND / "js" / "app.js").read_text()

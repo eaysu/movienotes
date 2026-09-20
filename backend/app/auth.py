@@ -137,6 +137,50 @@ def validate_password(password: str, confirmation: str | None = None) -> str:
     return password
 
 
+# ── Sinefil Sineması eşleşme skoru ──────────────────────────────────────────
+# Her sinyalin kendi tavanı var. Önceden tek bir ortak Fav 4 filmi 42 puandı,
+# beş ortak yönetmen ise 30: bir rastlantı, baştan aşağı örtüşen bir rafın
+# önüne geçiyordu. Sıralı on yönetmen ve tür listesi artık gerçek ağırlık
+# taşıyor — aynı yönetmenleri izleyen iki kişi, dört favorileri tutmasa da
+# eşleşir.
+SINEFIL_WEIGHTS = {
+    "fav4": (30, 60),
+    "directors": (7, 35),
+    "genres": (6, 24),
+    "keywords": (2, 12),
+}
+SINEFIL_SEMANTIC_WEIGHT = 12
+SINEFIL_SEMANTIC_MIN_COVERAGE = 0.30
+
+
+def sinefil_match_score(
+    *,
+    shared_fav4: int,
+    shared_directors: int,
+    shared_genres: int,
+    shared_keywords: int,
+    semantic_score: float = 0.0,
+    semantic_coverage: float = 0.0,
+) -> int:
+    """How closely two members' stated tastes line up, out of 100."""
+    def capped(kind: str, count: int) -> int:
+        weight, ceiling = SINEFIL_WEIGHTS[kind]
+        return min(max(0, int(count)) * weight, ceiling)
+
+    semantic = (
+        round(float(semantic_score) * SINEFIL_SEMANTIC_WEIGHT)
+        if semantic_coverage >= SINEFIL_SEMANTIC_MIN_COVERAGE
+        else 0
+    )
+    return min(100, (
+        capped("fav4", shared_fav4)
+        + capped("directors", shared_directors)
+        + capped("genres", shared_genres)
+        + capped("keywords", shared_keywords)
+        + semantic
+    ))
+
+
 class AuthService:
     CHALLENGE_TTL_MINUTES = 15
     MAX_CHALLENGE_ATTEMPTS = 5
@@ -1311,11 +1355,14 @@ class AuthService:
             keywords = self._overlap(viewer_taste.get("top_keywords"), taste.get("top_keywords"))
             semantic_score = semantic_by_user.get(user_id, 0.0)
             semantic_match = semantic_coverage >= 0.30 and semantic_score >= 0.62
-            score = min(100, (
-                len(same_fav4) * 42
-                + len(directors) * 6 + len(genres) * 4 + len(keywords) * 2
-                + round(semantic_score * 10 if semantic_coverage >= 0.30 else 0)
-            ))
+            score = sinefil_match_score(
+                shared_fav4=len(same_fav4),
+                shared_directors=len(directors),
+                shared_genres=len(genres),
+                shared_keywords=len(keywords),
+                semantic_score=semantic_score,
+                semantic_coverage=semantic_coverage,
+            )
             shared_titles: list[str] = []
             for slug in list(same_fav4):
                 title = viewer_fav_titles.get(slug)
