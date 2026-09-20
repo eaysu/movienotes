@@ -1356,6 +1356,70 @@ def test_a_sidebar_label_that_wraps_still_lines_up_with_the_others():
     assert "What should I watch?" not in en.split("'Ne izlesem?'", 1)[1][:80]
 
 
+def test_the_archive_scan_warns_before_the_areas_that_depend_on_it():
+    """Asked for: say the scan is still running, and say how far along it is.
+
+    Recommendations, Blend and the Cinephile ranking all read the full
+    archive, so during the sweep they answer from a partial one. The warning
+    is not a lock: it reports progress as scanned/total, points at what works
+    today, and lets the member go in anyway.
+    """
+    html = (FRONTEND / "index.html").read_text()
+    js = (FRONTEND / "js" / "app.js").read_text()
+
+    assert 'id="dialog-sweep-gate"' in html
+    assert 'id="sweep-gate-count"' in html
+    assert 'id="sweep-gate-continue"' in html
+
+    gated = js.split("const SWEEP_GATED = {", 1)[1].split("\n};", 1)[0]
+    for area in ("watch:", "blend:", "sinefil:"):
+        assert area in gated, area
+
+    # Every gated area routes through the same check, and the check yields.
+    assert "withSweepGate('sinefil'" in js
+    assert "withSweepGate(which, () => openQuickTool(which, { ...options, gated: true }))" in js
+    gate = js.split("function withSweepGate", 1)[1].split("\n}", 1)[0]
+    assert "_isSweepActive(_sweepJob)" in gate
+    # Warned once per area, not on every visit.
+    assert "_sweepGateShown.has(area)" in gate
+
+
+def test_the_progress_reading_is_scanned_over_total():
+    js = (FRONTEND / "js" / "app.js").read_text()
+    sync = (ROOT / "app" / "profile_sync.py").read_text()
+
+    block = js.split("function _sweepCountText", 1)[1].split("\n}", 1)[0]
+    assert "job?.processed" in block and "job?.total" in block
+
+    # The diary crawl cannot know a total until it runs out of pages, so the
+    # member's own published film count stands in for it; without that the
+    # reading was a number that only climbed.
+    crawl = sync.split("async def _crawl", 1)[1].split("\nasync def ", 1)[0]
+    assert 'letterboxd_stats' in crawl
+    assert "films_total=max(expected_total, processed)" in crawl
+
+
+def test_finishing_the_scan_announces_itself_and_offers_the_profile():
+    html = (FRONTEND / "index.html").read_text()
+    js = (FRONTEND / "js" / "app.js").read_text()
+
+    assert 'id="dialog-sweep-done"' in html
+    assert 'id="sweep-done-profile"' in html
+
+    block = js.split("function announceSweepComplete", 1)[1].split("\n}\n", 1)[0]
+    assert "goNav('profile')" in block
+    assert "dialog.showModal()" in block
+
+    # The watcher is not tied to the profile page, or the announcement would
+    # only ever reach someone already looking at it.
+    poll = js.split("async function pollSweepOnce", 1)[1].split("\n}\n", 1)[0]
+    assert "announceSweepComplete(job)" in poll
+    assert "_sweepWasActive" in poll
+    # The single check made at entry has to schedule the next one, or someone
+    # who never opens their profile is never told the scan finished.
+    assert "startSweepPoll(); return;" in poll
+
+
 def test_shell_asset_content_changes_force_a_version_bump():
     """Guard against shipping edits that browsers never fetch.
 
@@ -1372,10 +1436,10 @@ def test_shell_asset_content_changes_force_a_version_bump():
     files that no longer existed.
     """
     expected = {
-        "js/app.js": "b4204188fa7dd0f7f92cf1b837a8e932cdee7e8b16b005ab64b34a3279f75a48",
+        "js/app.js": "94945523092fe8979b6434f5ab8841a15c268988bc9837804f59f7b7c688325d",
         "app.css": "e0d4d0a3da619f189f862d86a9fbd32e2ebdf6799b83b0ad8a7f4cfd7fce38d7",
-        "js/share-cards.js": "9ac000cac59ace221527eee456e70234e32355a0e3ad6925d7d573dd8b018a96",
-        "js/i18n.js": "9e790514aada1b67e511f5084585b2df4aa3e95b66c1bb43a29a040dab1c5e34",
+        "js/share-cards.js": "a94e9ee8aa8fa4a15a7f6e8ad75136de87314cedf28431084350d504c5c32863",
+        "js/i18n.js": "419a0b95cc249f5319ceb2765e5bdd2f10bb87e081544d9dcb7ed1916f5d934a",
         "site.webmanifest": "7a7de349179ed9f226d38632dfde5a8478edd10305972ea52641b0dc6aa7f405",
         "movienotes-mark.png": "850aa9117aa52768952843f8e2c410c0c17868877d81b2058274290373b4ee1e",
         "movienotes-icon-192.png": "3b04c52ffd23799ce424f1acefd0a1d7c386b8c968b09be9bd5c87b623c6ac12",
@@ -1411,24 +1475,24 @@ def test_every_app_shell_asset_has_an_explicit_immutable_version():
     source_css = (FRONTEND / "css" / "source.css").read_text()
 
     dependency_version = "v=20260902.15"
-    api_version = "v=20260920.18"
-    css_version = "v=20260920.18"
+    api_version = "v=20260920.20"
+    css_version = "v=20260920.20"
     assert f"/static/app.css?{css_version}" in html
-    assert "/static/js/app.js?v=20260920.18" in html
-    assert "./i18n.js?v=20260920.18" in app_js
+    assert "/static/js/app.js?v=20260920.20" in html
+    assert "./i18n.js?v=20260920.20" in app_js
     assert app_js.count(f"?{dependency_version}") == 2
     assert f"./api.js?{api_version}" in app_js
-    assert "./recommendations.js?v=20260920.18" in app_js
-    assert "./share-cards.js?v=20260920.18" in app_js
-    assert "./auth.js?v=20260920.18" in app_js
+    assert "./recommendations.js?v=20260920.20" in app_js
+    assert "./share-cards.js?v=20260920.20" in app_js
+    assert "./auth.js?v=20260920.20" in app_js
     assert f"./dom.js?{dependency_version}" in auth_js
-    assert "./i18n.js?v=20260920.18" in auth_js
+    assert "./i18n.js?v=20260920.20" in auth_js
     assert f"./dom.js?{dependency_version}" in profile_js
-    assert "./i18n.js?v=20260920.18" in profile_js
+    assert "./i18n.js?v=20260920.20" in profile_js
     assert f"./dom.js?{dependency_version}" in recommendations_js
-    assert "./i18n.js?v=20260920.18" in recommendations_js
+    assert "./i18n.js?v=20260920.20" in recommendations_js
     assert f"./api.js?{api_version}" in share_js
-    assert "./i18n.js?v=20260920.18" in share_js
+    assert "./i18n.js?v=20260920.20" in share_js
     assert f"criterion-closet-bg.jpg?{dependency_version}" in source_css
 
 
@@ -1498,7 +1562,7 @@ def test_png_share_renderer_is_lazy_loaded_on_first_share_action():
 
     imports = app_js.split("// ── Cinema facts", 1)[0]
     assert "from './share-cards.js" not in imports
-    assert "import('./share-cards.js?v=20260920.18')" in imports
+    assert "import('./share-cards.js?v=20260920.20')" in imports
     assert "const shareCards = await loadShareCardsModule();" in app_js
 
 
@@ -1520,7 +1584,9 @@ def test_sync_progress_polling_does_not_reload_the_full_profile_snapshot():
     )[0]
     assert "apiJSON('/api/profile/sync-status')" in sweep_poll
     assert "apiJSON('/api/profile/me')" not in sweep_poll
-    assert "if (!active) await loadProfile();" in sweep_poll
+    # The full snapshot is read once the sweep is over, never on every tick.
+    assert "if (active) { _sweepWasActive = true; startSweepPoll(); return; }" in sweep_poll
+    assert sweep_poll.count("loadProfile()") == 1
     # The progress strip is the only thing that polls the sweep. Onboarding
     # gave up waiting for the archive, so it must not open a second poller.
     onboarding = app_js.split("async function startOnboarding", 1)[1].split(

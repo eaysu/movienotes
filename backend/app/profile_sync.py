@@ -335,6 +335,13 @@ async def _crawl(pipeline, service, account, *, lease_token: str | None = None) 
 
     known: set[str] = set(await asyncio.to_thread(service.get_watched_slugs, uid))
     natural_end = phase != "diary"
+    # Letterboxd publishes the member's own film count on their profile header,
+    # and the diary crawl cannot know a total until it runs out of pages. Using
+    # that figure as the expected total is what turns the progress reading from
+    # a number that only climbs into "247 / 3,454" — the shape people read as
+    # progress. It is an estimate, so the percentage is still capped below 100
+    # and the real total replaces it at the enrichment phase.
+    expected_total = int((getattr(account, "letterboxd_stats", None) or {}).get("films") or 0)
 
     # ── Phase 1 · walk the /films/ grid and persist each window ───────────
     # Do not put one TMDb search per film on the critical crawl path. Known
@@ -407,7 +414,7 @@ async def _crawl(pipeline, service, account, *, lease_token: str | None = None) 
             lease_token,
             cursor_page=cursor,
             films_processed=processed,
-            films_total=0,
+            films_total=max(expected_total, processed),
         )
         if not complete:
             # The successful pages above are already durable.  Stop here so the

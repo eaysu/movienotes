@@ -8,24 +8,24 @@ import {
   finishApiRequest,
   scrapeErrorMessage,
   streamErrorMessage,
-} from './api.js?v=20260920.18';
+} from './api.js?v=20260920.20';
 import {
   cookieValue,
   csrfHeaders,
   setAuthMessage,
   setAuthMode,
   setPasswordVisibility,
-} from './auth.js?v=20260920.18';
-import { directorAvatar, directorFilmGrid, directorFilmTile } from './profile.js?v=20260920.18';
+} from './auth.js?v=20260920.20';
+import { directorAvatar, directorFilmGrid, directorFilmTile } from './profile.js?v=20260920.20';
 import { animateScore, getScoreInfo } from './blend.js?v=20260902.15';
-import { createRecommendationCards } from './recommendations.js?v=20260920.18';
+import { createRecommendationCards } from './recommendations.js?v=20260920.20';
 import {
   getLocale,
   initI18n,
   localePreference,
   setLocalePreference,
   t,
-} from './i18n.js?v=20260920.18';
+} from './i18n.js?v=20260920.20';
 
 initI18n();
 
@@ -34,7 +34,7 @@ const uiLocale = () => (getLocale() === 'en' ? 'en-US' : 'tr-TR');
 let _shareCardsModule;
 function loadShareCardsModule() {
   if (!_shareCardsModule) {
-    _shareCardsModule = import('./share-cards.js?v=20260920.18');
+    _shareCardsModule = import('./share-cards.js?v=20260920.20');
   }
   return _shareCardsModule;
 }
@@ -464,7 +464,14 @@ function openToolsDirectory() {
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
-function openQuickTool(which, { parent = 'feed' } = {}) {
+function openQuickTool(which, options = {}) {
+  // Öneri ve Blend tam arşivden besleniyor; tarama sürerken önce durumu
+  // söyleyip kullanıcıya seçim bırakıyoruz.
+  if (SWEEP_GATED[which] && !options.gated) {
+    withSweepGate(which, () => openQuickTool(which, { ...options, gated: true }));
+    return;
+  }
+  const { parent = 'feed' } = options;
   _toolParents[which] = parent;
   _setToolBackCopy(which, parent);
   if (which === 'blend') {
@@ -1308,7 +1315,9 @@ function goNav(target) {
     case 'notifications': openNotifications(); break;
     case 'inbox': openLetterInbox(); break;
     case 'blends': openQuickTool('blend'); break;
-    case 'sinefil': showView('sinefil'); loadSinefilArea(); break;
+    // Eşleşme sıralaması yönetmen ve tür sinyaline dayanıyor; ikisi de
+    // tarama ilerledikçe oluşuyor.
+    case 'sinefil': withSweepGate('sinefil', () => { showView('sinefil'); loadSinefilArea(); }); break;
     case 'profile': showView('profile'); break;
     default: openFeed();
   }
@@ -1699,6 +1708,75 @@ async function loadMobileDirectorFilms(details) {
 // reads as a broken one rather than a loading one.
 function _isSweepActive(job) {
   return Boolean(job && (job.state === 'queued' || job.state === 'running'));
+}
+
+// ── Tarama kapısı ──────────────────────────────────────────────────────
+// Öneri, Blend ve Sinefil eşleşmesi tam arşivden besleniyor: tarama sürerken
+// açıldıklarında sonuç eksik veriyle çıkar. Kapatmak yerine söylüyoruz — ne
+// kadarının okunduğunu, neyin şimdi çalıştığını — ve yine de girilebiliyor.
+// Beklemesi gerekenle beklemesi gerekmeyeni kullanıcı seçsin.
+const SWEEP_GATED = {
+  watch: {
+    title: 'Öneriler henüz tam değil',
+    body: 'Zevkine göre öneri tüm izleme geçmişini okuyarak çalışıyor. Tarama bitmeden çıkan öneriler eksik geçmişe dayanır.',
+  },
+  blend: {
+    title: 'Blend henüz tam değil',
+    body: 'Blend iki arşivin örtüşmesini sayıyor. Seninki hâlâ okunuyor, yani şimdi çıkan skor olduğundan düşük görünecek.',
+  },
+  sinefil: {
+    title: 'Eşleşmeler henüz tam değil',
+    body: 'Sinefil Sineması yönetmen ve tür sinyallerine göre sıralıyor; ikisi de tarama ilerledikçe oluşuyor.',
+  },
+};
+// Tarama beklemeyen yerler: hepsi bugünden çalışıyor.
+// Rastgele seçim topluluk havuzundan çalışıyor, gündem vizyon takviminden,
+// akış ve mektuplar hiç arşive bakmıyor — dördü de bugün hazır.
+const SWEEP_OPEN_AREAS = [
+  { label: 'Akış', nav: 'feed' },
+  { label: 'Rastgele film', mode: 'random' },
+  { label: 'Sinema gündemi', nav: 'profile' },
+  { label: 'Mektuplar', nav: 'inbox' },
+];
+let _sweepJob = null;            // en son bilinen tarama durumu
+let _sweepWasActive = false;     // bu oturumda tarama çalışıyor muydu?
+const _sweepGateShown = new Set();  // alan başına bir kez uyar, sürekli değil
+
+function _sweepCountText(job) {
+  const processed = Number(job?.processed || 0);
+  const total = Number(job?.total || 0);
+  const locale = uiLocale();
+  return total
+    ? `${processed.toLocaleString(locale)} / ${total.toLocaleString(locale)} ${t('film')}`
+    : `${processed.toLocaleString(locale)} ${t('film')}`;
+}
+
+function openSweepGate(area, proceed) {
+  const copy = SWEEP_GATED[area];
+  const job = _sweepJob;
+  const dialog = $('dialog-sweep-gate');
+  if (!copy || !dialog) { proceed(); return; }
+  $('sweep-gate-title').textContent = t(copy.title);
+  $('sweep-gate-body').textContent = t(copy.body);
+  $('sweep-gate-count').textContent = _sweepCountText(job);
+  $('sweep-gate-phase').textContent = t(_SWEEP_PHASE_LABEL[job?.phase] || 'Tüm izleme geçmişin analiz ediliyor');
+  const bar = $('sweep-gate-bar');
+  bar.style.width = `${Math.max(4, Math.min(99, Number(job?.percent) || 0))}%`;
+  $('sweep-gate-open').innerHTML = SWEEP_OPEN_AREAS.map(item =>
+    `<button type="button" class="rounded-full border border-outline-variant/30 bg-surface-container px-3 py-1.5 font-label-sm text-label-sm text-on-surface-variant hover:border-primary-container/50 hover:text-on-surface"${
+      item.nav ? ` data-sweep-go-nav="${item.nav}"` : ` data-sweep-go-mode="${item.mode}"`
+    }>${escapeHTML(t(item.label))}</button>`).join('');
+  const onContinue = () => { dialog.close(); proceed(); };
+  const button = $('sweep-gate-continue');
+  button.onclick = onContinue;
+  if (!dialog.open) dialog.showModal();
+}
+
+// Kapı yalnızca tarama gerçekten sürerken ve alan başına bir kez çıkar.
+function withSweepGate(area, proceed) {
+  if (!_isSweepActive(_sweepJob) || _sweepGateShown.has(area)) { proceed(); return; }
+  _sweepGateShown.add(area);
+  openSweepGate(area, proceed);
 }
 
 function _profilePendingCard(sweeping, idleText) {
@@ -3097,6 +3175,8 @@ const _SWEEP_PHASE_LABEL = {
 };
 
 function applySyncJob(job) {
+  _sweepJob = job;
+  if (_isSweepActive(job)) _sweepWasActive = true;
   const badge = $('profile-scope-badge');
   const strip = $('profile-sweep');
   const mobileStrip = $('m-profile-sweep');
@@ -3138,23 +3218,65 @@ function applySyncJob(job) {
   }
 }
 
+// Tarama uygulamanın her yerinde arka planda sürüyor, bu yüzden takibi de
+// profil sayfasına bağlı değil: bittiğinde kullanıcı neredeyse orada haber
+// veriyoruz. Profil açıkken şerit zaten aynı yanıttan besleniyor.
 function startSweepPoll() {
   if (_sweepPollTimer) return;
-  _sweepPollTimer = setInterval(async () => {
-    if ($('view-profile').classList.contains('hidden')) { stopSweepPoll(); return; }
-    try {
-      const data = await apiJSON('/api/profile/sync-status');
-      const job = data.sync_job;
-      const active = _isSweepActive(job);
-      if (_persistedProfile) _persistedProfile.sync_job = job;
-      applySyncJob(job);
-      if (!active) await loadProfile();
-    } catch (_) { /* transient; keep polling */ }
-  }, 7000);
+  _sweepPollTimer = setInterval(pollSweepOnce, 8000);
+}
+
+async function pollSweepOnce() {
+  if (!_account) { stopSweepPoll(); return; }
+  try {
+    const data = await apiJSON('/api/profile/sync-status');
+    const job = data.sync_job;
+    const active = _isSweepActive(job);
+    _sweepJob = job;
+    if (_persistedProfile) _persistedProfile.sync_job = job;
+    if (!$('view-profile').classList.contains('hidden')) applySyncJob(job);
+    // Kendi kendini sürdürür: giriş anındaki tek yoklama da takibi başlatsın,
+    // yoksa profile hiç uğramayan biri bitiş haberini hiç almaz.
+    if (active) { _sweepWasActive = true; startSweepPoll(); return; }
+    stopSweepPoll();
+    if (_sweepWasActive) {
+      _sweepWasActive = false;
+      _sweepGateShown.clear();
+      announceSweepComplete(job);
+    }
+    await loadProfile();
+  } catch (_) { /* transient; keep polling */ }
 }
 
 function stopSweepPoll() {
   if (_sweepPollTimer) { clearInterval(_sweepPollTimer); _sweepPollTimer = null; }
+}
+
+// Tarama sırasında uyardığımız her yer artık gerçekten hazır; haberi vermenin
+// yeri de profil, çünkü yeni dolan bölümler orada.
+function announceSweepComplete(job) {
+  const dialog = $('dialog-sweep-done');
+  if (!dialog) return;
+  const total = Number(job?.total || job?.processed || 0);
+  $('sweep-done-body').textContent = total
+    ? t('{count} film okundu. Zevk analizin, yönetmen sıralaman ve önerilerin artık tüm geçmişine dayanıyor.',
+        { count: total.toLocaleString(uiLocale()) })
+    : t('Zevk analizin, yönetmen sıralaman ve önerilerin artık tüm geçmişine dayanıyor.');
+  $('sweep-done-profile').onclick = () => {
+    dialog.close();
+    goNav('profile');
+    loadProfile();
+  };
+  if (!dialog.open) dialog.showModal();
+}
+
+// Tarama sürerken uygulamaya girildiğinde takip hemen başlasın: kullanıcı
+// profile hiç uğramasa da bitiş haberini alır.
+function watchSweepFromEntry(job) {
+  _sweepJob = job || _sweepJob;
+  if (!_isSweepActive(_sweepJob)) return;
+  _sweepWasActive = true;
+  startSweepPoll();
 }
 
 let _blendInbox = { incoming: [], outgoing: [], history: [], blocked: [] };
@@ -4135,6 +4257,9 @@ function enterApp(account, opts = {}) {
     return;
   }
   queueEntrySync();
+  // Tarama sürüyorsa takibi hemen başlat: bitiş haberi profil sayfasına
+  // bağlı kalmasın, kullanıcı nerede olursa olsun ulaşsın.
+  pollSweepOnce();
   // Yenilendiğinde aynı ekrana dönülür; adres yoksa ev akıştır. Pano arka
   // planda hazırlanmaya devam eder, "Profil"e geçiş anlık olsun diye.
   restoreRoute()
@@ -4198,6 +4323,7 @@ function _obLive(token) {
 function finishOnboarding() {
   _obToken += 1;
   _obEscapeOnly = false;
+  watchSweepFromEntry(_persistedProfile?.sync_job);
   _obClearTimers();
   if (_account) sessionStorage.setItem(_onboardKey(_account), '1');
   $('ob-skip').classList.add('hidden');
@@ -5647,6 +5773,17 @@ function openInfoDialog(id) {
 $('login-form').addEventListener('submit', loginAccount);
 $('register-form').addEventListener('submit', startRegistration);
 $('sandbox-form').addEventListener('submit', startSandboxSession);
+$('dialog-sweep-gate').addEventListener('click', event => {
+  const nav = event.target.closest('[data-sweep-go-nav]');
+  const mode = event.target.closest('[data-sweep-go-mode]');
+  if (!nav && !mode) return;
+  $('dialog-sweep-gate').close();
+  if (nav) { goNav(nav.dataset.sweepGoNav); return; }
+  // Rastgele, "Ne izlesem?" içindeki bir mod: aracı zaten uyarmış olarak aç
+  // ve doğrudan o moda geç.
+  openQuickTool('watch', { gated: true });
+  setProfileWatchMode(mode.dataset.sweepGoMode);
+});
 $('auth-tab-login').addEventListener('click', () => setAuthMode('login'));
 $('auth-tab-register').addEventListener('click', () => setAuthMode('register'));
 $('btn-verify').addEventListener('click', verifyRegistration);

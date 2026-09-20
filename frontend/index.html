@@ -29,7 +29,7 @@
 <link rel="manifest" href="/static/site.webmanifest?v=20260910.6"/>
 <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Geist:wght@400;500;600;700&display=swap" rel="stylesheet"/>
-<link rel="stylesheet" href="/static/app.css?v=20260920.18"/>
+<link rel="stylesheet" href="/static/app.css?v=20260920.20"/>
 </head>
 <body class="is-booting bg-surface-container-lowest text-on-surface min-h-screen flex flex-col selection:bg-primary-container selection:text-on-primary-container">
 
@@ -204,6 +204,54 @@
   <div class="relative">
     <img id="avatar-zoom-image" class="block w-full rounded-2xl object-contain" alt=""/>
     <button type="button" data-close-dialog="dialog-avatar" class="absolute right-2 top-2 flex h-9 w-9 items-center justify-center rounded-full bg-black/60 text-white backdrop-blur" aria-label="Kapat"><span class="material-symbols-outlined text-[20px]">close</span></button>
+  </div>
+</dialog>
+
+<!-- Arşiv taraması sürerken öneri/Blend gibi tam geçmişe dayanan bir yere
+     girilirse çıkar. Engellemez: ne kadarının hazır olduğunu söyler, tarama
+     beklemeden kullanılabilecek yerleri gösterir, yine de devam edilebilir. -->
+<dialog id="dialog-sweep-gate" class="auth-info-dialog" aria-labelledby="sweep-gate-title">
+  <div class="glass-panel rounded-2xl p-6 md:p-7 shadow-2xl">
+    <div class="flex items-start gap-3">
+      <span class="material-symbols-outlined shrink-0 text-[22px] text-secondary-container">hourglass_top</span>
+      <div class="min-w-0 flex-1">
+        <h2 id="sweep-gate-title" class="font-headline-md text-[20px] text-on-surface">Arşiv taraman sürüyor</h2>
+        <p id="sweep-gate-body" class="mt-2 font-body-md text-body-md leading-relaxed text-on-surface-variant"></p>
+      </div>
+    </div>
+    <div class="mt-4 rounded-xl border border-outline-variant/25 bg-surface-container/50 p-3">
+      <div class="flex items-baseline justify-between gap-3">
+        <span class="font-label-sm text-label-sm uppercase tracking-wide text-on-surface-variant/70">Taranan film</span>
+        <strong id="sweep-gate-count" class="font-label-md text-label-md text-primary-container"></strong>
+      </div>
+      <div class="mt-2 h-1.5 overflow-hidden rounded-full bg-surface-variant">
+        <div id="sweep-gate-bar" class="h-full rounded-full bg-primary-container transition-[width] duration-500"></div>
+      </div>
+      <p id="sweep-gate-phase" class="mt-2 font-label-sm text-label-sm text-on-surface-variant/70"></p>
+    </div>
+    <p class="mt-4 font-label-sm text-label-sm text-on-surface-variant/70">Tarama beklemeden kullanabileceklerin:</p>
+    <div id="sweep-gate-open" class="mt-2 flex flex-wrap gap-2"></div>
+    <div class="mt-5 grid gap-2 sm:grid-cols-2">
+      <button id="sweep-gate-continue" type="button" class="rounded-xl bg-primary-container px-4 py-3 font-label-md text-label-md uppercase tracking-wide text-on-primary-container">Yine de devam et</button>
+      <button type="button" data-close-dialog="dialog-sweep-gate" class="rounded-xl border border-outline-variant/30 bg-surface-container px-4 py-3 font-label-md text-label-md uppercase tracking-wide text-on-surface-variant">Taramayı bekle</button>
+    </div>
+  </div>
+</dialog>
+
+<!-- Tarama bittiğinde, kullanıcı uygulamanın neresinde olursa olsun çıkar. -->
+<dialog id="dialog-sweep-done" class="auth-info-dialog" aria-labelledby="sweep-done-title">
+  <div class="glass-panel rounded-2xl p-6 md:p-7 shadow-2xl">
+    <div class="flex items-start gap-3">
+      <span class="material-symbols-outlined shrink-0 text-[22px] text-primary-container">task_alt</span>
+      <div class="min-w-0 flex-1">
+        <h2 id="sweep-done-title" class="font-headline-md text-[20px] text-on-surface">Arşiv taraman tamamlandı</h2>
+        <p id="sweep-done-body" class="mt-2 font-body-md text-body-md leading-relaxed text-on-surface-variant"></p>
+      </div>
+    </div>
+    <div class="mt-5 grid gap-2 sm:grid-cols-2">
+      <button id="sweep-done-profile" type="button" class="rounded-xl bg-primary-container px-4 py-3 font-label-md text-label-md uppercase tracking-wide text-on-primary-container">Profilime git</button>
+      <button type="button" data-close-dialog="dialog-sweep-done" class="rounded-xl border border-outline-variant/30 bg-surface-container px-4 py-3 font-label-md text-label-md uppercase tracking-wide text-on-surface-variant">Şimdi değil</button>
+    </div>
   </div>
 </dialog>
 
@@ -1381,6 +1429,6 @@
   </div>
 </footer>
 
-<script type="module" src="/static/js/app.js?v=20260920.18"></script>
+<script type="module" src="/static/js/app.js?v=20260920.20"></script>
 </body>
 </html>
