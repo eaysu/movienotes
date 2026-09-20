@@ -609,6 +609,13 @@ async def _restore_account_from_device(request: Request, response: Response) -> 
         _clear_session_cookies(response)
         raise HTTPException(status_code=401, detail="Oturum geçersiz.") from exc
 
+    if session is None:
+        # A refresh that declines by answering nothing is still a decline. It
+        # used to reach the cookie writer and fail there, so a stale cookie
+        # produced a 500 on the bootstrap instead of a plain "sign in again".
+        _clear_session_cookies(response)
+        raise HTTPException(status_code=401, detail="Oturum geçersiz.")
+
     _set_session_cookies(response, session, remember=_remembered(request))
     _cache_account(_auth_service(), session.access_token, session.account)
     return session.account

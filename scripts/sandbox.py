@@ -81,10 +81,13 @@ def main() -> int:
         # allowed to travel without TLS.
         "AUTH_COOKIE_SECURE": "false",
         "DEV_LOGIN_ENABLED": "false",
-        # One person, one profile: the background bulletin and diary sweeps
-        # have no cohort to serve and would only add noise.
+        # One person, one profile: the scheduled sweeps have no cohort to
+        # serve and would only add noise. The on-entry diary read still runs,
+        # and keeps more than the production three so the feed has something
+        # to show in a session that lasts minutes rather than weeks.
         "BULLETIN_ENABLED": "false",
         "DIARY_SCAN_ENABLED": "false",
+        "DIARY_SCAN_ENTRIES": "12",
     })
 
     sys.path.insert(0, str(BACKEND))

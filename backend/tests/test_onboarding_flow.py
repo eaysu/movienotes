@@ -308,14 +308,24 @@ class OnboardingEscapeTests(unittest.TestCase):
 
         self.js = (Path(__file__).resolve().parents[2] / "frontend" / "js" / "app.js").read_text()
 
-    def test_a_slow_bootstrap_opens_a_way_into_the_app(self):
+    def test_a_failed_bootstrap_opens_a_way_into_the_app(self):
+        """The trap was the reconnect loop, not the ordinary wait.
+
+        An "enter app" button sitting there through the normal few seconds
+        invited people out of a presentation that was about to start, so it is
+        offered only when the connection has actually failed — the one case
+        where no slide is coming.
+        """
         block = self.js.split("async function startOnboarding", 1)[1]
         block = block.split("\nasync function ", 1)[0]
 
-        # The presentation waits on one Letterboxd-backed request. If it is
-        # slow, the door opens anyway instead of holding a fact card forever.
-        self.assertIn("_obArmEscape()", block)
         self.assertIn("_obOfferEscape(", block)
+        # No timer arms the door during a healthy wait.
+        self.assertNotIn("_obArmEscape", self.js)
+        opening, failure = block.split("if (!data) {", 1)
+        self.assertNotIn("_obOfferEscape(", opening,
+                         "the door opened before the bootstrap had failed")
+        self.assertIn("_obOfferEscape(", failure)
 
     def test_the_reconnect_loop_gives_up_instead_of_spinning_forever(self):
         block = self.js.split("async function startOnboarding", 1)[1]

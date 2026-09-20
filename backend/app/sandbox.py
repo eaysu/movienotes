@@ -19,7 +19,7 @@ import threading
 from datetime import datetime, timezone
 from typing import Any
 
-from .auth import Account, InvalidCredentialsError
+from .auth import Account, AuthSession, InvalidCredentialsError
 
 # Anything not implemented below is answered from the shape its name implies,
 # so a surface this session never populates stays empty instead of raising.
@@ -50,6 +50,7 @@ class SandboxAuthService:
         self._films: dict[str, dict] = {}
         self._job: dict | None = None
         self._posters: dict[str, dict] = {}
+        self._posts: dict[str, dict] = {}
 
     # ── session ───────────────────────────────────────────────────────────
     def open_session(self, profile) -> tuple[Account, str]:
@@ -86,11 +87,29 @@ class SandboxAuthService:
                 raise InvalidCredentialsError("Sandbox oturumu bulunamadı.")
             return self.account
 
+    def refresh(self, refresh_token: str) -> AuthSession | None:
+        """Renew the one session this process holds, or decline.
+
+        The sandbox issues the same opaque value as both cookies, so a reload
+        arrives here rather than at `current_account`. Answering `None` for an
+        unknown token is how a decline is spelled; the caller clears cookies.
+        """
+        with self._lock:
+            if not self.account or not self.token or refresh_token != self.token:
+                return None
+            return AuthSession(
+                account=self.account,
+                access_token=self.token,
+                refresh_token=self.token,
+                expires_in=60 * 60 * 24,
+            )
+
     def revoke(self, *_args, **_kwargs) -> None:
         with self._lock:
             self.account = None
             self.token = ""
             self._films.clear()
+            self._posts.clear()
             self._favorites.clear()
             self._taste = None
             self._job = None
@@ -186,8 +205,100 @@ class SandboxAuthService:
     def list_blends(self, _account) -> dict:
         return {"blends": [], "requests": []}
 
-    def list_feed(self, _account, **_kwargs) -> dict:
-        return {"posts": [], "next_cursor": ""}
+    # ── the member's own notes ────────────────────────────────────────────
+    # Their commented diary entries are the one part of the feed a solo
+    # session can really fill, and the entry sync already fetches them, so
+    # the feed here shows exactly what it would show them in production.
+    def import_diary_entries(self, user_id: int, entries: list[dict]) -> int:
+        written = 0
+        with self._lock:
+            for entry in entries or []:
+                body = (entry.get("body") or "").strip()
+                key = entry.get("source_key")
+                if not body or not key or key in self._posts:
+                    continue
+                self._posts[key] = {
+                    "id": key,
+                    "author_id": user_id,
+                    "kind": "log",
+                    "source": "letterboxd",
+                    "source_key": key,
+                    "body": body,
+                    "film_slug": entry.get("film_slug") or "",
+                    "tmdb_id": entry.get("tmdb_id"),
+                    "film_title": entry.get("film_title") or "",
+                    "film_year": entry.get("film_year"),
+                    "payload": entry.get("payload") or {},
+                    "spoiler": False,
+                    "reply_to": None,
+                    "like_count": 0,
+                    "reply_count": 0,
+                    "created_at": entry.get("created_at") or _now(),
+                }
+                written += 1
+        return written
+
+    def create_post(self, account: Account, payload: dict) -> dict:
+        with self._lock:
+            key = f"note-{len(self._posts) + 1}"
+            row = {
+                "id": key, "author_id": account.id, "kind": "note",
+                "source": "movienotes", "source_key": key,
+                "body": (payload.get("body") or "").strip(),
+                "film_slug": payload.get("film_slug") or "",
+                "tmdb_id": payload.get("tmdb_id"),
+                "film_title": payload.get("film_title") or "",
+                "film_year": payload.get("film_year"),
+                "payload": {}, "spoiler": bool(payload.get("spoiler")),
+                "reply_to": payload.get("reply_to"),
+                "like_count": 0, "reply_count": 0, "created_at": _now(),
+            }
+            self._posts[key] = row
+            return self._hydrate(row)
+
+    def _hydrate(self, row: dict) -> dict:
+        account = self.account
+        poster = self._posters.get(row.get("film_slug") or "", {})
+        film = self._films.get(row.get("film_slug") or "", {})
+        return {
+            **row,
+            "author": {
+                "id": getattr(account, "id", 1),
+                "username": getattr(account, "username", ""),
+                "display_name": getattr(account, "display_name", ""),
+                "avatar_url": getattr(account, "avatar_url", ""),
+            },
+            "film": {
+                "slug": row.get("film_slug") or "",
+                "title": poster.get("title") or film.get("title") or row.get("film_title") or "",
+                "year": poster.get("release_year") or film.get("release_year") or row.get("film_year"),
+                "poster_url": poster.get("poster_url") or film.get("poster_url") or "",
+                "director": poster.get("director") or film.get("director") or "",
+            } if row.get("film_slug") else None,
+            "liked": False,
+            "mine": True,
+        }
+
+    def list_feed(self, _account, **kwargs) -> dict:
+        with self._lock:
+            rows = sorted(
+                self._posts.values(),
+                key=lambda row: str(row.get("created_at") or ""),
+                reverse=True,
+            )
+        limit = int(kwargs.get("limit") or 20)
+        slug = (kwargs.get("film_slug") or "").strip()
+        if slug:
+            rows = [row for row in rows if row.get("film_slug") == slug]
+        return {"posts": [self._hydrate(row) for row in rows[:limit]], "next_cursor": ""}
+
+    def list_user_posts(self, _account, _username="", **kwargs) -> list[dict]:
+        return self.list_feed(_account, **kwargs)["posts"]
+
+    def get_post_thread(self, _account, post_id: str) -> dict | None:
+        with self._lock:
+            row = self._posts.get(post_id)
+        return {"post": self._hydrate(row), "replies": []} if row else None
 
     def letter_send_status(self, _account, _username: str = "") -> dict:
         return {"can_send": False, "reason": "sandbox"}
@@ -268,6 +379,32 @@ class SandboxAuthService:
             row = self._films.get(slug)
             return self._film_row(row) if row else None
 
+    def list_director_films(
+        self, _user_id: int, director: str, *, limit: int = 60, offset: int = 0
+    ) -> list[dict]:
+        """The profile's director dropdown reads from here, so it is real."""
+        wanted = str(director or "").strip().casefold()
+        with self._lock:
+            rows = [
+                row for row in self._ordered()
+                if str(row.get("director") or "").strip().casefold() == wanted
+            ]
+        rows.sort(key=lambda row: (
+            -(row.get("user_rating") or 0),
+            row.get("watched_rank") if row.get("watched_rank") is not None else 1e9,
+        ))
+        return [
+            {
+                "film_slug": row.get("film_slug"),
+                "title": row.get("title") or "",
+                "release_year": row.get("release_year") or row.get("year"),
+                "poster_url": row.get("poster_url") or "",
+                "user_rating": row.get("user_rating"),
+                "watched_rank": row.get("watched_rank"),
+            }
+            for row in rows[offset : offset + limit]
+        ]
+
     def get_rated_watched_films(self, _user_id: int, *_args, **_kwargs) -> list[dict]:
         with self._lock:
             return [
@@ -335,6 +472,10 @@ class SandboxAuthService:
             return {slug: self._posters[slug] for slug in (slugs or []) if slug in self._posters}
 
     def get_film_posters_by_tmdb_ids(self, _ids) -> dict:
+        return {}
+
+    def get_director_assets(self, _names) -> dict:
+        """No shared portrait pool here; TMDb answers every lookup itself."""
         return {}
 
     def film_catalog_entry(self, slug: str) -> dict:

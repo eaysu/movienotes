@@ -8,24 +8,24 @@ import {
   finishApiRequest,
   scrapeErrorMessage,
   streamErrorMessage,
-} from './api.js?v=20260920.20';
+} from './api.js?v=20260920.21';
 import {
   cookieValue,
   csrfHeaders,
   setAuthMessage,
   setAuthMode,
   setPasswordVisibility,
-} from './auth.js?v=20260920.20';
-import { directorAvatar, directorFilmGrid, directorFilmTile } from './profile.js?v=20260920.20';
+} from './auth.js?v=20260920.21';
+import { directorAvatar, directorFilmGrid, directorFilmTile } from './profile.js?v=20260920.21';
 import { animateScore, getScoreInfo } from './blend.js?v=20260902.15';
-import { createRecommendationCards } from './recommendations.js?v=20260920.20';
+import { createRecommendationCards } from './recommendations.js?v=20260920.21';
 import {
   getLocale,
   initI18n,
   localePreference,
   setLocalePreference,
   t,
-} from './i18n.js?v=20260920.20';
+} from './i18n.js?v=20260920.21';
 
 initI18n();
 
@@ -34,7 +34,7 @@ const uiLocale = () => (getLocale() === 'en' ? 'en-US' : 'tr-TR');
 let _shareCardsModule;
 function loadShareCardsModule() {
   if (!_shareCardsModule) {
-    _shareCardsModule = import('./share-cards.js?v=20260920.20');
+    _shareCardsModule = import('./share-cards.js?v=20260920.21');
   }
   return _shareCardsModule;
 }
@@ -4282,7 +4282,6 @@ let _obEscapeTimer = null;    // bekleme uzarsa "uygulamaya geç" çıkışını
 let _obEscapeOnly = false;    // buton sunumu bitirmiyor, sadece uygulamaya alıyor
 const OB_SLIDE_MS = 15000;
 const OB_FACT_MS = 7000;
-const OB_ESCAPE_MS = 7000;
 const OB_MAX_RETRIES = 3;
 
 function _obClearTimers() {
@@ -4305,14 +4304,6 @@ function _obOfferEscape(note) {
   if (note) $('ob-bg-note').textContent = note;
 }
 
-function _obArmEscape() {
-  if (_obEscapeTimer) clearTimeout(_obEscapeTimer);
-  _obEscapeTimer = setTimeout(
-    () => _obOfferEscape('Beklemek istemiyorsan uygulamaya şimdi geçebilirsin.'),
-    OB_ESCAPE_MS,
-  );
-}
-
 // Bu onboarding çalışması hâlâ geçerli mi? Değilse timer'ları da temizler.
 function _obLive(token) {
   const ok = token === _obToken && !$('view-onboarding').classList.contains('hidden');
@@ -4324,6 +4315,10 @@ function finishOnboarding() {
   _obToken += 1;
   _obEscapeOnly = false;
   watchSweepFromEntry(_persistedProfile?.sync_job);
+  // Onboarding, `enterApp`'in giriş senkronunu atlayarak dallanıyordu — yani
+  // yeni bir üyenin Letterboxd'daki kendi yorumları akışa ancak ikinci
+  // açılışında düşüyordu. İlk akış ekranı boş görünmesin.
+  queueEntrySync();
   _obClearTimers();
   if (_account) sessionStorage.setItem(_onboardKey(_account), '1');
   $('ob-skip').classList.add('hidden');
@@ -4435,9 +4430,9 @@ function _obRenderWelcome() {
 function _obRenderNumbers(items) {
   _obStage(`
     <p class="font-label-sm text-label-sm uppercase tracking-[.24em] text-primary-container">Letterboxd geçmişin</p>
-    <div class="mt-6 grid grid-cols-3 gap-3">
+    <div class="mt-6 flex flex-wrap justify-center gap-3">
       ${items.map(x => `
-        <div class="rounded-2xl border border-outline-variant/20 bg-surface-container/50 p-4">
+        <div class="min-w-[96px] max-w-[160px] flex-1 rounded-2xl border border-outline-variant/20 bg-surface-container/50 p-4">
           <strong data-ob-count="${x.value}" class="block font-display-lg text-[26px] md:text-[30px] leading-none text-on-surface">0</strong>
           <span class="mt-2 block font-label-sm text-[9px] md:text-label-sm uppercase tracking-wide text-on-surface-variant">${escapeHTML(x.label)}</span>
         </div>`).join('')}
@@ -4556,11 +4551,12 @@ async function startOnboarding(retry = 0) {
   $('ob-skip-label').textContent = 'Uygulamaya geç';
   $('ob-bg-note').textContent = 'Favori dörtlün hazırlanıyor…';
   $('ob-dots').innerHTML = '';
-  // Bir kez açılan çıkış kapısı yeniden denemelerde kapanmaz.
+  // Çıkış kapısı yalnızca bağlantı koptuğunda açılıyor; normal bekleme kısa ve
+  // sonunda slaytlar var, oraya buton koymak sunumu başlamadan terk ettiriyor.
+  // Bir kez açıldıysa yeniden denemelerde kapanmaz.
   if (retry === 0) {
     _obEscapeOnly = false;
     $('ob-skip').classList.add('hidden');
-    _obArmEscape();
   }
 
   // Sadece tek küçük profil isteği ve Fav 4 enrichment'i beklenir. Tam

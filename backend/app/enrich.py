@@ -845,7 +845,11 @@ class Enricher:
         asset_getter = getattr(self.asset_store, "get_director_assets", None)
         if asset_getter:
             try:
-                shared_assets = await asyncio.to_thread(asset_getter, wanted)
+                # A store that answers `None` rather than raising used to take
+                # the whole ranking stage down with it — one missing shared
+                # lookup turned "zevkime göre öner" into an unexpected error.
+                # The shared pool is an optimisation; TMDb is the fallback.
+                shared_assets = await asyncio.to_thread(asset_getter, wanted) or {}
             except Exception:
                 shared_assets = {}
 

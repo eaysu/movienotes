@@ -87,6 +87,23 @@ class SandboxStoreTests(unittest.TestCase):
         self.assertEqual(dropped, 1)
         self.assertEqual(self.service.get_watched_slugs(1), {"solaris"})
 
+    def test_the_director_dropdown_is_filled_from_the_archive(self):
+        """Reported: the scan finished and the profile's lists stayed empty."""
+        self.service.save_watched_films(1, [
+            {"slug": "poor-things", "title": "Poor Things",
+             "director": "Yorgos Lanthimos", "user_rating": 4.5, "watched_rank": 3},
+            {"slug": "the-lobster", "title": "The Lobster",
+             "director": "Yorgos Lanthimos", "user_rating": 5.0, "watched_rank": 9},
+            {"slug": "stalker", "title": "Stalker", "director": "Andrei Tarkovsky"},
+        ])
+
+        films = self.service.list_director_films(1, "Yorgos Lanthimos")
+
+        # Highest rating first, exactly as the production query orders it.
+        self.assertEqual([film["title"] for film in films], ["The Lobster", "Poor Things"])
+        # And the name comes back from a taste snapshot, so case must not matter.
+        self.assertEqual(len(self.service.list_director_films(1, "yorgos lanthimos")), 2)
+
     def test_a_surface_this_session_cannot_fill_answers_empty(self):
         """A solo visitor has no feed; that is empty, not broken."""
         self.assertEqual(self.service.list_feed(self.account)["posts"], [])
@@ -313,6 +330,84 @@ class RunTestScriptTests(unittest.TestCase):
         """`exec` or a background server would strand the temporary folder."""
         self.assertNotIn("exec ", self.source)
         self.assertIn("--no-browser", self.source)
+
+
+class SandboxFeedTests(unittest.TestCase):
+    """A solo session still has one real source of notes: their own diary."""
+
+    def setUp(self):
+        self.service = SandboxAuthService()
+        self.account, _ = self.service.open_session(_profile())
+
+    def test_written_diary_entries_land_in_the_feed(self):
+        written = self.service.import_diary_entries(1, [
+            {"source_key": "k1", "film_slug": "stalker", "film_title": "Stalker",
+             "body": "Still the best thing I have seen all year.",
+             "created_at": "2026-09-01T12:00:00+00:00"},
+            {"source_key": "k2", "film_slug": "solaris", "film_title": "Solaris",
+             "body": "Colder than I remembered.",
+             "created_at": "2026-09-05T12:00:00+00:00"},
+        ])
+
+        self.assertEqual(written, 2)
+        posts = self.service.list_feed(self.account)["posts"]
+        # Newest first, and each one carries the author and film the shell draws.
+        self.assertEqual([post["film"]["title"] for post in posts], ["Solaris", "Stalker"])
+        self.assertEqual(posts[0]["author"]["username"], "tarkovskyfan")
+        self.assertTrue(posts[0]["mine"])
+
+    def test_an_entry_without_a_comment_is_not_a_note(self):
+        """The same rule as production: a rating alone has nothing to read."""
+        written = self.service.import_diary_entries(1, [
+            {"source_key": "k3", "film_slug": "mirror", "body": "   "},
+        ])
+
+        self.assertEqual(written, 0)
+        self.assertEqual(self.service.list_feed(self.account)["posts"], [])
+
+    def test_the_same_entry_does_not_land_twice(self):
+        row = {"source_key": "k4", "film_slug": "mirror", "body": "Luminous."}
+
+        self.service.import_diary_entries(1, [row])
+        self.service.import_diary_entries(1, [row])
+
+        self.assertEqual(len(self.service.list_feed(self.account)["posts"]), 1)
+
+
+class RefreshDeclineTests(unittest.TestCase):
+    """Caught live: a stale cookie produced a 500 instead of "sign in again"."""
+
+    def test_an_unknown_token_is_declined_rather_than_half_answered(self):
+        service = SandboxAuthService()
+        service.open_session(_profile())
+
+        self.assertIsNone(service.refresh("some-other-token"))
+
+    def test_the_bootstrap_turns_a_declined_refresh_into_a_plain_401(self):
+        main_py = (ROOT / "app" / "main.py").read_text()
+        block = main_py.split("def _restore_account_from_device", 1)[1]
+        block = block.split("\ndef ", 1)[0]
+
+        # A refresh that declines by answering nothing is still a decline; it
+        # used to reach the cookie writer and fail on `session.expires_in`.
+        assert "if session is None:" in block
+        assert "_clear_session_cookies(response)" in block
+        self.assertLess(
+            block.index("if session is None:"),
+            block.index("_set_session_cookies(response, session"),
+        )
+
+
+class SharedAssetLookupTests(unittest.TestCase):
+    """Caught live: "zevkime göre öner" died at the ranking stage."""
+
+    def test_a_shared_store_that_answers_nothing_does_not_take_ranking_down(self):
+        enrich = (ROOT / "app" / "enrich.py").read_text()
+        block = enrich.split("def director_movie_ids", 1)[1].split("\n    async def ", 1)[0]
+
+        # The shared pool is an optimisation. A store answering `None` rather
+        # than raising slipped past the except and crashed on `.get`.
+        assert "await asyncio.to_thread(asset_getter, wanted) or {}" in block
 
 
 if __name__ == "__main__":
