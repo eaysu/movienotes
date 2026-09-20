@@ -8,24 +8,24 @@ import {
   finishApiRequest,
   scrapeErrorMessage,
   streamErrorMessage,
-} from './api.js?v=20260920.12';
+} from './api.js?v=20260920.13';
 import {
   cookieValue,
   csrfHeaders,
   setAuthMessage,
   setAuthMode,
   setPasswordVisibility,
-} from './auth.js?v=20260920.12';
-import { directorAvatar, directorFilmGrid, directorFilmTile } from './profile.js?v=20260920.12';
+} from './auth.js?v=20260920.13';
+import { directorAvatar, directorFilmGrid, directorFilmTile } from './profile.js?v=20260920.13';
 import { animateScore, getScoreInfo } from './blend.js?v=20260902.15';
-import { createRecommendationCards } from './recommendations.js?v=20260920.12';
+import { createRecommendationCards } from './recommendations.js?v=20260920.13';
 import {
   getLocale,
   initI18n,
   localePreference,
   setLocalePreference,
   t,
-} from './i18n.js?v=20260920.12';
+} from './i18n.js?v=20260920.13';
 
 initI18n();
 
@@ -34,7 +34,7 @@ const uiLocale = () => (getLocale() === 'en' ? 'en-US' : 'tr-TR');
 let _shareCardsModule;
 function loadShareCardsModule() {
   if (!_shareCardsModule) {
-    _shareCardsModule = import('./share-cards.js?v=20260920.12');
+    _shareCardsModule = import('./share-cards.js?v=20260920.13');
   }
   return _shareCardsModule;
 }
@@ -910,8 +910,10 @@ function showView(name) {
 
 // ── Adres yönlendirmesi ──────────────────────────────────────────────────
 // Yenilediğinde bulunduğun sayfa açılsın diye ekran adı adres çubuğunda
-// tutuluyor. `replaceState` kullanılıyor: geçmişe kayıt eklenmiyor, yani
-// tarayıcının geri tuşu bugünkü davranışını koruyor.
+// tutuluyor. Her ekran değişimi geçmişe bir kayıt bırakıyor: kurulu
+// uygulamada tek kayıt olduğu sürece telefonun geri tuşu ilk dokunuşta
+// uygulamadan çıkıyordu. İlk ekran `replaceState` ile yazılıyor, yani ana
+// ekrandan geri basmak hâlâ uygulamayı kapatır — beklenen davranış budur.
 const ROUTE_OF_VIEW = {
   feed: 'akis', notifications: 'bildirimler', inbox: 'mektuplar',
   blends: 'blend', sinefil: 'kesfet', profile: 'profil', tools: 'araclar',
@@ -929,11 +931,20 @@ function currentRoute(name) {
 }
 
 function rememberRoute(name) {
-  if (_routeRestoring || !_account) return;
+  if (!_account) return;
   const route = currentRoute(name);
-  if (!route) return;
-  const next = `#/${route}`;
-  if (location.hash !== next) history.replaceState(null, '', next);
+  // A screen with no address of its own — a result, a mobile list — keeps the
+  // one it was opened from, but still earns an entry so going back returns to
+  // that screen rather than skipping past it.
+  const next = route ? `#/${route}` : (location.hash || '#/akis');
+  const previous = history.state && history.state.view;
+  // The first screen seeds the stack even while a reload is being restored:
+  // without a state to build on, the next navigation would replace it and the
+  // member would lose a level of back.
+  if (previous === undefined) { history.replaceState({ view: name }, '', next); return; }
+  if (_routeRestoring) return;
+  if (previous === name && location.hash === next) return;
+  history.pushState({ view: name }, '', next);
 }
 
 // Açılışta adresteki ekranı geri getirir. Bilinmeyen adres akışa düşer.
@@ -941,6 +952,9 @@ async function restoreRoute() {
   const raw = (location.hash || '').replace(/^#\/?/, '');
   const [head, ...rest] = raw.split('/').filter(Boolean);
   if (!head) return false;
+  // Save and restore rather than clear: a back gesture sets this too, and
+  // clearing it here would let the restored screen push a fresh entry.
+  const wasRestoring = _routeRestoring;
   _routeRestoring = true;
   try {
     if (head === 'u' && rest[0]) { await openUserPage(rest[0], { from: 'feed' }); return true; }
@@ -951,9 +965,32 @@ async function restoreRoute() {
     goNav(NAV_OF_VIEW[view] || 'feed');
     return true;
   } finally {
-    _routeRestoring = false;
+    _routeRestoring = wasRestoring;
   }
 }
+
+// The phone's own back gesture. Without this an installed app had a single
+// history entry, so the first back closed it from wherever the member was.
+window.addEventListener('popstate', async event => {
+  if (!_account) return;
+  const view = event.state && event.state.view;
+  const wasRestoring = _routeRestoring;
+  _routeRestoring = true;
+  try {
+    // A modal dialog is left alone: the browser already cancels it on back,
+    // and closing one here would spend a history entry the view never used.
+    if (view && !ROUTE_OF_VIEW[view] && view !== 'user' && view !== 'thread' && view !== 'follows') {
+      // A result or list screen: its address belongs to the screen behind it,
+      // so restoring by address would reopen the wrong one.
+      showView(view);
+      return;
+    }
+    if (await restoreRoute()) return;
+    await openFeed();
+  } finally {
+    _routeRestoring = wasRestoring;
+  }
+});
 
 // ── Uygulama kabuğu: sol gezinme, alt sekme çubuğu, sağ raf ─────────────
 // Twitter'ın üç sütunu: solda gezinme, ortada akış, sağda gündem. Mobilde sol

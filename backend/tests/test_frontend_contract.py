@@ -770,6 +770,43 @@ def test_the_blend_hero_reports_three_figures_and_nothing_else():
     assert main_py.count('"top_director_photo"') == 2
 
 
+def test_the_phones_back_gesture_walks_the_app_instead_of_closing_it():
+    """Reported: in the installed app the phone's own back button quit from
+    wherever the member was.
+
+    The shell only ever called replaceState, so a standalone window held a
+    single history entry and the first back popped straight out of it.
+    """
+    app_js = (FRONTEND / "js" / "app.js").read_text()
+    manifest = json.loads((FRONTEND / "site.webmanifest").read_text())
+
+    assert manifest["display"] == "standalone"
+
+    remember = app_js.split("function rememberRoute", 1)[1].split(
+        "async function restoreRoute", 1
+    )[0]
+    # Every later screen pushes; only the first one replaces, so back from the
+    # home screen still closes the app.
+    assert "history.pushState({ view: name }" in remember
+    assert "history.replaceState({ view: name }" in remember
+    assert "if (previous === undefined)" in remember
+
+    popstate = app_js.split("window.addEventListener('popstate'", 1)[1].split(
+        "// ── Uygulama kabuğu", 1
+    )[0]
+    assert "await restoreRoute()" in popstate
+    assert "showView(view)" in popstate
+    # The restoring guard is saved and restored, not cleared, or the screen a
+    # back gesture lands on would push a fresh entry of its own.
+    assert "const wasRestoring = _routeRestoring;" in popstate
+    assert "_routeRestoring = wasRestoring;" in popstate
+    restore = app_js.split("async function restoreRoute", 1)[1].split(
+        "window.addEventListener('popstate'", 1
+    )[0]
+    assert "_routeRestoring = wasRestoring;" in restore
+    assert "_routeRestoring = false;" not in restore
+
+
 def test_profile_follow_lists_are_dialogs_and_stay_out_of_the_share_card():
     html = (FRONTEND / "index.html").read_text()
     app_js = (FRONTEND / "js" / "app.js").read_text()
@@ -1095,8 +1132,10 @@ def test_a_refresh_reopens_the_page_you_were_on():
     html = (FRONTEND / "index.html").read_text()
     css = (FRONTEND / "css" / "source.css").read_text()
 
-    # The open screen is written to the address bar, without touching history.
-    assert "history.replaceState(null, '', next)" in app_js
+    # The open screen is written to the address bar. It now also leaves a
+    # history entry, so the phone's back gesture walks the app — see
+    # test_the_phones_back_gesture_walks_the_app_instead_of_closing_it.
+    assert "history.replaceState({ view: name }, '', next)" in app_js
     assert "async function restoreRoute" in app_js
     assert "restoreRoute()" in app_js
     for route in ("akis", "bildirimler", "mektuplar", "blend", "kesfet", "profil", "araclar"):
@@ -1246,9 +1285,9 @@ def test_shell_asset_content_changes_force_a_version_bump():
     files that no longer existed.
     """
     expected = {
-        "js/app.js": "cb06150a4492510f571ae1415beecdaffe1baace6204ea29769c856fe8a1caa3",
+        "js/app.js": "191572e41a02329fc17ded51b2e93c8c92ddce4394277f7b6dcb8451b7bc1f5b",
         "app.css": "fa99484963ab265cc5a719990859fcfb3a984cd28b738ec22c36b0f0395b9d86",
-        "js/share-cards.js": "200d83eb33b456892742816aa28aab02dac008bab85a791b61a09ed42a1668cd",
+        "js/share-cards.js": "cb5d9195d5f1503feef2cf47183a1ee8235e7706d9928ff40b416a23ee9407b7",
         "js/i18n.js": "515343c0d3770fbd64d3046ece28477b3c50f583b5339a517730f253c7df0968",
         "site.webmanifest": "7a7de349179ed9f226d38632dfde5a8478edd10305972ea52641b0dc6aa7f405",
         "movienotes-mark.png": "850aa9117aa52768952843f8e2c410c0c17868877d81b2058274290373b4ee1e",
@@ -1285,24 +1324,24 @@ def test_every_app_shell_asset_has_an_explicit_immutable_version():
     source_css = (FRONTEND / "css" / "source.css").read_text()
 
     dependency_version = "v=20260902.15"
-    api_version = "v=20260920.12"
-    css_version = "v=20260920.12"
+    api_version = "v=20260920.13"
+    css_version = "v=20260920.13"
     assert f"/static/app.css?{css_version}" in html
-    assert "/static/js/app.js?v=20260920.12" in html
-    assert "./i18n.js?v=20260920.12" in app_js
+    assert "/static/js/app.js?v=20260920.13" in html
+    assert "./i18n.js?v=20260920.13" in app_js
     assert app_js.count(f"?{dependency_version}") == 2
     assert f"./api.js?{api_version}" in app_js
-    assert "./recommendations.js?v=20260920.12" in app_js
-    assert "./share-cards.js?v=20260920.12" in app_js
-    assert "./auth.js?v=20260920.12" in app_js
+    assert "./recommendations.js?v=20260920.13" in app_js
+    assert "./share-cards.js?v=20260920.13" in app_js
+    assert "./auth.js?v=20260920.13" in app_js
     assert f"./dom.js?{dependency_version}" in auth_js
-    assert "./i18n.js?v=20260920.12" in auth_js
+    assert "./i18n.js?v=20260920.13" in auth_js
     assert f"./dom.js?{dependency_version}" in profile_js
-    assert "./i18n.js?v=20260920.12" in profile_js
+    assert "./i18n.js?v=20260920.13" in profile_js
     assert f"./dom.js?{dependency_version}" in recommendations_js
-    assert "./i18n.js?v=20260920.12" in recommendations_js
+    assert "./i18n.js?v=20260920.13" in recommendations_js
     assert f"./api.js?{api_version}" in share_js
-    assert "./i18n.js?v=20260920.12" in share_js
+    assert "./i18n.js?v=20260920.13" in share_js
     assert f"criterion-closet-bg.jpg?{dependency_version}" in source_css
 
 
@@ -1372,7 +1411,7 @@ def test_png_share_renderer_is_lazy_loaded_on_first_share_action():
 
     imports = app_js.split("// ── Cinema facts", 1)[0]
     assert "from './share-cards.js" not in imports
-    assert "import('./share-cards.js?v=20260920.12')" in imports
+    assert "import('./share-cards.js?v=20260920.13')" in imports
     assert "const shareCards = await loadShareCardsModule();" in app_js
 
 
