@@ -730,6 +730,46 @@ def test_blend_is_orange_and_letters_are_blue_on_a_member_header():
     assert "tertiary-container" in letter and "secondary-container" not in letter
 
 
+def test_the_cinema_list_separates_the_film_from_the_cinema():
+    """Reported: the link icon opened Letterboxd, so the cinema's own page for
+    the film was unreachable from the programme."""
+    app_js = (FRONTEND / "js" / "app.js").read_text()
+
+    render = app_js.split("function renderMobileBulletinList", 1)[1].split(
+        "function paintBulletin", 1
+    )[0]
+    # Poster and title go to the film…
+    assert "letterboxdFilmURL(film.slug)" in render
+    # …and the icon beside them goes to the venue, straight through when there
+    # is only one and via the picker when there are several.
+    assert "venues[0].url" in render
+    assert 'data-bulletin-venues="${key}"' in render
+    assert "openBulletinVenues(venueButton.dataset.bulletinVenues)" in app_js.split(
+        "$('m-profile-list').addEventListener('click'", 1
+    )[1]
+
+
+def test_the_blend_hero_reports_three_figures_and_nothing_else():
+    """Asked for: no data-coverage line, and the shared director with a face."""
+    html = (FRONTEND / "index.html").read_text()
+    app_js = (FRONTEND / "js" / "app.js").read_text()
+    main_py = (ROOT / "app" / "main.py").read_text()
+
+    assert "br-confidence" not in html
+    assert "br-confidence" not in app_js
+    assert "veri kapsamı" not in app_js
+
+    stats = html.split('id="br-stats"', 1)[1].split("</section>", 1)[0]
+    for element_id in ("br-common-count", "br-scan-count", "br-director"):
+        assert element_id in stats, element_id
+    assert 'id="br-director-avatar"' in stats
+    assert "$('br-director-avatar').innerHTML" in app_js
+    # The portrait comes from the same cached TMDb person lookup the profile
+    # deck uses, on both the stored and the freshly computed payload.
+    assert "async def _director_photo" in main_py
+    assert main_py.count('"top_director_photo"') == 2
+
+
 def test_profile_follow_lists_are_dialogs_and_stay_out_of_the_share_card():
     html = (FRONTEND / "index.html").read_text()
     app_js = (FRONTEND / "js" / "app.js").read_text()
@@ -1206,9 +1246,9 @@ def test_shell_asset_content_changes_force_a_version_bump():
     files that no longer existed.
     """
     expected = {
-        "js/app.js": "b3b6a123ff83286b84537eba5290c1f7bccf1a7af4c9644da0bcb290d71bad35",
-        "app.css": "d58aa8ba68ce3a88d3e18895f4d4dc7c259098da8dab9c8aa908329a65caff9e",
-        "js/share-cards.js": "0619d4afb500c6647c88832808d0dd0eacfe414901e071a13c3bb81d5667d359",
+        "js/app.js": "cb06150a4492510f571ae1415beecdaffe1baace6204ea29769c856fe8a1caa3",
+        "app.css": "fa99484963ab265cc5a719990859fcfb3a984cd28b738ec22c36b0f0395b9d86",
+        "js/share-cards.js": "200d83eb33b456892742816aa28aab02dac008bab85a791b61a09ed42a1668cd",
         "js/i18n.js": "515343c0d3770fbd64d3046ece28477b3c50f583b5339a517730f253c7df0968",
         "site.webmanifest": "7a7de349179ed9f226d38632dfde5a8478edd10305972ea52641b0dc6aa7f405",
         "movienotes-mark.png": "850aa9117aa52768952843f8e2c410c0c17868877d81b2058274290373b4ee1e",
@@ -1245,24 +1285,24 @@ def test_every_app_shell_asset_has_an_explicit_immutable_version():
     source_css = (FRONTEND / "css" / "source.css").read_text()
 
     dependency_version = "v=20260902.15"
-    api_version = "v=20260920.11"
-    css_version = "v=20260920.11"
+    api_version = "v=20260920.12"
+    css_version = "v=20260920.12"
     assert f"/static/app.css?{css_version}" in html
-    assert "/static/js/app.js?v=20260920.11" in html
-    assert "./i18n.js?v=20260920.11" in app_js
+    assert "/static/js/app.js?v=20260920.12" in html
+    assert "./i18n.js?v=20260920.12" in app_js
     assert app_js.count(f"?{dependency_version}") == 2
     assert f"./api.js?{api_version}" in app_js
-    assert "./recommendations.js?v=20260920.11" in app_js
-    assert "./share-cards.js?v=20260920.11" in app_js
-    assert "./auth.js?v=20260920.11" in app_js
+    assert "./recommendations.js?v=20260920.12" in app_js
+    assert "./share-cards.js?v=20260920.12" in app_js
+    assert "./auth.js?v=20260920.12" in app_js
     assert f"./dom.js?{dependency_version}" in auth_js
-    assert "./i18n.js?v=20260920.11" in auth_js
+    assert "./i18n.js?v=20260920.12" in auth_js
     assert f"./dom.js?{dependency_version}" in profile_js
-    assert "./i18n.js?v=20260920.11" in profile_js
+    assert "./i18n.js?v=20260920.12" in profile_js
     assert f"./dom.js?{dependency_version}" in recommendations_js
-    assert "./i18n.js?v=20260920.11" in recommendations_js
+    assert "./i18n.js?v=20260920.12" in recommendations_js
     assert f"./api.js?{api_version}" in share_js
-    assert "./i18n.js?v=20260920.11" in share_js
+    assert "./i18n.js?v=20260920.12" in share_js
     assert f"criterion-closet-bg.jpg?{dependency_version}" in source_css
 
 
@@ -1332,7 +1372,7 @@ def test_png_share_renderer_is_lazy_loaded_on_first_share_action():
 
     imports = app_js.split("// ── Cinema facts", 1)[0]
     assert "from './share-cards.js" not in imports
-    assert "import('./share-cards.js?v=20260920.11')" in imports
+    assert "import('./share-cards.js?v=20260920.12')" in imports
     assert "const shareCards = await loadShareCardsModule();" in app_js
 
 

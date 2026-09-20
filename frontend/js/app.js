@@ -8,24 +8,24 @@ import {
   finishApiRequest,
   scrapeErrorMessage,
   streamErrorMessage,
-} from './api.js?v=20260920.11';
+} from './api.js?v=20260920.12';
 import {
   cookieValue,
   csrfHeaders,
   setAuthMessage,
   setAuthMode,
   setPasswordVisibility,
-} from './auth.js?v=20260920.11';
-import { directorAvatar, directorFilmGrid, directorFilmTile } from './profile.js?v=20260920.11';
+} from './auth.js?v=20260920.12';
+import { directorAvatar, directorFilmGrid, directorFilmTile } from './profile.js?v=20260920.12';
 import { animateScore, getScoreInfo } from './blend.js?v=20260902.15';
-import { createRecommendationCards } from './recommendations.js?v=20260920.11';
+import { createRecommendationCards } from './recommendations.js?v=20260920.12';
 import {
   getLocale,
   initI18n,
   localePreference,
   setLocalePreference,
   t,
-} from './i18n.js?v=20260920.11';
+} from './i18n.js?v=20260920.12';
 
 initI18n();
 
@@ -34,7 +34,7 @@ const uiLocale = () => (getLocale() === 'en' ? 'en-US' : 'tr-TR');
 let _shareCardsModule;
 function loadShareCardsModule() {
   if (!_shareCardsModule) {
-    _shareCardsModule = import('./share-cards.js?v=20260920.11');
+    _shareCardsModule = import('./share-cards.js?v=20260920.12');
   }
   return _shareCardsModule;
 }
@@ -2473,12 +2473,32 @@ function renderMobileBulletinList() {
   $('m-profile-list-title').textContent = selected
     ? ($('m-bulletin-venue').selectedOptions[0]?.textContent || t('Bu hafta perdede'))
     : t('Bu hafta perdede');
+  // Two destinations, two targets: the poster and title are the film, the icon
+  // on the right is the cinema showing it. One row-wide link to Letterboxd
+  // made the programme unreachable.
   $('m-profile-list').innerHTML = films.length ? films.map(film => {
     const title = escapeHTML(film.title || 'Film');
     const note = escapeHTML(film.note || t('Bu hafta vizyonda'));
     const poster = safeImageURL(film.poster_url);
-    const href = letterboxdFilmURL(film.slug) || '#';
-    return `<a href="${href}" target="_blank" rel="noopener" class="flex items-center gap-3 border-b border-outline-variant/15 px-3 py-3"><span class="h-16 w-11 shrink-0 overflow-hidden rounded-md bg-surface-container">${poster ? `<img src="${poster}" alt="" onerror="posterErr(this)" class="h-full w-full object-cover"/>` : '<span class="flex h-full items-center justify-center text-on-surface-variant/35"><span class="material-symbols-outlined text-[18px]">movie</span></span>'}</span><span class="min-w-0 flex-1"><small class="block text-[10px] text-tertiary-container">${note}</small><strong class="block text-sm leading-snug text-on-surface">${title}</strong></span><span class="material-symbols-outlined text-on-surface-variant/55">open_in_new</span></a>`;
+    const filmHref = letterboxdFilmURL(film.slug);
+    const art = poster
+      ? `<img src="${poster}" alt="" onerror="posterErr(this)" class="h-full w-full object-cover"/>`
+      : '<span class="flex h-full items-center justify-center text-on-surface-variant/35"><span class="material-symbols-outlined text-[18px]">movie</span></span>';
+    const cover = `<span class="h-16 w-11 shrink-0 overflow-hidden rounded-md bg-surface-container">${art}</span>`;
+    const label = `<span class="min-w-0 flex-1"><small class="block text-[10px] text-tertiary-container">${note}</small><strong class="block text-sm leading-snug text-on-surface">${title}</strong></span>`;
+    const film_ = filmHref
+      ? `<a href="${filmHref}" target="_blank" rel="noopener" title="${title} — Letterboxd" class="flex min-w-0 flex-1 items-center gap-3">${cover}${label}</a>`
+      : `<span class="flex min-w-0 flex-1 items-center gap-3">${cover}${label}</span>`;
+    const venues = film.venues || [];
+    const key = escapeHTML(String(film.tmdb_id || film.slug || film.title));
+    // One venue opens straight through; several need the picker that already
+    // says whether a link is the film's page or the cinema's programme.
+    const venueLink = venues.length === 1 && venues[0].url
+      ? `<a href="${escapeHTML(venues[0].url)}" target="_blank" rel="noopener" title="${escapeHTML(venues[0].name || '')}" aria-label="${t('Sinemanın sayfasını aç')}" class="shrink-0 rounded-full p-2 text-tertiary-container hover:bg-tertiary-container/10"><span class="material-symbols-outlined text-[20px]">open_in_new</span></a>`
+      : venues.length
+      ? `<button type="button" data-bulletin-venues="${key}" aria-label="${t('Sinemanın sayfasını aç')}" class="shrink-0 rounded-full p-2 text-tertiary-container hover:bg-tertiary-container/10"><span class="material-symbols-outlined text-[20px]">open_in_new</span></button>`
+      : '';
+    return `<div class="flex items-center gap-2 border-b border-outline-variant/15 px-3 py-3">${film_}${venueLink}</div>`;
   }).join('') : `<p class="p-5 text-sm text-on-surface-variant">${t('Bu filtreye uyan gösterim yok.')}</p>`;
 }
 
@@ -4490,8 +4510,8 @@ async function renderBlendResult(data) {
   const { username1, username2, score, watched_count1, watched_count2,
           common_count, top_director,
           top_director_count1, top_director_count2, films,
-          common_watchlist_films = [], bridge_films = [], watchlist_public = false, watchlist_pending = false,
-          confidence = { level: 'low', score: 0, sample_size: 0, rating_pairs: 0 } } = data;
+          common_watchlist_films = [], bridge_films = [], watchlist_public = false,
+          watchlist_pending = false } = data;
 
   const info = getScoreInfo(score);
 
@@ -4512,9 +4532,14 @@ async function renderBlendResult(data) {
   $('br-scan-count').textContent = watched_count1 + watched_count2;
   if (top_director) {
     $('br-director').textContent = top_director;
-    $('br-director-counts').textContent = `${username1}: ${top_director_count1} · ${username2}: ${top_director_count2}`;
+    // Counts stay, just quietly: "(7 · 5)" rather than a line of its own.
+    $('br-director-counts').textContent = `(${top_director_count1} · ${top_director_count2})`;
+    const photo = safeImageURL(data.top_director_photo);
+    $('br-director-avatar').innerHTML = photo
+      ? `<img src="${photo}" alt="" class="h-full w-full object-cover"/>`
+      : escapeHTML((top_director[0] || '?').toUpperCase());
     $('br-director-card').classList.remove('hidden');
-    $('br-director-card').classList.add('flex');
+    $('br-director-card').classList.add('inline-flex');
   }
 
   // Background gradient
@@ -4562,10 +4587,6 @@ async function renderBlendResult(data) {
   $('br-label').textContent = info.label;
   $('br-label').classList.remove('opacity-0');
   $('br-label').classList.add('blend-fade-up');
-  const confidenceLabels = { high: 'Yüksek', medium: 'Orta', low: 'Düşük' };
-  $('br-confidence').textContent = `${confidenceLabels[confidence.level] || 'Düşük'} veri kapsamı · %${confidence.score} · ${confidence.sample_size} film/kişi`;
-  $('br-confidence').classList.remove('opacity-0');
-  $('br-confidence').classList.add('blend-fade-up');
   await new Promise(r => setTimeout(r, 150));
   $('br-stats').classList.remove('opacity-0');
   $('br-stats').classList.add('blend-fade-up');
@@ -4845,12 +4866,12 @@ async function blendFlow() {
   $('br-user1').className = 'opacity-0 flex flex-col items-center gap-2 min-w-[80px] md:min-w-[110px]';
   $('br-user2').className = 'opacity-0 flex flex-col items-center gap-2 min-w-[80px] md:min-w-[110px]';
   $('br-label').className = 'opacity-0 font-headline-md text-headline-md text-on-surface text-center';
-  $('br-confidence').className = 'opacity-0 -mt-4 font-label-md text-label-md text-on-surface-variant text-center';
   $('br-stats').className = 'opacity-0 flex flex-wrap items-center justify-center gap-gutter';
   $('br-score').textContent = '0';
   $('br-ring').style.strokeDashoffset = '503';
   $('br-director-card').classList.add('hidden');
-  $('br-director-card').classList.remove('flex');
+  $('br-director-card').classList.remove('inline-flex');
+  $('br-director-avatar').innerHTML = '';
 
   const done = (errMsg) => {
     finishBlendSteps();
@@ -5861,6 +5882,10 @@ $('btn-mobile-profile-list-back').addEventListener('click', () => showView('prof
 $('mobile-profile').addEventListener('click', event => {
   const card = event.target.closest('[data-mobile-profile-list]');
   if (card) openMobileProfileList(card.dataset.mobileProfileList);
+});
+$('m-profile-list').addEventListener('click', event => {
+  const venueButton = event.target.closest('[data-bulletin-venues]');
+  if (venueButton) openBulletinVenues(venueButton.dataset.bulletinVenues);
 });
 $('m-profile-list').addEventListener('toggle', event => {
   const details = event.target;

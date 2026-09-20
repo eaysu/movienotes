@@ -29,7 +29,7 @@
 <link rel="manifest" href="/static/site.webmanifest?v=20260910.6"/>
 <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Geist:wght@400;500;600;700&display=swap" rel="stylesheet"/>
-<link rel="stylesheet" href="/static/app.css?v=20260920.11"/>
+<link rel="stylesheet" href="/static/app.css?v=20260920.12"/>
 </head>
 <body class="is-booting bg-surface-container-lowest text-on-surface min-h-screen flex flex-col selection:bg-primary-container selection:text-on-primary-container">
 
@@ -1057,7 +1057,7 @@
     </div>
 
     <!-- ── HERO: score ring + user bubbles ── -->
-    <section class="flex flex-col items-center py-gutter gap-stack-lg">
+    <section class="flex flex-col items-center gap-4 pb-2 pt-1">
 
       <div class="flex items-center justify-center w-full gap-2 md:gap-6">
         <!-- User 1 -->
@@ -1100,24 +1100,16 @@
 
       <!-- Score label -->
       <div id="br-label" class="opacity-0 font-headline-md text-headline-md text-on-surface text-center"></div>
-      <div id="br-confidence" class="opacity-0 -mt-4 font-label-md text-label-md text-on-surface-variant text-center"></div>
 
       <!-- Stats row -->
       <!-- Aynı üç istatistik, ekranın üçte birini yemeden. -->
-      <div id="br-stats" class="opacity-0 flex flex-wrap items-stretch justify-center gap-2">
-        <div class="glass-panel rounded-lg px-3 py-2 flex flex-col items-center gap-0.5 min-w-[92px]">
-          <span id="br-common-count" class="font-headline-md text-[20px] leading-none text-primary-container">—</span>
-          <span class="font-label-sm text-[9px] text-on-surface-variant uppercase tracking-wider">ortak film</span>
-        </div>
-        <div class="glass-panel rounded-lg px-3 py-2 flex flex-col items-center gap-0.5 min-w-[92px]">
-          <span id="br-scan-count" class="font-headline-md text-[20px] leading-none text-on-surface-variant">—</span>
-          <span class="font-label-sm text-[9px] text-on-surface-variant uppercase tracking-wider">taranan film</span>
-        </div>
-        <div id="br-director-card" class="hidden glass-panel rounded-lg px-3 py-2 flex flex-col items-center gap-0.5 min-w-[92px] max-w-[190px]">
-          <span id="br-director" class="font-headline-md text-[13px] leading-tight text-secondary-container text-center break-words"></span>
-          <span class="font-label-sm text-[9px] text-on-surface-variant uppercase tracking-wider">ortak yönetmen</span>
-          <span id="br-director-counts" class="font-label-sm text-[9px] text-on-surface-variant/60 text-center"></span>
-        </div>
+      <div id="br-stats" class="opacity-0 flex flex-wrap items-center justify-center gap-x-5 gap-y-2 text-sm text-on-surface-variant">
+        <span><strong id="br-common-count" class="text-on-surface">—</strong> ortak film</span>
+        <span><strong id="br-scan-count" class="text-on-surface">—</strong> taranan film</span>
+        <span id="br-director-card" class="hidden items-center gap-2">
+          <span id="br-director-avatar" class="flex h-7 w-7 shrink-0 items-center justify-center overflow-hidden rounded-full bg-surface-container text-[11px] text-secondary-container"></span>
+          <span class="min-w-0"><strong id="br-director" class="text-on-surface"></strong> ortak yönetmen<span id="br-director-counts" class="ml-1 text-on-surface-variant/55"></span></span>
+        </span>
       </div>
     </section>
 
@@ -1380,6 +1372,6 @@
   </div>
 </footer>
 
-<script type="module" src="/static/js/app.js?v=20260920.11"></script>
+<script type="module" src="/static/js/app.js?v=20260920.12"></script>
 </body>
 </html>

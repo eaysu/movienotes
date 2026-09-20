@@ -3090,6 +3090,16 @@ async def _resolve_favorite_posters(favorites, watched_rows, service, enricher) 
     )
 
 
+async def _director_photo(name: str, enricher) -> str:
+    """One shared director's portrait for a Blend, or "" when TMDb has none."""
+    if not name or enricher is None:
+        return ""
+    with contextlib.suppress(Exception):
+        photos = await enricher.person_photos([name])
+        return photos.get(name) or ""
+    return ""
+
+
 async def _apply_director_photos(taste, enricher, service) -> None:
     """Fill top_directors_detail[].photo_url from TMDb person search (cached)."""
     detail = getattr(taste, "top_directors_detail", None) or []
@@ -4613,6 +4623,9 @@ async def _compute_accepted_blend(
         "watched_count2": len(watched2),
         "common_count": blend_result["common_count"],
         "top_director": blend_result["top_director"],
+        "top_director_photo": await _director_photo(
+            blend_result["top_director"], enricher
+        ),
         "top_director_count1": blend_result["top_director_count1"],
         "top_director_count2": blend_result["top_director_count2"],
         "films": [
@@ -6029,6 +6042,9 @@ async def blend(req: BlendRequest, request: Request):
                 "watched_count2": len(w2_enriched),
                 "common_count": result["common_count"],
                 "top_director": result["top_director"],
+                "top_director_photo": await _director_photo(
+                    result["top_director"], enricher
+                ),
                 "top_director_count1": result["top_director_count1"],
                 "top_director_count2": result["top_director_count2"],
                 "films": [f.to_dict() for f in result["films"]],
