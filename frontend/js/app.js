@@ -8,24 +8,24 @@ import {
   finishApiRequest,
   scrapeErrorMessage,
   streamErrorMessage,
-} from './api.js?v=20260920.7';
+} from './api.js?v=20260920.8';
 import {
   cookieValue,
   csrfHeaders,
   setAuthMessage,
   setAuthMode,
   setPasswordVisibility,
-} from './auth.js?v=20260920.7';
-import { directorAvatar, directorFilmGrid, directorFilmTile } from './profile.js?v=20260920.7';
+} from './auth.js?v=20260920.8';
+import { directorAvatar, directorFilmGrid, directorFilmTile } from './profile.js?v=20260920.8';
 import { animateScore, getScoreInfo } from './blend.js?v=20260902.15';
-import { createRecommendationCards } from './recommendations.js?v=20260920.7';
+import { createRecommendationCards } from './recommendations.js?v=20260920.8';
 import {
   getLocale,
   initI18n,
   localePreference,
   setLocalePreference,
   t,
-} from './i18n.js?v=20260920.7';
+} from './i18n.js?v=20260920.8';
 
 initI18n();
 
@@ -34,7 +34,7 @@ const uiLocale = () => (getLocale() === 'en' ? 'en-US' : 'tr-TR');
 let _shareCardsModule;
 function loadShareCardsModule() {
   if (!_shareCardsModule) {
-    _shareCardsModule = import('./share-cards.js?v=20260920.7');
+    _shareCardsModule = import('./share-cards.js?v=20260920.8');
   }
   return _shareCardsModule;
 }
@@ -1454,13 +1454,14 @@ function mobileListRow(film) {
 }
 
 function openMobileProfileList(kind) {
+  // No kicker above the title: every page's heading sits at the same height,
+  // and these kickers only restated what the title already says.
   const config = {
-    directors: { kicker: 'Auteur radar', title: 'Favori yönetmenlerin' },
-    recent: { kicker: 'Günce', title: 'İzlediğin son 10 film' },
-    bulletin: { kicker: 'Sinema gündemi', title: 'Bu hafta perdede' },
+    directors: { title: 'Favori yönetmenlerin' },
+    recent: { title: 'İzlediğin son 10 film' },
+    bulletin: { title: 'Bu hafta perdede' },
   }[kind];
   if (!config) return;
-  $('m-profile-list-kicker').textContent = config.kicker;
   $('m-profile-list-title').textContent = config.title;
   // Only the cinema programme has something to filter by.
   $('m-profile-list-filter').classList.toggle('hidden', kind !== 'bulletin');
@@ -2476,7 +2477,6 @@ function renderMobileBulletinList() {
   $('m-profile-list-title').textContent = selected
     ? ($('m-bulletin-venue').selectedOptions[0]?.textContent || t('Bu hafta perdede'))
     : t('Bu hafta perdede');
-  $('m-profile-list-kicker').textContent = t('Sinema gündemi');
   $('m-profile-list').innerHTML = films.length ? films.map(film => {
     const title = escapeHTML(film.title || 'Film');
     const note = escapeHTML(film.note || t('Bu hafta vizyonda'));

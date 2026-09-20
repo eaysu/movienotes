@@ -608,6 +608,8 @@
      da kalkmalı, yoksa her sayfa bir başlık yüksekliği kadar aşağıdan
      başlıyor. */
   body.has-shell #view-profile,
+  body.has-shell #view-profile-list,
+  body.has-shell #view-notifications,
   body.has-shell #view-tools,
   body.has-shell #view-inbox,
   body.has-shell #view-blends,
@@ -734,6 +736,15 @@
     transition: color .15s ease;
   }
   .page-back:hover { color: rgb(var(--color-on-surface)); }
+  /* Her sayfanın başlığı aynı: geri çubuğunun hemen altında, aynı punto ve
+     aynı kalınlıkta. Tek tek sınıf listeleri yazıldığı sürece sayfalar
+     birbirinden kayıyordu. */
+  .page-title {
+    font-family: 'Space Grotesk', 'Geist', sans-serif;
+    font-size: 22px; line-height: 1.35; letter-spacing: -0.02em;
+    font-weight: 700;
+    color: rgb(var(--color-on-surface));
+  }
   .page-back .material-symbols-outlined { font-size: 20px; }
   /* Üst çubuktaki yuvarlak düğmeler tek boy. */
   .page-topbar__actions .avatar-button,

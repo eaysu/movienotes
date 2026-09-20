@@ -29,7 +29,7 @@
 <link rel="manifest" href="/static/site.webmanifest?v=20260910.6"/>
 <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Geist:wght@400;500;600;700&display=swap" rel="stylesheet"/>
-<link rel="stylesheet" href="/static/app.css?v=20260920.7"/>
+<link rel="stylesheet" href="/static/app.css?v=20260920.8"/>
 </head>
 <body class="is-booting bg-surface-container-lowest text-on-surface min-h-screen flex flex-col selection:bg-primary-container selection:text-on-primary-container">
 
@@ -711,11 +711,10 @@
 <!-- ═══════════════════════ VIEW: MOBILE PROFILE LIST ═══════════════════ -->
 <div id="view-profile-list" class="hidden flex-grow pb-24 md:hidden">
   <main class="mx-auto w-full max-w-[620px] px-margin-mobile">
-    <div class="page-topbar pt-3"><button id="btn-mobile-profile-list-back" type="button" class="page-back"><span class="material-symbols-outlined">arrow_back</span>Profile dön</button></div>
-    <div class="mt-3 flex items-start justify-between gap-3">
+    <div class="page-topbar"><button id="btn-mobile-profile-list-back" type="button" class="page-back"><span class="material-symbols-outlined">arrow_back</span>Profile dön</button></div>
+    <div class="flex items-start justify-between gap-3">
       <div class="min-w-0">
-        <p id="m-profile-list-kicker" class="text-[10px] font-semibold uppercase tracking-[.2em] text-primary-container"></p>
-        <h1 id="m-profile-list-title" class="mt-1 font-headline-lg text-[28px] leading-tight text-on-surface"></h1>
+        <h1 id="m-profile-list-title" class="page-title"></h1>
       </div>
       <label id="m-profile-list-filter" class="hidden shrink-0 pt-1"><span class="sr-only">Sinema filtresi</span><select id="m-bulletin-venue" class="max-w-[136px] rounded-lg border border-outline-variant/30 bg-surface px-2 py-1.5 text-[11px] text-on-surface outline-none"><option value="">Tüm sinemalar</option></select></label>
     </div>
@@ -726,10 +725,10 @@
 <!-- ═══════════════════════════  VIEW: ARAÇLAR  ═══════════════════════════ -->
 <div id="view-tools" class="hidden flex-grow pb-24">
   <div class="w-full max-w-[920px] mx-auto px-margin-mobile md:px-margin-desktop">
-    <div class="page-topbar pt-3"><button id="btn-tools-back" type="button" class="page-back"><span class="material-symbols-outlined">arrow_back</span><span id="tools-back-label">Akışa dön</span></button><div class="page-topbar__actions"><button type="button" data-open-profile class="avatar-button flex shrink-0 items-center justify-center overflow-hidden rounded-full border border-outline-variant/30 bg-surface-container text-on-surface-variant transition-colors hover:border-primary-container/50" aria-label="Profilim"></button></div></div>
+    <div class="page-topbar"><button id="btn-tools-back" type="button" class="page-back"><span class="material-symbols-outlined">arrow_back</span><span id="tools-back-label">Akışa dön</span></button><div class="page-topbar__actions"><button type="button" data-open-profile class="avatar-button flex shrink-0 items-center justify-center overflow-hidden rounded-full border border-outline-variant/30 bg-surface-container text-on-surface-variant transition-colors hover:border-primary-container/50" aria-label="Profilim"></button></div></div>
   </div>
-  <section id="tools-directory" class="mt-3 w-full max-w-[920px] mx-auto px-margin-mobile md:px-margin-desktop">
-    <h1 class="whitespace-nowrap font-headline-lg text-[22px] leading-tight text-on-surface min-[380px]:text-[26px] sm:text-headline-lg">Bu akşam ne yapalım?</h1>
+  <section id="tools-directory" class="w-full max-w-[920px] mx-auto px-margin-mobile md:px-margin-desktop">
+    <h1 class="page-title whitespace-nowrap">Bu akşam ne yapalım?</h1>
     <p class="mt-2 max-w-[560px] font-body-md text-body-md text-on-surface-variant">Zevkine göre bir film bul ya da takip ettiğin biriyle ortak bir liste çıkar.</p>
     <div class="mt-5 grid gap-3 sm:grid-cols-2">
       <button type="button" data-tools-page="watch" class="group rounded-2xl border border-primary-container/30 bg-primary-container/10 p-5 text-left transition-colors hover:bg-primary-container/15">
@@ -1295,7 +1294,7 @@
 
 <div id="view-notifications" class="hidden w-full max-w-2xl mx-auto shell-column border-outline-variant/20 px-4 pt-3 pb-20 lg:border-x">
   <div class="page-topbar"><button id="btn-notifications-back" type="button" class="page-back"><span class="material-symbols-outlined">arrow_back</span>Akışa dön</button><div class="page-topbar__actions"><button type="button" data-open-profile class="avatar-button flex shrink-0 items-center justify-center overflow-hidden rounded-full border border-outline-variant/30 bg-surface-container text-on-surface-variant transition-colors hover:border-primary-container/50" aria-label="Profilim"></button></div></div>
-  <h1 class="font-headline-md text-headline-md text-on-surface">Bildirimler</h1>
+  <h1 class="page-title">Bildirimler</h1>
   <div id="notifications-list" class="mt-5 flex flex-col gap-2"></div>
 </div>
 
@@ -1303,7 +1302,7 @@
   <div class="relative z-10 max-w-[900px] mx-auto w-full px-margin-mobile md:px-margin-desktop pb-stack-lg flex flex-col gap-gutter">
     <div class="page-topbar"><button id="btn-inbox-back" type="button" class="page-back"><span class="material-symbols-outlined">arrow_back</span><span id="inbox-back-label">Akışa dön</span></button><div class="page-topbar__actions"><button type="button" data-open-profile class="avatar-button flex shrink-0 items-center justify-center overflow-hidden rounded-full border border-outline-variant/30 bg-surface-container text-on-surface-variant transition-colors hover:border-primary-container/50" aria-label="Profilim"></button></div></div>
     <div id="inbox-header">
-      <h1 class="font-headline-lg text-headline-lg text-on-surface flex items-center gap-2">Mektuplar <button id="btn-letter-help" type="button" class="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-outline-variant/30 align-middle text-[12px] font-bold text-on-surface-variant hover:border-tertiary-container/50 hover:text-tertiary-container" aria-label="Mektuplar nasıl çalışır?">?</button><span id="inbox-letters-badge" class="hidden align-middle ml-1 rounded-full bg-secondary-container px-2 py-0.5 text-[11px] font-bold text-on-secondary-container"></span></h1>
+      <h1 class="page-title flex items-center gap-2">Mektuplar <button id="btn-letter-help" type="button" class="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-outline-variant/30 align-middle text-[12px] font-bold text-on-surface-variant hover:border-tertiary-container/50 hover:text-tertiary-container" aria-label="Mektuplar nasıl çalışır?">?</button><span id="inbox-letters-badge" class="hidden align-middle ml-1 rounded-full bg-secondary-container px-2 py-0.5 text-[11px] font-bold text-on-secondary-container"></span></h1>
     </div>
     <div id="inbox-letters-panel" class="flex flex-col gap-gutter">
       <p id="letters-error" class="hidden rounded-xl border border-error/25 bg-error-container/20 px-4 py-3 text-sm text-error"></p>
@@ -1323,10 +1322,7 @@
   <div class="relative z-10 max-w-[900px] mx-auto w-full px-margin-mobile md:px-margin-desktop pb-stack-lg flex flex-col gap-gutter">
     <div class="page-topbar"><button id="btn-blends-back" type="button" class="page-back"><span class="material-symbols-outlined">arrow_back</span><span id="blends-back-label">Akışa dön</span></button><div class="page-topbar__actions"><button id="btn-blends-refresh" type="button" class="flex items-center justify-center rounded-full text-on-surface-variant transition-colors hover:text-primary" title="Yenile"><span class="material-symbols-outlined text-[20px]">refresh</span></button><button type="button" data-open-profile class="avatar-button flex shrink-0 items-center justify-center overflow-hidden rounded-full border border-outline-variant/30 bg-surface-container text-on-surface-variant transition-colors hover:border-primary-container/50" aria-label="Profilim"></button></div></div>
     <div>
-      <div>
-        <span class="font-label-sm text-label-sm text-primary-container uppercase tracking-wider">Blend alanı</span>
-        <h1 class="font-headline-lg text-headline-lg text-on-surface mt-1">Blendler</h1>
-      </div>
+      <div><h1 class="page-title">Blendler</h1></div>
     </div>
     <div id="blends-error" class="hidden glass-panel rounded-lg px-4 py-3 text-error font-body-md text-body-md"></div>
     <div id="blends-notice" class="hidden glass-panel rounded-lg px-4 py-3 text-primary-container font-body-md text-body-md"></div>
@@ -1351,10 +1347,9 @@
 <div id="view-sinefil" class="hidden flex-grow pt-20">
   <div class="relative z-10 max-w-[1120px] mx-auto w-full px-margin-mobile md:px-margin-desktop pb-stack-lg">
     <div class="page-topbar"><button id="btn-sinefil-back" type="button" class="page-back"><span class="material-symbols-outlined">arrow_back</span>Akışa dön</button><div class="page-topbar__actions"><button type="button" data-open-profile class="avatar-button flex shrink-0 items-center justify-center overflow-hidden rounded-full border border-outline-variant/30 bg-surface-container text-on-surface-variant transition-colors hover:border-primary-container/50" aria-label="Profilim"></button></div></div>
-    <div class="mt-6 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+    <div class="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
       <div>
-        <span class="font-label-sm text-label-sm uppercase tracking-[.24em] text-tertiary-container">Topluluk</span>
-        <h1 class="mt-1 font-headline-lg text-headline-lg text-on-surface">Sinefil Sineması</h1>
+        <h1 class="page-title">Sinefil Sineması</h1>
       </div>
       <label class="relative block w-full md:w-[280px]">
         <span class="sr-only">Sinefil ara</span>
@@ -1381,6 +1376,6 @@
   </div>
 </footer>
 
-<script type="module" src="/static/js/app.js?v=20260920.7"></script>
+<script type="module" src="/static/js/app.js?v=20260920.8"></script>
 </body>
 </html>

@@ -538,6 +538,43 @@ def test_an_attached_letter_film_can_always_be_detached():
     assert "shrink-0 rounded-md" in app_js
 
 
+def test_every_page_wears_the_same_title():
+    """Asked for: one size, one weight, one height for every page heading.
+
+    Each page used to spell its own class list, so the sizes ranged from 22px
+    to 36px and decorative kickers pushed some titles a line further down than
+    others.
+    """
+    html = (FRONTEND / "index.html").read_text()
+    css = (FRONTEND / "css" / "source.css").read_text()
+
+    rule = css.split(".page-title {", 1)[1].split("}", 1)[0]
+    assert "font-size: 22px" in rule          # the notifications heading's size
+    assert "font-weight: 700" in rule
+
+    for heading in ("Bildirimler", "Mektuplar", "Blendler", "Sinefil Sineması",
+                    "Bu akşam ne yapalım?"):
+        marker = f'class="page-title'
+        assert marker in html, heading
+        assert heading in html, heading
+    assert 'id="m-profile-list-title" class="page-title"' in html
+    # No page-level heading keeps a bespoke size any more.
+    assert "font-headline-lg text-headline-lg text-on-surface\">" not in html
+
+    # The kickers that pushed titles out of line are gone, markup and script.
+    app_js = (FRONTEND / "js" / "app.js").read_text()
+    for kicker in ("Topluluk</span>", "Blend alanı", "m-profile-list-kicker"):
+        assert kicker not in html, kicker
+    assert "m-profile-list-kicker" not in app_js
+
+    # And every shell page starts its content at the same inset.
+    inset = css.split("body.has-shell #view-profile,", 1)[1].split("}", 1)[0]
+    for view in ("#view-profile-list", "#view-notifications", "#view-tools",
+                 "#view-inbox", "#view-blends", "#view-sinefil"):
+        assert view in inset, view
+    assert "padding-top: .75rem" in inset
+
+
 def test_profile_follow_lists_are_dialogs_and_stay_out_of_the_share_card():
     html = (FRONTEND / "index.html").read_text()
     app_js = (FRONTEND / "js" / "app.js").read_text()
@@ -1011,9 +1048,9 @@ def test_shell_asset_content_changes_force_a_version_bump():
     files that no longer existed.
     """
     expected = {
-        "js/app.js": "2f0a91f737ea1e0300f2d8b7a941504fd3f43e89658e21da0023ee2020851041",
-        "app.css": "fe2da4761c150adf89c648f9a1e228b9ec935606a37c899c36c089fc09ad66c1",
-        "js/share-cards.js": "34bb3b39c6530c47344a60d7939c49382a228d698e5610fb08286262f7f5d368",
+        "js/app.js": "0b0c570ca7655e0310a09995de8729447b4c890b4aeb390e25b6e8f7e7fe006d",
+        "app.css": "303cb569bf4632efd265134326dcd805615364d6a4832c5e29096d5f709ee889",
+        "js/share-cards.js": "8492d3b6b9832f92df71fed41e7e934a3fdd753e0040ca9a5186743bfd69f7d8",
         "js/i18n.js": "d4eab4d2f6dc01ded277e1c39d15dc0818d2baa15dc49f51a57a19da83e70ba1",
         "site.webmanifest": "7a7de349179ed9f226d38632dfde5a8478edd10305972ea52641b0dc6aa7f405",
         "movienotes-mark.png": "850aa9117aa52768952843f8e2c410c0c17868877d81b2058274290373b4ee1e",
@@ -1050,24 +1087,24 @@ def test_every_app_shell_asset_has_an_explicit_immutable_version():
     source_css = (FRONTEND / "css" / "source.css").read_text()
 
     dependency_version = "v=20260902.15"
-    api_version = "v=20260920.7"
-    css_version = "v=20260920.7"
+    api_version = "v=20260920.8"
+    css_version = "v=20260920.8"
     assert f"/static/app.css?{css_version}" in html
-    assert "/static/js/app.js?v=20260920.7" in html
-    assert "./i18n.js?v=20260920.7" in app_js
+    assert "/static/js/app.js?v=20260920.8" in html
+    assert "./i18n.js?v=20260920.8" in app_js
     assert app_js.count(f"?{dependency_version}") == 2
     assert f"./api.js?{api_version}" in app_js
-    assert "./recommendations.js?v=20260920.7" in app_js
-    assert "./share-cards.js?v=20260920.7" in app_js
-    assert "./auth.js?v=20260920.7" in app_js
+    assert "./recommendations.js?v=20260920.8" in app_js
+    assert "./share-cards.js?v=20260920.8" in app_js
+    assert "./auth.js?v=20260920.8" in app_js
     assert f"./dom.js?{dependency_version}" in auth_js
-    assert "./i18n.js?v=20260920.7" in auth_js
+    assert "./i18n.js?v=20260920.8" in auth_js
     assert f"./dom.js?{dependency_version}" in profile_js
-    assert "./i18n.js?v=20260920.7" in profile_js
+    assert "./i18n.js?v=20260920.8" in profile_js
     assert f"./dom.js?{dependency_version}" in recommendations_js
-    assert "./i18n.js?v=20260920.7" in recommendations_js
+    assert "./i18n.js?v=20260920.8" in recommendations_js
     assert f"./api.js?{api_version}" in share_js
-    assert "./i18n.js?v=20260920.7" in share_js
+    assert "./i18n.js?v=20260920.8" in share_js
     assert f"criterion-closet-bg.jpg?{dependency_version}" in source_css
 
 
@@ -1137,7 +1174,7 @@ def test_png_share_renderer_is_lazy_loaded_on_first_share_action():
 
     imports = app_js.split("// ── Cinema facts", 1)[0]
     assert "from './share-cards.js" not in imports
-    assert "import('./share-cards.js?v=20260920.7')" in imports
+    assert "import('./share-cards.js?v=20260920.8')" in imports
     assert "const shareCards = await loadShareCardsModule();" in app_js
 
 
