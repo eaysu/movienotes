@@ -436,15 +436,10 @@
     from { opacity: 0; transform: translateY(22px) scale(.94); }
     to   { opacity: 1; transform: translateY(0)    scale(1);   }
   }
-  @keyframes ring-glow-pulse {
-    0%, 100% { filter: drop-shadow(0 0 4px var(--ring-color,#43fe6d)); }
-    50%       { filter: drop-shadow(0 0 16px var(--ring-color,#43fe6d)); }
-  }
   .blend-bubble-l  { animation: bubble-from-left  .7s cubic-bezier(.22,1,.36,1) forwards; }
   .blend-bubble-r  { animation: bubble-from-right .7s cubic-bezier(.22,1,.36,1) forwards; }
   .blend-score-in  { animation: score-number-in   .5s cubic-bezier(.22,1,.36,1) .9s both; }
   .blend-fade-up   { animation: fade-up .5s ease forwards; }
-  .ring-glow       { animation: ring-glow-pulse 2.5s ease-in-out infinite 1.6s; }
 
   /* Profile reveal */
   @keyframes profile-rise {
@@ -666,7 +661,7 @@
   /* Akış sekmeleri — Twitter'ın alt çizgili ikilisi. */
   .feed-tab {
     position: relative; flex: 1 1 0%;
-    padding: .95rem .5rem; font-size: .95rem;
+    padding: .57rem .5rem; font-size: .95rem;
     color: rgb(var(--color-on-surface-variant));
     transition: background-color .15s ease, color .15s ease;
   }
@@ -726,7 +721,7 @@
      ekran kendi yüksekliğini ve hizasını kuruyordu. */
   .page-topbar {
     display: flex; align-items: center; justify-content: space-between;
-    gap: .75rem; min-height: 3.5rem;
+    gap: .75rem; min-height: 3.5rem; width: 100%;
   }
   .page-topbar__actions { display: flex; align-items: center; gap: .5rem; }
   .page-back {
@@ -736,6 +731,9 @@
     transition: color .15s ease;
   }
   .page-back:hover { color: rgb(var(--color-on-surface)); }
+  /* Blend'in film listesi: satırlar arası ince ayraç, son satırda yok. */
+  .blend-film-row + .blend-film-row { border-top: 1px solid rgb(var(--color-outline-variant) / .25); }
+  .blend-film-row > summary::-webkit-details-marker { display: none; }
   /* Her sayfanın başlığı aynı: geri çubuğunun hemen altında, aynı punto ve
      aynı kalınlıkta. Tek tek sınıf listeleri yazıldığı sürece sayfalar
      birbirinden kayıyordu. */

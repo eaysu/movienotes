@@ -8,24 +8,24 @@ import {
   finishApiRequest,
   scrapeErrorMessage,
   streamErrorMessage,
-} from './api.js?v=20260920.8';
+} from './api.js?v=20260920.9';
 import {
   cookieValue,
   csrfHeaders,
   setAuthMessage,
   setAuthMode,
   setPasswordVisibility,
-} from './auth.js?v=20260920.8';
-import { directorAvatar, directorFilmGrid, directorFilmTile } from './profile.js?v=20260920.8';
+} from './auth.js?v=20260920.9';
+import { directorAvatar, directorFilmGrid, directorFilmTile } from './profile.js?v=20260920.9';
 import { animateScore, getScoreInfo } from './blend.js?v=20260902.15';
-import { createRecommendationCards } from './recommendations.js?v=20260920.8';
+import { createRecommendationCards } from './recommendations.js?v=20260920.9';
 import {
   getLocale,
   initI18n,
   localePreference,
   setLocalePreference,
   t,
-} from './i18n.js?v=20260920.8';
+} from './i18n.js?v=20260920.9';
 
 initI18n();
 
@@ -34,7 +34,7 @@ const uiLocale = () => (getLocale() === 'en' ? 'en-US' : 'tr-TR');
 let _shareCardsModule;
 function loadShareCardsModule() {
   if (!_shareCardsModule) {
-    _shareCardsModule = import('./share-cards.js?v=20260920.8');
+    _shareCardsModule = import('./share-cards.js?v=20260920.9');
   }
   return _shareCardsModule;
 }
@@ -1999,7 +1999,6 @@ async function setFeedScope(scope, { openFollowFilter = false } = {}) {
   _feedScope = scope;
   _feedAuthor = '';
   _feedFollowFilterOpen = openFollowFilter;
-  $('feed-sort-note').classList.toggle('hidden', scope !== 'community');
   document.querySelectorAll('[data-feed-scope]').forEach(button => {
     button.classList.toggle('is-active', button.dataset.feedScope === scope);
   });
@@ -2013,7 +2012,6 @@ async function openFeed() {
   closeComposerOnPhone();
   _feedFilm = { slug: '', title: '' };
   renderFeedFilmChip();
-  $('feed-sort-note').classList.toggle('hidden', _feedScope !== 'community');
   // Serial, not parallel: a burst of six calls at boot is what made a
   // transient read failure look like an empty timeline.
   await setFeedScope(_feedScope);
@@ -3761,8 +3759,12 @@ async function handleBlendInboxAction(event) {
     if (!confirmed) return;
   }
   button.disabled = true;
-  const oldText = button.textContent;
-  button.textContent = ['accepted', 'retry', 'refresh-result'].includes(action) ? 'Hazırlanıyor…' : 'İşleniyor…';
+  // A spinner says "working" without the word having to fit a 3-column button,
+  // where "Hazırlanıyor…" wrapped or clipped.
+  const oldText = button.innerHTML;
+  const busyLabel = ['accepted', 'retry', 'refresh-result'].includes(action)
+    ? 'Hazırlanıyor' : 'İşleniyor';
+  button.innerHTML = `<span class="flex items-center justify-center gap-1.5"><span class="material-symbols-outlined animate-spin text-[16px]">progress_activity</span><span class="sr-only">${busyLabel}</span></span>`;
   try {
     if (action === 'delete-result') {
       await apiJSON(`/api/blends/${encodeURIComponent(requestId)}`, {
@@ -3810,7 +3812,7 @@ async function handleBlendInboxAction(event) {
     actionError.classList.remove('hidden');
   } finally {
     button.disabled = false;
-    button.textContent = oldText;
+    button.innerHTML = oldText;
   }
 }
 
@@ -4430,46 +4432,54 @@ function _startBlendFact() {
   $('bfact-author').textContent = item.author ? `— ${item.author}` : '';
 }
 
+// A Blend's films are a list, not a gallery: five posters at grid size pushed
+// the ratings — the thing the two people came to compare — off the screen.
+// Each row opens to show what each of them gave it.
 function buildBlendFilmCard(film, idx, username1 = '', username2 = '') {
   const title = escapeHTML(film.title);
   const director = escapeHTML(film.director);
   const year = escapeHTML(film.year);
   const posterURL = safeImageURL(film.poster_url);
   const href = letterboxdFilmURL(film.slug);
+  const meta = [film.year, film.director].filter(Boolean).map(escapeHTML).join(' · ');
   const poster = posterURL
-    ? `<img alt="${title}" draggable="false" loading="lazy"
-          class="w-full h-full object-cover group-hover:scale-[1.04] transition-transform duration-500"
-          src="${posterURL}"/>`
-    : `<div class="w-full h-full flex items-center justify-center bg-surface-container"><span class="material-symbols-outlined text-[40px] text-on-surface-variant/20">movie</span></div>`;
-  const preferenceLine = (username, rating, favorite) => {
+    ? `<img src="${posterURL}" alt="" onerror="posterErr(this)" loading="lazy" class="h-full w-full object-cover"/>`
+    : '<span class="flex h-full items-center justify-center text-on-surface-variant/35"><span class="material-symbols-outlined text-[18px]">movie</span></span>';
+
+  const preferenceRow = (username, rating, favorite) => {
+    if (!username) return '';
     const hasRating = rating !== null && rating !== undefined;
-    if (!hasRating && !favorite) return '';
     const favoriteLabel = favorite === 'fav4' ? 'Fav 4' : '';
-    return `<span class="flex min-w-0 items-center justify-between gap-1 text-[10px] leading-tight text-on-surface-variant/75">
-      <span class="truncate" title="@${escapeHTML(username)}">@${escapeHTML(username)}</span>
-      <strong class="shrink-0 text-primary-container">${hasRating ? `${Number(rating).toFixed(1)}★` : ''}${hasRating && favoriteLabel ? ' · ' : ''}${favoriteLabel}</strong>
+    const value = hasRating
+      ? `${Number(rating).toFixed(1)}★`
+      : `<span class="text-on-surface-variant/45">${t('Puanlamamış')}</span>`;
+    return `<span class="flex min-w-0 items-center justify-between gap-2 py-1 text-xs">
+      <span class="truncate text-on-surface-variant">@${escapeHTML(username)}</span>
+      <strong class="shrink-0 text-primary-container">${value}${favoriteLabel ? ` · ${favoriteLabel}` : ''}</strong>
     </span>`;
   };
   const preferences = [
-    preferenceLine(username1, film.rating1, film.favorite1),
-    preferenceLine(username2, film.rating2, film.favorite2),
+    preferenceRow(username1, film.rating1, film.favorite1),
+    preferenceRow(username2, film.rating2, film.favorite2),
   ].filter(Boolean).join('');
-  const card = `
-    <article class="tilt-card glass-panel h-full rounded-xl overflow-hidden group flex flex-col overflow-safe"
-      style="opacity:0;animation:blend-card-in .5s cubic-bezier(.22,1,.36,1) both;animation-delay:${idx * 80}ms">
-      <div class="w-full aspect-[2/3] overflow-hidden relative bg-surface-container shrink-0">
-        ${poster}
-        <div class="absolute inset-x-0 bottom-0 h-1/3 bg-gradient-to-t from-surface-container-lowest/80 to-transparent pointer-events-none"></div>
-      </div>
-      <div class="p-stack-sm flex flex-col gap-unit flex-grow">
-        <h4 class="font-label-md text-label-md text-on-surface line-clamp-2 leading-snug">${title}${film.year ? ` <span class="text-on-surface-variant/60">(${year})</span>` : ''}</h4>
-        ${film.director ? `<span class="font-label-sm text-label-sm text-on-surface-variant/70">${director}</span>` : ''}
-        ${preferences ? `<div class="mt-1 flex flex-col gap-1 border-t border-outline-variant/15 pt-2">${preferences}</div>` : ''}
-      </div>
-    </article>`;
-  return href
-    ? `<a href="${href}" target="_blank" rel="noopener" class="block h-full" title="${title} — Letterboxd">${card}</a>`
-    : card;
+  const link = href
+    ? `<a href="${href}" target="_blank" rel="noopener" class="mt-1 inline-flex items-center gap-1 text-xs text-tertiary-container">${t('Letterboxd’de aç')}<span class="material-symbols-outlined text-[14px]">open_in_new</span></a>`
+    : '';
+
+  return `<details class="group blend-film-row" style="opacity:0;animation:blend-card-in .5s cubic-bezier(.22,1,.36,1) both;animation-delay:${idx * 60}ms">
+    <summary class="flex cursor-pointer list-none items-center gap-3 px-3 py-2.5">
+      <span class="h-14 w-10 shrink-0 overflow-hidden rounded-md bg-surface-container">${poster}</span>
+      <span class="min-w-0 flex-1">
+        <strong class="block truncate text-sm text-on-surface">${title}</strong>
+        ${meta ? `<small class="block truncate text-xs text-on-surface-variant">${meta}</small>` : ''}
+      </span>
+      <span class="material-symbols-outlined shrink-0 text-on-surface-variant transition-transform group-open:rotate-90">chevron_right</span>
+    </summary>
+    <div class="border-t border-outline-variant/15 bg-surface-container/30 px-3 py-2 pl-[64px]">
+      ${preferences || `<p class="py-1 text-xs text-on-surface-variant">${t('İkinizin de izleme listesinde.')}</p>`}
+      ${link}
+    </div>
+  </details>`;
 }
 
 async function renderBlendResult(data) {
@@ -4548,7 +4558,6 @@ async function renderBlendResult(data) {
   // Phase 2 (700ms): Score ring draws + number counts
   await new Promise(r => setTimeout(r, 700));
   animateScore(score, $('br-ring'), $('br-score'));
-  $('br-ring').classList.add('ring-glow');
 
   // Phase 3 (1200ms): Score label + stats
   await new Promise(r => setTimeout(r, 500));
@@ -4842,7 +4851,6 @@ async function blendFlow() {
   $('br-stats').className = 'opacity-0 flex flex-wrap items-center justify-center gap-gutter';
   $('br-score').textContent = '0';
   $('br-ring').style.strokeDashoffset = '503';
-  $('br-ring').classList.remove('ring-glow');
   $('br-director-card').classList.add('hidden');
   $('br-director-card').classList.remove('flex');
 
@@ -5535,7 +5543,6 @@ $('feed-film-results').addEventListener('click', event => {
       tab.classList.toggle('is-active', tab.dataset.feedScope === 'community');
     });
     renderFeedFollowingFilter();
-    $('feed-sort-note').classList.remove('hidden');
     openFilmFeed(film.slug, film.title);
   } else {
     _feedPickedFilm = film;

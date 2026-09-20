@@ -29,7 +29,7 @@
 <link rel="manifest" href="/static/site.webmanifest?v=20260910.6"/>
 <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Geist:wght@400;500;600;700&display=swap" rel="stylesheet"/>
-<link rel="stylesheet" href="/static/app.css?v=20260920.8"/>
+<link rel="stylesheet" href="/static/app.css?v=20260920.9"/>
 </head>
 <body class="is-booting bg-surface-container-lowest text-on-surface min-h-screen flex flex-col selection:bg-primary-container selection:text-on-primary-container">
 
@@ -942,9 +942,8 @@
   <div class="relative z-10 max-w-[1200px] mx-auto w-full px-margin-mobile md:px-margin-desktop pb-stack-lg flex flex-col gap-gutter">
 
     <!-- Back button -->
-    <div class="flex items-center justify-between mt-stack-md">
-      <div class="page-topbar"><button id="btn-new-search" type="button" class="page-back"><span class="material-symbols-outlined">arrow_back</span>Ne izlesem? bölümüne dön</button><div class="page-topbar__actions"><button type="button" data-open-profile class="avatar-button flex shrink-0 items-center justify-center overflow-hidden rounded-full border border-outline-variant/30 bg-surface-container text-on-surface-variant transition-colors hover:border-primary-container/50" aria-label="Profilim"></button></div></div>
-      <div id="result-username" class="font-label-md text-label-md text-on-surface-variant/50 uppercase tracking-wider"></div>
+    <div class="mt-stack-md">
+      <div class="page-topbar"><button id="btn-new-search" type="button" class="page-back"><span class="material-symbols-outlined">arrow_back</span>Ne izlesem? bölümüne dön</button><div class="page-topbar__actions"><span id="result-username" class="hidden sm:inline font-label-md text-label-md text-on-surface-variant/50 uppercase tracking-wider"></span><button type="button" data-open-profile class="avatar-button flex shrink-0 items-center justify-center overflow-hidden rounded-full border border-outline-variant/30 bg-surface-container text-on-surface-variant transition-colors hover:border-primary-container/50" aria-label="Profilim"></button></div></div>
     </div>
 
     <!-- Taste analysis card -->
@@ -1046,7 +1045,7 @@
   <div class="relative z-10 max-w-[1200px] mx-auto w-full px-margin-mobile md:px-margin-desktop pb-stack-lg flex flex-col gap-gutter">
 
     <!-- Back -->
-    <div class="flex items-center justify-between mt-stack-md">
+    <div class="mt-stack-md">
       <div class="page-topbar"><button id="btn-blend-back" type="button" class="page-back"><span class="material-symbols-outlined">arrow_back</span><span id="blend-result-back-label">Akışa dön</span></button><div class="page-topbar__actions"><button type="button" data-open-profile class="avatar-button flex shrink-0 items-center justify-center overflow-hidden rounded-full border border-outline-variant/30 bg-surface-container text-on-surface-variant transition-colors hover:border-primary-container/50" aria-label="Profilim"></button></div></div>
     </div>
 
@@ -1097,19 +1096,20 @@
       <div id="br-confidence" class="opacity-0 -mt-4 font-label-md text-label-md text-on-surface-variant text-center"></div>
 
       <!-- Stats row -->
-      <div id="br-stats" class="opacity-0 flex flex-wrap items-center justify-center gap-gutter">
-        <div class="glass-panel rounded-xl px-6 py-4 flex flex-col items-center gap-1 min-w-[120px]">
-          <span id="br-common-count" class="font-headline-lg text-headline-lg text-primary-container">—</span>
-          <span class="font-label-sm text-label-sm text-on-surface-variant uppercase tracking-wider">ortak film</span>
+      <!-- Aynı üç istatistik, ekranın üçte birini yemeden. -->
+      <div id="br-stats" class="opacity-0 flex flex-wrap items-stretch justify-center gap-2">
+        <div class="glass-panel rounded-lg px-3 py-2 flex flex-col items-center gap-0.5 min-w-[92px]">
+          <span id="br-common-count" class="font-headline-md text-[20px] leading-none text-primary-container">—</span>
+          <span class="font-label-sm text-[9px] text-on-surface-variant uppercase tracking-wider">ortak film</span>
         </div>
-        <div class="glass-panel rounded-xl px-6 py-4 flex flex-col items-center gap-1 min-w-[120px]">
-          <span id="br-scan-count" class="font-headline-lg text-headline-lg text-on-surface-variant">—</span>
-          <span class="font-label-sm text-label-sm text-on-surface-variant uppercase tracking-wider">taranan film</span>
+        <div class="glass-panel rounded-lg px-3 py-2 flex flex-col items-center gap-0.5 min-w-[92px]">
+          <span id="br-scan-count" class="font-headline-md text-[20px] leading-none text-on-surface-variant">—</span>
+          <span class="font-label-sm text-[9px] text-on-surface-variant uppercase tracking-wider">taranan film</span>
         </div>
-        <div id="br-director-card" class="hidden glass-panel rounded-xl px-6 py-4 flex flex-col items-center gap-1 min-w-[120px]">
-          <span id="br-director" class="font-headline-md text-headline-md text-secondary-container text-center leading-tight"></span>
-          <span class="font-label-sm text-label-sm text-on-surface-variant uppercase tracking-wider">ortak yönetmen</span>
-          <span id="br-director-counts" class="font-label-sm text-label-sm text-on-surface-variant/60 text-center"></span>
+        <div id="br-director-card" class="hidden glass-panel rounded-lg px-3 py-2 flex flex-col items-center gap-0.5 min-w-[92px] max-w-[190px]">
+          <span id="br-director" class="font-headline-md text-[13px] leading-tight text-secondary-container text-center break-words"></span>
+          <span class="font-label-sm text-[9px] text-on-surface-variant uppercase tracking-wider">ortak yönetmen</span>
+          <span id="br-director-counts" class="font-label-sm text-[9px] text-on-surface-variant/60 text-center"></span>
         </div>
       </div>
     </section>
@@ -1125,7 +1125,7 @@
           <span class="material-symbols-outlined text-[17px]">ios_share</span><span class="hidden sm:inline" data-share-label>PNG paylaş</span>
         </button>
       </div>
-      <div id="br-grid" class="mobile-film-grid film-grid-5"></div>
+      <div id="br-grid" class="overflow-hidden rounded-xl border border-outline-variant/25 bg-surface/60"></div>
     </section>
 
     <!-- No common films fallback -->
@@ -1151,7 +1151,7 @@
         </button>
       </div>
       <p id="br-wishlist-sub" class="hidden font-body-md text-body-md text-on-surface-variant/70 -mt-2"></p>
-      <div id="br-wishlist-grid" class="mobile-film-grid film-grid-5"></div>
+      <div id="br-wishlist-grid" class="overflow-hidden rounded-xl border border-outline-variant/25 bg-surface/60"></div>
     </section>
 
     <!-- Ortak watchlist yok fallback -->
@@ -1170,9 +1170,8 @@
   <div class="relative z-10 max-w-[1200px] mx-auto w-full px-margin-mobile md:px-margin-desktop pb-stack-lg flex flex-col gap-gutter">
 
     <!-- Back button -->
-    <div class="flex items-center justify-between mt-stack-md">
-      <div class="page-topbar"><button id="btn-random-new-search" type="button" class="page-back"><span class="material-symbols-outlined">arrow_back</span>Ne izlesem? bölümüne dön</button><div class="page-topbar__actions"><button type="button" data-open-profile class="avatar-button flex shrink-0 items-center justify-center overflow-hidden rounded-full border border-outline-variant/30 bg-surface-container text-on-surface-variant transition-colors hover:border-primary-container/50" aria-label="Profilim"></button></div></div>
-      <div id="random-result-username" class="font-label-md text-label-md text-on-surface-variant/50 uppercase tracking-wider"></div>
+    <div class="mt-stack-md">
+      <div class="page-topbar"><button id="btn-random-new-search" type="button" class="page-back"><span class="material-symbols-outlined">arrow_back</span>Ne izlesem? bölümüne dön</button><div class="page-topbar__actions"><span id="random-result-username" class="hidden sm:inline font-label-md text-label-md text-on-surface-variant/50 uppercase tracking-wider"></span><button type="button" data-open-profile class="avatar-button flex shrink-0 items-center justify-center overflow-hidden rounded-full border border-outline-variant/30 bg-surface-container text-on-surface-variant transition-colors hover:border-primary-container/50" aria-label="Profilim"></button></div></div>
     </div>
 
     <!-- Header with attempt badge -->
@@ -1209,8 +1208,8 @@
 <div id="view-feed" class="hidden w-full max-w-2xl mx-auto shell-column border-outline-variant/20 px-0 pt-0 pb-20 lg:border-x">
   <!-- Sabit başlık: Twitter'ın orta sütun başlığı gibi, kaydırırken kalır. -->
   <div class="sticky top-0 z-30 border-b border-outline-variant/25 bg-surface/85 backdrop-blur-xl">
-    <div class="flex items-center justify-between gap-3 px-4 py-4">
-      <h1 class="font-headline-md text-headline-md text-on-surface">Akış</h1>
+    <div class="flex items-center justify-between gap-3 px-4 py-2.5">
+      <h1 class="page-title">Akış</h1>
       <div class="flex shrink-0 items-center gap-1">
         <button id="btn-feed-film-filter" type="button" title="Akışı filtrele" aria-label="Akışı filtrele" aria-expanded="false" class="rounded-full p-2 text-on-surface-variant hover:text-primary-container transition-colors"><span class="material-symbols-outlined text-[22px]">filter_alt</span></button>
         <button id="btn-feed-mine" type="button" title="Profilim" class="avatar-button h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full border border-outline-variant/30 bg-surface-container text-on-surface-variant transition-colors hover:border-primary-container/50 flex"></button>
@@ -1258,8 +1257,6 @@
 
   <div id="feed-trending" class="hidden px-4 pt-4 lg:block xl:hidden"></div>
   <div id="feed-film-filter" class="hidden border-b border-outline-variant/25 px-4 py-4"></div>
-  <p id="feed-sort-note" class="mx-4 mt-3 text-xs text-on-surface-variant/60">Topluluk notları etkileşime göre sıralanır; eşit notlarda takip ettiklerin öne çıkar.</p>
-
   <div id="feed-list" class="flex flex-col"></div>
   <button id="btn-feed-more" type="button" class="hidden w-full border-t border-outline-variant/25 py-4 text-sm text-primary-container hover:bg-surface-container/40 transition-colors">Daha fazla göster</button>
 </div>
@@ -1376,6 +1373,6 @@
   </div>
 </footer>
 
-<script type="module" src="/static/js/app.js?v=20260920.8"></script>
+<script type="module" src="/static/js/app.js?v=20260920.9"></script>
 </body>
 </html>

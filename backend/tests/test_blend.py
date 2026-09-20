@@ -49,7 +49,7 @@ class BlendCalibrationTests(unittest.TestCase):
 
         result = _calculate_blend(first, second)
 
-        self.assertLessEqual(result["score"], 25)
+        self.assertLessEqual(result["score"], 32)
 
     def test_hated_and_loved_shared_features_do_not_score_as_a_match(self):
         hated = EnrichedFilm(
@@ -63,7 +63,7 @@ class BlendCalibrationTests(unittest.TestCase):
 
         result = _calculate_blend([hated], [loved])
 
-        self.assertEqual(result["score"], 25)
+        self.assertEqual(result["score"], 32)
 
     def test_disjoint_profiles_keep_a_warm_but_clearly_low_floor(self):
         first = _profile("first", shared_features=False)
@@ -71,7 +71,7 @@ class BlendCalibrationTests(unittest.TestCase):
 
         result = _calculate_blend(first, second)
 
-        self.assertEqual(result["score"], 25)
+        self.assertEqual(result["score"], 32)
         self.assertEqual(result["confidence"]["level"], "high")
 
     def test_shared_fav4_has_a_larger_explicit_bonus(self):
@@ -86,9 +86,9 @@ class BlendCalibrationTests(unittest.TestCase):
             favorite_four2=["shared-love"],
         )
 
-        self.assertEqual(result["score"], baseline["score"] + 10)
+        self.assertEqual(result["score"], baseline["score"] + 12)
         self.assertEqual(result["favorite_matches"]["fav4"], ["shared-love"])
-        self.assertEqual(result["favorite_matches"]["bonus"], 10)
+        self.assertEqual(result["favorite_matches"]["bonus"], 12)
 
     def test_small_profiles_report_low_confidence(self):
         first = _profile("first", shared_features=True, count=5)

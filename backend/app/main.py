@@ -746,7 +746,7 @@ ENTRY_SYNC_MIN_INTERVAL = 15 * 60
 FINGERPRINT_FILM_LIMIT = 28
 TTL_RECOMMENDATION = 30 * 24 * 3600
 RECOMMENDER_VERSION = "v5-last100-fav4-directors"
-BLEND_VERSION = "blend-v7-fav4-directors"
+BLEND_VERSION = "blend-v8-warmer-curve"
 
 
 def _make_persistent_cache(settings, client):
@@ -5714,11 +5714,15 @@ def _calculate_blend(
     # The displayed score is intentionally warmer than the raw statistical
     # similarity. A nonlinear calibration protects meaningful differences while
     # avoiding demoralizing zeroes for two valid, simply different profiles.
+    # The floor and the curve were both raised once real Blends read colder
+    # than they felt: raw similarity between two people who share a film
+    # language rarely passes 0.5, so the mid range is where the warmth has to
+    # land. Ordering is untouched — the curve is still monotonic in `raw`.
     bounded_raw = max(0.0, min(raw, 1.0))
-    calibrated_score = 25.0 + 75.0 * (bounded_raw ** 0.85)
+    calibrated_score = 32.0 + 68.0 * (bounded_raw ** 0.72)
 
     shared_fav4 = sorted(fav4_1 & fav4_2)
-    favorite_bonus = min(len(shared_fav4) * 10, 20)
+    favorite_bonus = min(len(shared_fav4) * 12, 24)
     score = round(min(100.0, calibrated_score + favorite_bonus))
 
     min_watched = min(len(watched1), len(watched2))

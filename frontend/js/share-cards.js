@@ -1,5 +1,5 @@
-import { API_BASE } from './api.js?v=20260920.8';
-import { t } from './i18n.js?v=20260920.8';
+import { API_BASE } from './api.js?v=20260920.9';
+import { t } from './i18n.js?v=20260920.9';
 
 const WIDTH = 1080;
 const HEIGHT = 1350;
@@ -122,10 +122,6 @@ function drawBrand(ctx, width = WIDTH) {
   ctx.textAlign = 'left';
   ctx.textBaseline = 'middle';
   ctx.fillText('MOVIENOTES', 150, 78);
-  font(ctx, 20, 600);
-  ctx.fillStyle = 'rgba(224,226,230,.45)';
-  ctx.textAlign = 'right';
-  ctx.fillText(t('SİNEFİL PROFİL KARTI'), width - 74, 78);
 }
 
 function drawFooter(ctx, label, width = WIDTH, height = HEIGHT) {
@@ -365,10 +361,17 @@ export async function renderBlendShareCard(data, mode = 'watched') {
   drawBackground(ctx, accent);
   drawBrand(ctx);
 
-  font(ctx, 18, 700);
-  drawLines(ctx, [t(isWatchlist ? 'ORTAK İZLEME LİSTESİ' : 'ORTAK İZLENENLER')], 72, 152, 22, accent);
-  font(ctx, 50, 700);
-  drawLines(ctx, [t(isWatchlist ? 'Sıradaki filmlerimiz' : 'Aynı filmlerde buluştuk')], 72, 188, 60, '#e0e2e6');
+  if (isWatchlist) {
+    font(ctx, 18, 700);
+    drawLines(ctx, [t('ORTAK İZLEME LİSTESİ')], 72, 152, 22, accent);
+    font(ctx, 50, 700);
+    drawLines(ctx, [t('Sıradaki filmlerimiz')], 72, 188, 60, '#e0e2e6');
+  } else {
+    // The shared-watched card says what it is by name; the kicker above it was
+    // repeating the title in smaller type.
+    font(ctx, 50, 700);
+    drawLines(ctx, ['Movienotes Blend'], 72, 176, 60, '#e0e2e6');
+  }
 
   const user1 = `@${clean(data.username1 || t('kullanıcı'))}`;
   const user2 = `@${clean(data.username2 || t('kullanıcı'))}`;

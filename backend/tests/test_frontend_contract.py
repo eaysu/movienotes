@@ -37,8 +37,6 @@ def test_phone_layout_prevents_film_grid_and_inbox_overflow():
 
     for element_id, variant in (
         ("alt-grid", "film-grid-4"),
-        ("br-grid", "film-grid-5"),
-        ("br-wishlist-grid", "film-grid-5"),
     ):
         marker = f'id="{element_id}" class="'
         classes = html.split(marker, 1)[1].split('"', 1)[0]
@@ -575,6 +573,98 @@ def test_every_page_wears_the_same_title():
     assert "padding-top: .75rem" in inset
 
 
+def test_blend_films_are_rows_that_open_on_the_two_ratings():
+    """Asked for: a list with an arrow per film, opening to each side's score.
+
+    Five posters at grid size pushed the ratings — the thing two people came to
+    compare — below the fold.
+    """
+    html = (FRONTEND / "index.html").read_text()
+    app_js = (FRONTEND / "js" / "app.js").read_text()
+
+    for element_id in ("br-grid", "br-wishlist-grid"):
+        classes = html.split(f'id="{element_id}" class="', 1)[1].split('"', 1)[0]
+        assert "mobile-film-grid" not in classes, element_id
+
+    card = app_js.split("function buildBlendFilmCard", 1)[1].split(
+        "async function renderBlendResult", 1
+    )[0]
+    assert "<details" in card and "<summary" in card
+    assert "group-open:rotate-90" in card          # the arrow turns when open
+    assert "film.rating1" in card and "film.rating2" in card
+    assert "film.favorite1" in card and "film.favorite2" in card
+
+
+def test_the_blend_stats_row_stays_out_of_the_way():
+    """Asked for: the same three figures, taking far less of the screen."""
+    html = (FRONTEND / "index.html").read_text()
+    stats = html.split('id="br-stats"', 1)[1].split("</section>", 1)[0]
+
+    # All three are still reported…
+    for element_id in ("br-common-count", "br-scan-count", "br-director-card"):
+        assert element_id in stats, element_id
+    # …at a size that no longer dominates the result.
+    assert "text-headline-lg" not in stats
+    assert "px-6 py-4" not in stats
+    assert "min-w-[120px]" not in stats
+
+
+def test_the_blend_score_does_not_pulse():
+    app_js = (FRONTEND / "js" / "app.js").read_text()
+    css = (FRONTEND / "css" / "source.css").read_text()
+
+    assert "ring-glow" not in app_js
+    assert "ring-glow" not in css
+
+
+def test_the_blend_share_card_is_titled_as_a_blend():
+    share_js = (FRONTEND / "js" / "share-cards.js").read_text()
+
+    assert "Movienotes Blend" in share_js
+    assert "Aynı filmlerde buluştuk" not in share_js
+    assert "ORTAK İZLENENLER" not in share_js
+    # The corner label rode on every card, not just the profile one.
+    assert "SİNEFİL PROFİL KARTI" not in share_js
+    # The watchlist variant keeps its own heading.
+    assert "ORTAK İZLEME LİSTESİ" in share_js
+
+
+def test_a_working_blend_button_spins_instead_of_rewording_itself():
+    app_js = (FRONTEND / "js" / "app.js").read_text()
+
+    assert "'Hazırlanıyor…'" not in app_js
+    assert "animate-spin" in app_js.split("const busyLabel", 1)[1][:600]
+    # innerHTML both ways, or the spinner markup would be restored as text.
+    assert "const oldText = button.innerHTML;" in app_js
+    assert "button.innerHTML = oldText;" in app_js
+
+
+def test_the_profile_avatar_reaches_the_top_right_corner():
+    """Reported: on the result screens it sat beside the back link.
+
+    The bar was nested in another flex row, so it shrank to its content and
+    space-between had nothing left to push apart.
+    """
+    html = (FRONTEND / "index.html").read_text()
+    css = (FRONTEND / "css" / "source.css").read_text()
+
+    bar = css.split(".page-topbar {", 1)[1].split("}", 1)[0]
+    assert "width: 100%" in bar
+    assert "justify-content: space-between" in bar
+    assert '<div class="flex items-center justify-between mt-stack-md">' not in html
+
+
+def test_the_feed_header_gave_back_its_height():
+    html = (FRONTEND / "index.html").read_text()
+    css = (FRONTEND / "css" / "source.css").read_text()
+
+    header = html.split('id="view-feed"', 1)[1].split('id="feed-list"', 1)[0]
+    assert 'class="flex items-center justify-between gap-3 px-4 py-2.5"' in header
+    assert "py-4" not in header.split("role=\"tablist\"", 1)[0]
+    tab = css.split(".feed-tab {", 1)[1].split("}", 1)[0]
+    assert "padding: .57rem" in tab
+
+
 def test_profile_follow_lists_are_dialogs_and_stay_out_of_the_share_card():
     html = (FRONTEND / "index.html").read_text()
     app_js = (FRONTEND / "js" / "app.js").read_text()
@@ -949,12 +1039,15 @@ def test_the_compose_button_only_shows_where_there_is_something_to_write():
     assert "name === 'inbox' && !_openLetterThread" in app_js
 
 
-def test_feed_can_filter_to_visible_film_notes_and_explains_community_ordering():
+def test_feed_can_filter_to_visible_film_notes_and_orders_community_by_engagement():
     html = (FRONTEND / "index.html").read_text()
     app_js = (FRONTEND / "js" / "app.js").read_text()
 
     assert 'id="btn-feed-film-filter"' in html
-    assert 'id="feed-sort-note"' in html
+    # The paragraph that narrated the ordering is gone from the header, which
+    # had to earn back its height; the ordering itself is unchanged.
+    assert "feed-sort-note" not in html
+    assert "feed-sort-note" not in app_js
     assert "_feedFilmPickerMode === 'filter'" in app_js
     assert '`/api/feed/films?q=${encodeURIComponent(query)}`' in app_js
     assert "sort = _feedScope === 'community' ? 'engagement' : 'recent'" in app_js
@@ -1048,10 +1141,10 @@ def test_shell_asset_content_changes_force_a_version_bump():
     files that no longer existed.
     """
     expected = {
-        "js/app.js": "0b0c570ca7655e0310a09995de8729447b4c890b4aeb390e25b6e8f7e7fe006d",
-        "app.css": "303cb569bf4632efd265134326dcd805615364d6a4832c5e29096d5f709ee889",
-        "js/share-cards.js": "8492d3b6b9832f92df71fed41e7e934a3fdd753e0040ca9a5186743bfd69f7d8",
-        "js/i18n.js": "d4eab4d2f6dc01ded277e1c39d15dc0818d2baa15dc49f51a57a19da83e70ba1",
+        "js/app.js": "5bbdf089ee2c929860100e5adb8f6c0ef5f5254e1272343b0962069021b3452f",
+        "app.css": "8d28f8cefefa89eb36f834742974d0b38ea51bf6969f495305f05845e4bfc3c1",
+        "js/share-cards.js": "0f5cf3bc807af23f2176004d08cb8a86492f28f0acc1ee38dfaaa2da9548c5c9",
+        "js/i18n.js": "de3fd6a7a1b08612a1373c3edf81c0d3e1a696fb81492660d8a239194e9527c1",
         "site.webmanifest": "7a7de349179ed9f226d38632dfde5a8478edd10305972ea52641b0dc6aa7f405",
         "movienotes-mark.png": "850aa9117aa52768952843f8e2c410c0c17868877d81b2058274290373b4ee1e",
         "movienotes-icon-192.png": "3b04c52ffd23799ce424f1acefd0a1d7c386b8c968b09be9bd5c87b623c6ac12",
@@ -1087,24 +1180,24 @@ def test_every_app_shell_asset_has_an_explicit_immutable_version():
     source_css = (FRONTEND / "css" / "source.css").read_text()
 
     dependency_version = "v=20260902.15"
-    api_version = "v=20260920.8"
-    css_version = "v=20260920.8"
+    api_version = "v=20260920.9"
+    css_version = "v=20260920.9"
     assert f"/static/app.css?{css_version}" in html
-    assert "/static/js/app.js?v=20260920.8" in html
-    assert "./i18n.js?v=20260920.8" in app_js
+    assert "/static/js/app.js?v=20260920.9" in html
+    assert "./i18n.js?v=20260920.9" in app_js
     assert app_js.count(f"?{dependency_version}") == 2
     assert f"./api.js?{api_version}" in app_js
-    assert "./recommendations.js?v=20260920.8" in app_js
-    assert "./share-cards.js?v=20260920.8" in app_js
-    assert "./auth.js?v=20260920.8" in app_js
+    assert "./recommendations.js?v=20260920.9" in app_js
+    assert "./share-cards.js?v=20260920.9" in app_js
+    assert "./auth.js?v=20260920.9" in app_js
     assert f"./dom.js?{dependency_version}" in auth_js
-    assert "./i18n.js?v=20260920.8" in auth_js
+    assert "./i18n.js?v=20260920.9" in auth_js
     assert f"./dom.js?{dependency_version}" in profile_js
-    assert "./i18n.js?v=20260920.8" in profile_js
+    assert "./i18n.js?v=20260920.9" in profile_js
     assert f"./dom.js?{dependency_version}" in recommendations_js
-    assert "./i18n.js?v=20260920.8" in recommendations_js
+    assert "./i18n.js?v=20260920.9" in recommendations_js
     assert f"./api.js?{api_version}" in share_js
-    assert "./i18n.js?v=20260920.8" in share_js
+    assert "./i18n.js?v=20260920.9" in share_js
     assert f"criterion-closet-bg.jpg?{dependency_version}" in source_css
 
 
@@ -1174,7 +1267,7 @@ def test_png_share_renderer_is_lazy_loaded_on_first_share_action():
 
     imports = app_js.split("// ── Cinema facts", 1)[0]
     assert "from './share-cards.js" not in imports
-    assert "import('./share-cards.js?v=20260920.8')" in imports
+    assert "import('./share-cards.js?v=20260920.9')" in imports
     assert "const shareCards = await loadShareCardsModule();" in app_js
 
 
