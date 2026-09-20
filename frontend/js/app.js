@@ -8,24 +8,24 @@ import {
   finishApiRequest,
   scrapeErrorMessage,
   streamErrorMessage,
-} from './api.js?v=20260920.10';
+} from './api.js?v=20260920.11';
 import {
   cookieValue,
   csrfHeaders,
   setAuthMessage,
   setAuthMode,
   setPasswordVisibility,
-} from './auth.js?v=20260920.10';
-import { directorAvatar, directorFilmGrid, directorFilmTile } from './profile.js?v=20260920.10';
+} from './auth.js?v=20260920.11';
+import { directorAvatar, directorFilmGrid, directorFilmTile } from './profile.js?v=20260920.11';
 import { animateScore, getScoreInfo } from './blend.js?v=20260902.15';
-import { createRecommendationCards } from './recommendations.js?v=20260920.10';
+import { createRecommendationCards } from './recommendations.js?v=20260920.11';
 import {
   getLocale,
   initI18n,
   localePreference,
   setLocalePreference,
   t,
-} from './i18n.js?v=20260920.10';
+} from './i18n.js?v=20260920.11';
 
 initI18n();
 
@@ -34,7 +34,7 @@ const uiLocale = () => (getLocale() === 'en' ? 'en-US' : 'tr-TR');
 let _shareCardsModule;
 function loadShareCardsModule() {
   if (!_shareCardsModule) {
-    _shareCardsModule = import('./share-cards.js?v=20260920.10');
+    _shareCardsModule = import('./share-cards.js?v=20260920.11');
   }
   return _shareCardsModule;
 }
@@ -2181,10 +2181,10 @@ function userHeaderMarkup(profile) {
   // yüksekliğinde yuvarlak düğmeler, mektup takibin hemen solunda.
   const iconAction = 'inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border transition-colors';
   const letterAction = canLetter
-    ? `<button type="button" data-user-letter="${escapeHTML(profile.username)}" aria-label="Mektup yaz" title="Mektup yaz" class="${iconAction} border-secondary-container/45 bg-secondary-container/10 text-secondary-container hover:bg-secondary-container/20"><span class="material-symbols-outlined text-[19px]">mail</span></button>`
+    ? `<button type="button" data-user-letter="${escapeHTML(profile.username)}" aria-label="Mektup yaz" title="Mektup yaz" class="${iconAction} border-tertiary-container/45 bg-tertiary-container/10 text-tertiary-container hover:bg-tertiary-container/20"><span class="material-symbols-outlined text-[19px]">mail</span></button>`
     : '';
   const blendAction = canBlend
-    ? `<button type="button" data-user-blend="${escapeHTML(profile.username)}" aria-label="Blend yap" title="Blend yap" class="${iconAction} border-primary-container/45 bg-primary-container/10 text-primary-container hover:bg-primary-container/20"><span class="material-symbols-outlined text-[19px]">join_inner</span></button>`
+    ? `<button type="button" data-user-blend="${escapeHTML(profile.username)}" aria-label="Blend yap" title="Blend yap" class="${iconAction} border-secondary-container/45 bg-secondary-container/10 text-secondary-container hover:bg-secondary-container/20"><span class="material-symbols-outlined text-[19px]">join_inner</span></button>`
     : '';
   return `<div class="rounded-2xl border border-outline-variant/25 bg-surface-container/60 p-5">
     <div class="flex items-start gap-4">
@@ -2192,16 +2192,14 @@ function userHeaderMarkup(profile) {
         ? `<img src="${avatar}" data-avatar-zoom alt="" class="h-20 w-20 shrink-0 rounded-full object-cover border border-outline-variant/30"/>`
         : `<div class="flex h-20 w-20 shrink-0 items-center justify-center rounded-full bg-surface-container text-2xl font-bold text-primary-container">${name[0] || '?'}</div>`}
       <div class="min-w-0 flex-1">
-        <div class="flex items-start justify-between gap-3">
-          <div class="min-w-0">
-            <h1 class="truncate font-headline-md text-headline-md text-on-surface">${name}</h1>
-            <p class="text-sm text-on-surface-variant/70">@${escapeHTML(profile.username)}</p>
-          </div>
-          <div class="flex shrink-0 items-center gap-2">${blendAction}${letterAction}${followButton(profile)}</div>
-        </div>
+        <h1 class="truncate font-headline-md text-headline-md text-on-surface">${name}</h1>
+        <p class="truncate text-sm text-on-surface-variant/70">@${escapeHTML(profile.username)}</p>
         ${locked ? '<span class="mt-2 inline-flex items-center gap-1 rounded-full bg-surface-variant/60 px-2 py-0.5 text-[11px] text-on-surface-variant"><span class="material-symbols-outlined text-[13px]">lock</span>Kilitli hesap</span>' : (profile.follows_you ? '<span class="mt-2 inline-block rounded-full bg-surface-variant/60 px-2 py-0.5 text-[11px] text-on-surface-variant">Seni takip ediyor</span>' : '')}
       </div>
     </div>
+    <!-- Actions get their own row: sharing one with the name left the name a
+         few dozen pixels on a phone, and the username ran under the buttons. -->
+    <div class="mt-4 flex flex-wrap items-center gap-2">${blendAction}${letterAction}${followButton(profile)}</div>
     ${locked ? '<p class="mt-4 text-sm text-on-surface-variant">Bu hesabın notları, zevk profili ve takip listeleri kilitli.</p>' : `<div class="mt-4 flex flex-wrap items-center gap-x-5 gap-y-1 text-sm">
       <span class="text-on-surface-variant"><strong class="text-on-surface">${profile.note_count}</strong> not</span>
       <span class="text-on-surface-variant"><strong class="text-on-surface">${profile.follower_count || 0}</strong> takipçi</span>

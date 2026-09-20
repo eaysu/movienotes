@@ -649,8 +649,14 @@ def test_the_profile_avatar_reaches_the_top_right_corner():
     css = (FRONTEND / "css" / "source.css").read_text()
 
     bar = css.split(".page-topbar {", 1)[1].split("}", 1)[0]
-    assert "width: 100%" in bar
     assert "justify-content: space-between" in bar
+    # A block-level flex container already fills its parent. Forcing width:100%
+    # instead pushed the bars that carry a horizontal margin off-screen, taking
+    # the avatar with them.
+    assert "width: 100%" not in bar
+    assert "page-topbar mx-4" in html
+    # …and no bar is nested in another flex row, which is what made
+    # space-between have nothing to push apart in the first place.
     assert '<div class="flex items-center justify-between mt-stack-md">' not in html
 
 
@@ -693,6 +699,35 @@ def test_a_profile_portrait_can_be_opened_full_size():
     assert "avatar.currentSrc || avatar.src" in handler
     assert "safeImageURL(avatar" not in app_js
     assert "$('dialog-avatar').showModal();" in handler
+
+
+def test_a_member_header_gives_the_name_and_the_actions_their_own_rows():
+    """Reported: the display name was cut to a few characters and the username
+    ran under the Blend and letter buttons on a phone."""
+    app_js = (FRONTEND / "js" / "app.js").read_text()
+
+    header = app_js.split("function userHeaderMarkup", 1)[1].split(
+        "function userFavoritesMarkup", 1
+    )[0]
+    identity, actions = header.split("Actions get their own row", 1)
+    # Name and username own the row beside the portrait…
+    assert "${name}" in identity and "@${escapeHTML(profile.username)}" in identity
+    assert identity.count("truncate") >= 2
+    assert "followButton(profile)" not in identity
+    # …and the three actions sit on the next one, free to wrap.
+    assert "flex flex-wrap items-center gap-2" in actions
+    assert "${blendAction}${letterAction}${followButton(profile)}" in actions
+
+
+def test_blend_is_orange_and_letters_are_blue_on_a_member_header():
+    """Asked for: one colour per feature, everywhere. This header had them
+    swapped — Blend green, letters orange — against the rest of the app."""
+    app_js = (FRONTEND / "js" / "app.js").read_text()
+
+    blend = app_js.split('aria-label="Blend yap"', 1)[1].split(">", 1)[0]
+    letter = app_js.split('aria-label="Mektup yaz"', 1)[1].split(">", 1)[0]
+    assert "secondary-container" in blend and "primary-container" not in blend
+    assert "tertiary-container" in letter and "secondary-container" not in letter
 
 
 def test_profile_follow_lists_are_dialogs_and_stay_out_of_the_share_card():
@@ -1171,9 +1206,9 @@ def test_shell_asset_content_changes_force_a_version_bump():
     files that no longer existed.
     """
     expected = {
-        "js/app.js": "ace2138b32da86fe5ad6a4de5f119f6ab69692bc126426b1d422078e3c1c9c47",
-        "app.css": "db96869e3616ad61ca67a158133b4c332ac1ef55436fa78808ce6b8dad9e7598",
-        "js/share-cards.js": "163f8ea9e1f356292588b27d31a5430793e8c2c092356fa536b64ee8abe6933b",
+        "js/app.js": "b3b6a123ff83286b84537eba5290c1f7bccf1a7af4c9644da0bcb290d71bad35",
+        "app.css": "d58aa8ba68ce3a88d3e18895f4d4dc7c259098da8dab9c8aa908329a65caff9e",
+        "js/share-cards.js": "0619d4afb500c6647c88832808d0dd0eacfe414901e071a13c3bb81d5667d359",
         "js/i18n.js": "515343c0d3770fbd64d3046ece28477b3c50f583b5339a517730f253c7df0968",
         "site.webmanifest": "7a7de349179ed9f226d38632dfde5a8478edd10305972ea52641b0dc6aa7f405",
         "movienotes-mark.png": "850aa9117aa52768952843f8e2c410c0c17868877d81b2058274290373b4ee1e",
@@ -1210,24 +1245,24 @@ def test_every_app_shell_asset_has_an_explicit_immutable_version():
     source_css = (FRONTEND / "css" / "source.css").read_text()
 
     dependency_version = "v=20260902.15"
-    api_version = "v=20260920.10"
-    css_version = "v=20260920.10"
+    api_version = "v=20260920.11"
+    css_version = "v=20260920.11"
     assert f"/static/app.css?{css_version}" in html
-    assert "/static/js/app.js?v=20260920.10" in html
-    assert "./i18n.js?v=20260920.10" in app_js
+    assert "/static/js/app.js?v=20260920.11" in html
+    assert "./i18n.js?v=20260920.11" in app_js
     assert app_js.count(f"?{dependency_version}") == 2
     assert f"./api.js?{api_version}" in app_js
-    assert "./recommendations.js?v=20260920.10" in app_js
-    assert "./share-cards.js?v=20260920.10" in app_js
-    assert "./auth.js?v=20260920.10" in app_js
+    assert "./recommendations.js?v=20260920.11" in app_js
+    assert "./share-cards.js?v=20260920.11" in app_js
+    assert "./auth.js?v=20260920.11" in app_js
     assert f"./dom.js?{dependency_version}" in auth_js
-    assert "./i18n.js?v=20260920.10" in auth_js
+    assert "./i18n.js?v=20260920.11" in auth_js
     assert f"./dom.js?{dependency_version}" in profile_js
-    assert "./i18n.js?v=20260920.10" in profile_js
+    assert "./i18n.js?v=20260920.11" in profile_js
     assert f"./dom.js?{dependency_version}" in recommendations_js
-    assert "./i18n.js?v=20260920.10" in recommendations_js
+    assert "./i18n.js?v=20260920.11" in recommendations_js
     assert f"./api.js?{api_version}" in share_js
-    assert "./i18n.js?v=20260920.10" in share_js
+    assert "./i18n.js?v=20260920.11" in share_js
     assert f"criterion-closet-bg.jpg?{dependency_version}" in source_css
 
 
@@ -1297,7 +1332,7 @@ def test_png_share_renderer_is_lazy_loaded_on_first_share_action():
 
     imports = app_js.split("// ── Cinema facts", 1)[0]
     assert "from './share-cards.js" not in imports
-    assert "import('./share-cards.js?v=20260920.10')" in imports
+    assert "import('./share-cards.js?v=20260920.11')" in imports
     assert "const shareCards = await loadShareCardsModule();" in app_js
 
 
