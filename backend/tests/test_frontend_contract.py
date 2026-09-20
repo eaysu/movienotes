@@ -1353,9 +1353,9 @@ def test_shell_asset_content_changes_force_a_version_bump():
     files that no longer existed.
     """
     expected = {
-        "js/app.js": "88f350891e05e1752f7d726499caf229427f3a9f3c3c8b0e2cbe10c6b126fc1d",
+        "js/app.js": "563ff9e2b1fbda50205e17963311244a6d8f875e8e69f61c691fda48b2ac58c0",
         "app.css": "7048bbb950ac7364044784479cb49a3cd98da657b2d157ebdd51b87f3816bced",
-        "js/share-cards.js": "49a92f99a7fca74baf5e1e98e919192a88fd7198d85a04039979e11a7bfcdba2",
+        "js/share-cards.js": "d8d07de0feb8248fb29b2490ed0fda7c0adeaa68e426d8ebb9b93e3093c5abee",
         "js/i18n.js": "f4abeb6262ca0b8f2239a1fc35ae124431ed7e9daa36374a92729bb550ccae92",
         "site.webmanifest": "7a7de349179ed9f226d38632dfde5a8478edd10305972ea52641b0dc6aa7f405",
         "movienotes-mark.png": "850aa9117aa52768952843f8e2c410c0c17868877d81b2058274290373b4ee1e",
@@ -1392,24 +1392,24 @@ def test_every_app_shell_asset_has_an_explicit_immutable_version():
     source_css = (FRONTEND / "css" / "source.css").read_text()
 
     dependency_version = "v=20260902.15"
-    api_version = "v=20260920.15"
-    css_version = "v=20260920.15"
+    api_version = "v=20260920.16"
+    css_version = "v=20260920.16"
     assert f"/static/app.css?{css_version}" in html
-    assert "/static/js/app.js?v=20260920.15" in html
-    assert "./i18n.js?v=20260920.15" in app_js
+    assert "/static/js/app.js?v=20260920.16" in html
+    assert "./i18n.js?v=20260920.16" in app_js
     assert app_js.count(f"?{dependency_version}") == 2
     assert f"./api.js?{api_version}" in app_js
-    assert "./recommendations.js?v=20260920.15" in app_js
-    assert "./share-cards.js?v=20260920.15" in app_js
-    assert "./auth.js?v=20260920.15" in app_js
+    assert "./recommendations.js?v=20260920.16" in app_js
+    assert "./share-cards.js?v=20260920.16" in app_js
+    assert "./auth.js?v=20260920.16" in app_js
     assert f"./dom.js?{dependency_version}" in auth_js
-    assert "./i18n.js?v=20260920.15" in auth_js
+    assert "./i18n.js?v=20260920.16" in auth_js
     assert f"./dom.js?{dependency_version}" in profile_js
-    assert "./i18n.js?v=20260920.15" in profile_js
+    assert "./i18n.js?v=20260920.16" in profile_js
     assert f"./dom.js?{dependency_version}" in recommendations_js
-    assert "./i18n.js?v=20260920.15" in recommendations_js
+    assert "./i18n.js?v=20260920.16" in recommendations_js
     assert f"./api.js?{api_version}" in share_js
-    assert "./i18n.js?v=20260920.15" in share_js
+    assert "./i18n.js?v=20260920.16" in share_js
     assert f"criterion-closet-bg.jpg?{dependency_version}" in source_css
 
 
@@ -1479,7 +1479,7 @@ def test_png_share_renderer_is_lazy_loaded_on_first_share_action():
 
     imports = app_js.split("// ── Cinema facts", 1)[0]
     assert "from './share-cards.js" not in imports
-    assert "import('./share-cards.js?v=20260920.15')" in imports
+    assert "import('./share-cards.js?v=20260920.16')" in imports
     assert "const shareCards = await loadShareCardsModule();" in app_js
 
 

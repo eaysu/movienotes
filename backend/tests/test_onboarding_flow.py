@@ -335,6 +335,58 @@ class OnboardingEscapeTests(unittest.TestCase):
         self.assertIn("if (last) _obEscapeOnly = false;", reveal)
 
 
+class DropdownMotionTests(unittest.TestCase):
+    """Asked for: every dropdown in the app opens and closes by sliding."""
+
+    def setUp(self):
+        from pathlib import Path
+
+        self.js = (Path(__file__).resolve().parents[2] / "frontend" / "js" / "app.js").read_text()
+
+    def test_one_helper_drives_every_menu(self):
+        for name in ("function slideOpen", "function slideClose", "function slideToggle"):
+            self.assertIn(name, self.js)
+
+        # No menu may go back to flipping `hidden` on its own; that is the
+        # difference between the motion being the rule and being decoration.
+        for menu in (
+            "profile-settings-menu",
+            "feed-filter-menu",
+            "feed-follow-filter",
+            "blend-user-suggestions",
+            "profile-blend-suggestions",
+        ):
+            self.assertNotIn(
+                f"$('{menu}').classList.add('hidden')", self.js, menu
+            )
+            self.assertNotIn(
+                f"$('{menu}').classList.toggle('hidden'", self.js, menu
+            )
+
+    def test_details_rows_animate_in_both_directions(self):
+        """A <details> closes in one frame unless the close is held back."""
+        block = self.js.split("document.addEventListener('click', event => {", 1)[1]
+        block = block.split("}, true);", 1)[0]
+
+        self.assertIn("event.preventDefault()", block)
+        self.assertIn("details.open = false", block)
+        self.assertIn("_slideIn(body)", block)
+
+    def test_the_motion_yields_to_a_reduced_motion_preference(self):
+        for helper in ("function _slideIn", "function _slideOut"):
+            block = self.js.split(helper, 1)[1].split("\nfunction ", 1)[0]
+            self.assertIn("_reduceMotion", block, helper)
+
+    def test_a_measured_height_is_released_once_the_slide_ends(self):
+        """Lazily loaded rows must not stay trapped at their opening height."""
+        block = self.js.split("function _slideIn", 1)[1].split("\nfunction ", 1)[0]
+
+        self.assertIn("_slideReset(el)", block)
+        reset = self.js.split("function _slideReset", 1)[1].split("\nfunction ", 1)[0]
+        for prop in ("height", "opacity", "overflow", "transition"):
+            self.assertIn(f"el.style.{prop} = ''", reset)
+
+
 class MemberActionBudgetTests(unittest.TestCase):
     """Letters, Blends, blocks and reports used to share the signup budget."""
 

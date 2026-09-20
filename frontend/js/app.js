@@ -8,24 +8,24 @@ import {
   finishApiRequest,
   scrapeErrorMessage,
   streamErrorMessage,
-} from './api.js?v=20260920.15';
+} from './api.js?v=20260920.16';
 import {
   cookieValue,
   csrfHeaders,
   setAuthMessage,
   setAuthMode,
   setPasswordVisibility,
-} from './auth.js?v=20260920.15';
-import { directorAvatar, directorFilmGrid, directorFilmTile } from './profile.js?v=20260920.15';
+} from './auth.js?v=20260920.16';
+import { directorAvatar, directorFilmGrid, directorFilmTile } from './profile.js?v=20260920.16';
 import { animateScore, getScoreInfo } from './blend.js?v=20260902.15';
-import { createRecommendationCards } from './recommendations.js?v=20260920.15';
+import { createRecommendationCards } from './recommendations.js?v=20260920.16';
 import {
   getLocale,
   initI18n,
   localePreference,
   setLocalePreference,
   t,
-} from './i18n.js?v=20260920.15';
+} from './i18n.js?v=20260920.16';
 
 initI18n();
 
@@ -34,7 +34,7 @@ const uiLocale = () => (getLocale() === 'en' ? 'en-US' : 'tr-TR');
 let _shareCardsModule;
 function loadShareCardsModule() {
   if (!_shareCardsModule) {
-    _shareCardsModule = import('./share-cards.js?v=20260920.15');
+    _shareCardsModule = import('./share-cards.js?v=20260920.16');
   }
   return _shareCardsModule;
 }
@@ -552,6 +552,100 @@ async function consumeRecommendationStream(path, body, handlers) {
 
 // ── Streaming text reveal ──────────────────────────────────────────────
 const _reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+// ── Açılır menüler ─────────────────────────────────────────────────────
+// Uygulamadaki bütün dropdown'lar aynı hareketle açılıp kapanıyor: ayarlar
+// menüsü, akış filtresi, kullanıcı önerileri ve <details> satırları. Yükseklik
+// yalnızca animasyon boyunca sabitleniyor, bitince inline stiller bırakılıyor;
+// aksi hâlde sonradan gelen içerik (tembel yüklenen film listesi, arama
+// sonuçları) donmuş bir yüksekliğin içinde kırpılırdı.
+const SLIDE_MS = 240;
+const SLIDE_EASE = 'cubic-bezier(.22,1,.36,1)';
+
+function _slideReset(el) {
+  el.style.transition = '';
+  el.style.height = '';
+  el.style.opacity = '';
+  el.style.overflow = '';
+  delete el.dataset.sliding;
+}
+
+function _slideIn(el) {
+  if (!el) return;
+  if (_reduceMotion) { _slideReset(el); return; }
+  el.dataset.sliding = 'in';
+  el.style.transition = 'none';
+  el.style.overflow = 'hidden';
+  el.style.height = '0px';
+  el.style.opacity = '0';
+  const target = el.scrollHeight;
+  requestAnimationFrame(() => {
+    if (el.dataset.sliding !== 'in') return;
+    el.style.transition = `height ${SLIDE_MS}ms ${SLIDE_EASE}, opacity ${SLIDE_MS}ms ease`;
+    el.style.height = `${target}px`;
+    el.style.opacity = '1';
+  });
+  setTimeout(() => { if (el.dataset.sliding === 'in') _slideReset(el); }, SLIDE_MS + 60);
+}
+
+function _slideOut(el, done) {
+  if (!el) { done?.(); return; }
+  if (_reduceMotion) { _slideReset(el); done?.(); return; }
+  el.dataset.sliding = 'out';
+  el.style.transition = 'none';
+  el.style.overflow = 'hidden';
+  el.style.height = `${el.scrollHeight}px`;
+  el.style.opacity = '1';
+  requestAnimationFrame(() => {
+    if (el.dataset.sliding !== 'out') return;
+    el.style.transition = `height ${SLIDE_MS}ms ${SLIDE_EASE}, opacity ${SLIDE_MS}ms ease`;
+    el.style.height = '0px';
+    el.style.opacity = '0';
+  });
+  setTimeout(() => {
+    if (el.dataset.sliding !== 'out') return;
+    // Önce gizle, sonra stilleri bırak: ters sırada içerik tam boyuna dönüp
+    // tek kare parlıyor.
+    done?.();
+    _slideReset(el);
+  }, SLIDE_MS + 60);
+}
+
+// `hidden` sınıfıyla yönetilen paneller için aynı hareket.
+function slideOpen(el) {
+  if (!el || (!el.classList.contains('hidden') && el.dataset.sliding !== 'out')) return;
+  el.classList.remove('hidden');
+  _slideIn(el);
+}
+
+function slideClose(el, done) {
+  if (!el) return;
+  if (el.classList.contains('hidden')) { done?.(); return; }
+  _slideOut(el, () => { el.classList.add('hidden'); done?.(); });
+}
+
+function slideToggle(el, open) {
+  if (open) slideOpen(el); else slideClose(el);
+}
+
+// <details> yerel olarak animasyonsuz açılır. Açılışı tarayıcıya bırakıp
+// içeriği biz kaydırıyoruz; kapanışta ise önce hareketi oynatıp `open`'ı
+// sonunda kaldırıyoruz, yoksa içerik tek karede yok oluyor.
+document.addEventListener('click', event => {
+  if (_reduceMotion) return;
+  const summary = event.target.closest('summary');
+  const details = summary?.parentElement;
+  if (!details || details.tagName !== 'DETAILS') return;
+  const body = summary.nextElementSibling;
+  if (!body) return;
+  if (details.open) {
+    event.preventDefault();
+    _slideOut(body, () => { details.open = false; });
+  } else {
+    requestAnimationFrame(() => { if (details.open) _slideIn(body); });
+  }
+}, true);
+
 function streamText(el, text) {
   if (!el) return;
   text = String(text || '');
@@ -2054,10 +2148,11 @@ function renderFeedFollowingFilter() {
   // Kişi şeridi sekmenin altında hep durmaz: filtre ikonundan açılır. Seçili
   // bir kişi varken açık kalır, yoksa kullanıcı neye baktığını göremezdi.
   const show = _feedScope === 'following' && (_feedFollowFilterOpen || Boolean(_feedAuthor));
-  filter.classList.toggle('hidden', !show);
-  if (!show) return;
+  if (!show) { slideClose(filter); return; }
   const pill = (label, username = '') => `<button type="button" data-feed-author="${escapeHTML(username)}" class="shrink-0 rounded-full border px-3 py-1.5 text-xs transition-colors ${_feedAuthor === username ? 'border-primary-container/50 bg-primary-container/15 text-primary-container' : 'border-outline-variant/30 text-on-surface-variant hover:border-outline-variant/60 hover:text-on-surface'}">${label}</button>`;
+  // Şerit önce dolduruluyor: boş bir kabuğu açmak sıfır yükseklik ölçerdi.
   filter.innerHTML = `<div class="flex gap-2 overflow-x-auto pb-1">${pill('Tümü')}${_feedFollowingUsers.map(person => pill(`@${escapeHTML(person.username)}`, person.username)).join('')}</div>`;
+  slideOpen(filter);
 }
 
 async function loadFeedFollowingUsers() {
@@ -4909,17 +5004,17 @@ async function searchBlendUsers(inputId = 'username2-input', panelId = 'blend-us
   if (!_authEnabled) return;
   const query = $(inputId).value.trim().replace(/^@/, '').toLowerCase();
   if (query.length < 2) {
-    $(panelId).classList.add('hidden');
+    slideClose($(panelId));
     return;
   }
   try {
     const data = await apiJSON(`/api/users/search?q=${encodeURIComponent(query)}`);
     const users = data.users || [];
-    if (!users.length) { $(panelId).classList.add('hidden'); return; }
+    if (!users.length) { slideClose($(panelId)); return; }
     $(panelId).innerHTML = users.map(user => `<button type="button" data-blend-user="${escapeHTML(user.username)}" class="w-full px-4 py-3 flex items-center gap-3 hover:bg-surface-variant text-left border-b border-outline-variant/20 last:border-0"><strong class="text-on-surface">${escapeHTML(user.display_name || user.username)}</strong><span class="text-on-surface-variant text-sm">@${escapeHTML(user.username)}</span></button>`).join('');
-    $(panelId).classList.remove('hidden');
+    slideOpen($(panelId));
   } catch (_) {
-    $(panelId).classList.add('hidden');
+    slideClose($(panelId));
   }
 }
 
@@ -4941,7 +5036,7 @@ async function blendRequestFlow(opts = {}) {
       body: JSON.stringify({ recipient_username: recipient }),
     });
     $(inputId).value = '';
-    $(panelId).classList.add('hidden');
+    slideClose($(panelId));
     if (data.existing) {
       await routeToExistingBlend(data);
       return;
@@ -5494,7 +5589,7 @@ async function logoutAccount() {
   $('primary-username-field').classList.remove('hidden');
   $('username-input').value = '';
   renderBlendBadge(0);
-  $('profile-settings-menu').classList.add('hidden');
+  slideClose($('profile-settings-menu'));
   setAuthMode('login');
   showView('auth');
   loadPublicStats();
@@ -5503,7 +5598,7 @@ async function logoutAccount() {
 function toggleProfileMenu(force) {
   const menu = $('profile-settings-menu');
   const shouldOpen = typeof force === 'boolean' ? force : menu.classList.contains('hidden');
-  menu.classList.toggle('hidden', !shouldOpen);
+  slideToggle(menu, shouldOpen);
   $('profile-settings-btn').setAttribute('aria-expanded', String(shouldOpen));
 }
 
@@ -5780,13 +5875,13 @@ $('feed-film-filter').addEventListener('click', event => {
 $('btn-feed-film-filter').addEventListener('click', () => {
   const menu = $('feed-filter-menu');
   const open = menu.classList.contains('hidden');
-  menu.classList.toggle('hidden', !open);
+  slideToggle(menu, open);
   $('btn-feed-film-filter').setAttribute('aria-expanded', String(open));
 });
 $('feed-filter-menu').addEventListener('click', event => {
   const option = event.target.closest('[data-feed-filter-kind]');
   if (!option) return;
-  $('feed-filter-menu').classList.add('hidden');
+  slideClose($('feed-filter-menu'));
   $('btn-feed-film-filter').setAttribute('aria-expanded', 'false');
   if (option.dataset.feedFilterKind === 'film') { openFilmPicker('filter'); return; }
   setFeedScope('following', { openFollowFilter: true });
@@ -6145,7 +6240,7 @@ $('profile-blend-suggestions').addEventListener('click', event => {
   const button = event.target.closest('[data-blend-user]');
   if (!button) return;
   $('profile-blend-username').value = button.dataset.blendUser;
-  $('profile-blend-suggestions').classList.add('hidden');
+  slideClose($('profile-blend-suggestions'));
 });
 $('view-inbox').addEventListener('click', handleBlendInboxAction);
 $('view-blends').addEventListener('click', handleBlendInboxAction);
@@ -6172,7 +6267,7 @@ $('blend-user-suggestions').addEventListener('click', event => {
   const button = event.target.closest('[data-blend-user]');
   if (!button) return;
   $('username2-input').value = button.dataset.blendUser;
-  $('blend-user-suggestions').classList.add('hidden');
+  slideClose($('blend-user-suggestions'));
 });
 
 $('btn-home').addEventListener('click', () => {
