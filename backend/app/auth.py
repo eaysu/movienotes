@@ -1571,6 +1571,54 @@ class AuthService:
 
         return self._first(self._retry_storage_read(read))
 
+    def resumable_sync_accounts(self, limit: int = 3) -> list[tuple[Account, dict]]:
+        """Return a small, service-only batch of unfinished profile imports.
+
+        The web worker owns the retry loop, so a profile import must not depend
+        on the member reopening the PWA after a temporary Letterboxd block.
+        ``profile_sync.job_is_resumable`` remains the authority for leases and
+        backoff; this method only supplies candidate rows.
+        """
+        service = self._service_client()
+
+        def read_jobs():
+            return (
+                service.table("profile_sync_jobs")
+                .select("user_id,state,phase,scope,heartbeat_at,backoff_until,lease_expires_at")
+                .in_("state", ["queued", "running", "failed"])
+                .order("updated_at")
+                .limit(max(1, min(int(limit), 10)))
+                .execute()
+            )
+
+        jobs = self._retry_storage_read(read_jobs).data or []
+        user_ids = [int(job["user_id"]) for job in jobs if job.get("user_id")]
+        if not user_ids:
+            return []
+        columns = (
+            "id,auth_user_id,username,display_name,avatar_url,account_status,"
+            "profile_sync_status,onboarding_completed_at,letterboxd_stats"
+        )
+
+        def read_accounts():
+            return (
+                service.table("users")
+                .select(columns)
+                .in_("id", user_ids)
+                .in_("account_status", ["active", "verification_deferred"])
+                .execute()
+            )
+
+        accounts = {
+            int(row["id"]): self._account(row)
+            for row in (self._retry_storage_read(read_accounts).data or [])
+        }
+        return [
+            (accounts[int(job["user_id"])], job)
+            for job in jobs
+            if int(job["user_id"]) in accounts
+        ]
+
     def upsert_sync_job(self, user_id: int, **fields) -> dict:
         payload = {
             "user_id": user_id,

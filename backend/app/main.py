@@ -109,6 +109,11 @@ async def _lifespan(_app):
     # Günce taraması hesaplardan bağımsız çalışamaz: üye listesi Supabase'de.
     if getattr(settings, "diary_scan_enabled", True) and getattr(settings, "has_auth", False):
         schedulers.append(asyncio.create_task(_diary_refresh_loop()))
+    # Full profile imports are durable jobs.  The worker picks them up even if
+    # the member closes the PWA while Letterboxd is temporarily rate-limiting
+    # us, rather than requiring another visit to resume the crawl.
+    if getattr(settings, "has_auth", False):
+        schedulers.append(asyncio.create_task(_profile_sync_retry_loop()))
     try:
         yield
     finally:
@@ -3263,6 +3268,26 @@ async def _sync_recent_diary_on_entry(account: Account, settings, service) -> in
 
 
 _entry_sync_tasks: dict[int, asyncio.Task] = {}
+
+
+async def _profile_sync_retry_loop() -> None:
+    """Resume a bounded batch of queued/failed full imports every 30 seconds."""
+    while True:
+        try:
+            service = _auth_service()
+            if not isinstance(service, SandboxAuthService):
+                candidates = await asyncio.to_thread(service.resumable_sync_accounts, 3)
+                for account, job in candidates:
+                    if profile_sync.is_running(account.id) or not profile_sync.job_is_resumable(job):
+                        continue
+                    await profile_sync.ensure_started(
+                        _SyncPipeline(get_settings()), service, account, scope="full"
+                    )
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001 - a retry scan must not affect requests
+            log.warning("profile sync retry scan failed", exc_info=True)
+        await asyncio.sleep(30)
 
 
 async def _run_entry_sync(account: Account, settings, service) -> None:

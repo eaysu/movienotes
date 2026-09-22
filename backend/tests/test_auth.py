@@ -382,6 +382,27 @@ def test_entry_sync_queues_a_durable_full_import_when_no_archive_exists():
     lightweight.assert_not_awaited()
 
 
+def test_background_retry_loop_resumes_a_queued_profile_import():
+    account = _account()
+    job = {"state": "queued", "scope": "full", "backoff_until": None}
+    service = SimpleNamespace(resumable_sync_accounts=lambda _limit: [(account, job)])
+    starter = AsyncMock(return_value=job)
+
+    async def run_once():
+        with (
+            patch("app.main._auth_service", return_value=service),
+            patch("app.main.profile_sync.is_running", return_value=False),
+            patch("app.main.profile_sync.ensure_started", new=starter),
+            patch("app.main.get_settings", return_value=_settings()),
+            patch("app.main.asyncio.sleep", side_effect=asyncio.CancelledError),
+        ):
+            with pytest.raises(asyncio.CancelledError):
+                await main._profile_sync_retry_loop()
+
+    asyncio.run(run_once())
+    starter.assert_awaited_once()
+
+
 def test_blocked_bootstrap_still_queues_the_full_import():
     account = _account()
     service = SimpleNamespace(
