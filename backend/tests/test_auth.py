@@ -1081,6 +1081,14 @@ def test_new_accounts_get_an_open_letterbox():
     assert "ALTER COLUMN letter_receiving_enabled SET DEFAULT TRUE" in schema
 
 
+def test_deferred_bio_verification_status_is_in_the_database_schema():
+    """Fresh and existing installations must accept the fallback status."""
+    schema = (Path(__file__).parents[1] / "supabase" / "schema.sql").read_text()
+
+    assert "DROP CONSTRAINT IF EXISTS users_account_status_check" in schema
+    assert "'verification_deferred'" in schema
+
+
 def test_bulk_letterbox_open_is_a_script_not_a_schema_line():
     """Re-applying the schema must not undo someone's choice to close it."""
     schema = (Path(__file__).parents[1] / "supabase" / "schema.sql").read_text()

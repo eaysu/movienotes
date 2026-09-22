@@ -56,11 +56,15 @@ CREATE INDEX IF NOT EXISTS idx_users_letter_receivers
   ON public.users (username)
   WHERE account_status = 'active' AND letter_receiving_enabled = TRUE;
 
-DO $$ BEGIN
-  ALTER TABLE public.users ADD CONSTRAINT users_account_status_check
-    CHECK (account_status IN ('anonymous', 'pending_verification', 'active', 'disabled'));
-EXCEPTION WHEN duplicate_object THEN NULL;
-END $$;
+-- This constraint is deliberately replaced rather than only created when
+-- absent: existing installations may have the earlier version without
+-- `verification_deferred`.  That status lets a confirmed user continue to
+-- onboarding when Letterboxd temporarily blocks the bio check.
+ALTER TABLE public.users DROP CONSTRAINT IF EXISTS users_account_status_check;
+ALTER TABLE public.users ADD CONSTRAINT users_account_status_check
+  CHECK (account_status IN (
+    'anonymous', 'pending_verification', 'verification_deferred', 'active', 'disabled'
+  ));
 
 DO $$ BEGIN
   ALTER TABLE public.users ADD CONSTRAINT users_profile_sync_status_check
