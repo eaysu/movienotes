@@ -3293,6 +3293,24 @@ async def _schedule_entry_sync(account: Account, settings, service) -> str:
     """Queue one durable, throttled background refresh for an app entry."""
     if account.id in _entry_sync_tasks:
         return "running"
+
+    # A member who entered through the temporary bio-verification fallback
+    # has no bootstrap snapshot yet.  Do not let the lightweight entry pass
+    # (which also needs Letterboxd) be their only chance to start importing:
+    # create the durable full job first.  It checkpoints progress and retries
+    # after an upstream block, whereas the entry pass is intentionally
+    # best-effort and may be abandoned with the HTTP request.
+    try:
+        existing_job = await asyncio.to_thread(service.get_sync_job, account.id)
+        if profile_sync.job_needs_full_sweep(existing_job):
+            job = await profile_sync.ensure_started(
+                _SyncPipeline(settings), service, account, scope="full"
+            )
+            if job:
+                return "full_sync_queued"
+    except Exception:  # noqa: BLE001 - app entry must remain available
+        log.warning("entry full sync queue failed account=%s", account.id, exc_info=True)
+
     client, _cache = _make_cache(settings)
     pcache = _make_persistent_cache(settings, client)
     recent = await asyncio.to_thread(
@@ -4189,7 +4207,19 @@ async def sync_my_profile(
         except ScrapeError as exc:
             _raise_scrape_http(exc)
 
-    result = await _provisional_profile_sync(account, settings, service, force=force)
+    try:
+        result = await _provisional_profile_sync(account, settings, service, force=force)
+    except AccessBlockedError as exc:
+        # The fast Fav 4 bootstrap is allowed to fail without keeping the
+        # member out of the app.  It must still leave behind a durable full
+        # import job; otherwise a user who chooses "continue" has no later
+        # path for their films and favorites to arrive.
+        if full_sync_available:
+            with contextlib.suppress(Exception):
+                await profile_sync.ensure_started(
+                    _SyncPipeline(settings), service, account, scope="full", force=force
+                )
+        _raise_scrape_http(exc)
     if refreshed_watchlist_count is not None:
         result["watchlist_count"] = refreshed_watchlist_count
 

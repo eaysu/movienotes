@@ -362,6 +362,60 @@ def test_profile_visit_does_not_start_a_daily_incremental_scrape():
     starter.assert_not_awaited()
 
 
+def test_entry_sync_queues_a_durable_full_import_when_no_archive_exists():
+    """Deferred-bio accounts must not be left with an empty profile forever."""
+    account = _account()
+    cache = SimpleNamespace(get=lambda *_args: None, set=lambda *_args: None)
+    service = SimpleNamespace(get_sync_job=lambda _uid: None)
+    starter = AsyncMock(return_value={"state": "queued", "scope": "full"})
+    lightweight = AsyncMock()
+    with (
+        patch("app.main._make_cache", return_value=(None, object())),
+        patch("app.main._make_persistent_cache", return_value=cache),
+        patch("app.main.profile_sync.ensure_started", new=starter),
+        patch("app.main._run_entry_sync", new=lightweight),
+    ):
+        status = asyncio.run(main._schedule_entry_sync(account, _settings(), service))
+
+    assert status == "full_sync_queued"
+    starter.assert_awaited_once()
+    lightweight.assert_not_awaited()
+
+
+def test_blocked_bootstrap_still_queues_the_full_import():
+    account = _account()
+    service = SimpleNamespace(
+        current_account=lambda _token: account,
+        check_schema=lambda: True,
+        check_sync_schema=lambda: True,
+        get_sync_job=lambda _uid: None,
+        count_watched_films=lambda _uid: 0,
+        record_activity_event=lambda *_args: None,
+    )
+    starter = AsyncMock(return_value={"state": "queued", "scope": "full"})
+    with (
+        patch("app.main.get_settings", return_value=_settings()),
+        patch("app.main._auth_service", return_value=service),
+        patch("app.main._enforce_heavy_rate_limit", new=AsyncMock()),
+        patch(
+            "app.main._provisional_profile_sync",
+            new=AsyncMock(side_effect=AccessBlockedError("Letterboxd HTTP 403", status=403)),
+        ),
+        patch("app.main.profile_sync.ensure_started", new=starter),
+        TestClient(main.app, base_url="https://testserver") as client,
+    ):
+        response = client.post(
+            "/api/profile/sync",
+            headers={
+                "Cookie": "mb_access=deferred-sync-token; mb_csrf=csrf-token",
+                "X-CSRF-Token": "csrf-token",
+            },
+        )
+
+    assert response.status_code == 503
+    starter.assert_awaited_once()
+
+
 def test_entry_sync_is_queued_without_holding_the_signed_in_shell():
     account = _account()
     fake_service = SimpleNamespace(current_account=lambda _token: account)

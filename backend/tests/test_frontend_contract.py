@@ -1438,7 +1438,7 @@ def test_shell_asset_content_changes_force_a_version_bump():
     files that no longer existed.
     """
     expected = {
-        "js/app.js": "716bae3c30c43461f6d57bb0b6b956e61168f31ddaf6ad351401542e2c35b74b",
+        "js/app.js": "edfc7f6dad34d8cb3dcc2fad95aa2f65ae0eb874a640a77a05dc2ed6c3aa8903",
         "app.css": "5f763f94b8393ca456d31cb0cb9ded070201fe3b8dca83ac33350d958625287a",
         "js/share-cards.js": "75ec636dc005a1728c5039ba1d888fca802b0464d8f0492e47b5c1640692e904",
         "js/i18n.js": "42c6fc681904dd21f35bb880b81b3156fe37ef45ec6f401a0fe57b769bcf2643",
@@ -1480,7 +1480,7 @@ def test_every_app_shell_asset_has_an_explicit_immutable_version():
     api_version = "v=20260920.23"
     css_version = "v=20260920.22"
     assert f"/static/app.css?{css_version}" in html
-    assert "/static/js/app.js?v=20260920.23" in html
+    assert "/static/js/app.js?v=20260920.24" in html
     assert "./i18n.js?v=20260920.23" in app_js
     assert app_js.count(f"?{dependency_version}") == 2
     assert f"./api.js?{api_version}" in app_js

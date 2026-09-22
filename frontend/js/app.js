@@ -4181,7 +4181,7 @@ function queueEntrySync() {
   apiJSON('/api/profile/entry-sync', {
     method: 'POST', headers: csrfHeaders(),
   }).then(result => {
-    if (result.status !== 'queued') return;
+    if (!['queued', 'full_sync_queued'].includes(result.status)) return;
     // Let the background worker finish its small Letterboxd pass, then make
     // any changed Fav 4 or taste snapshot visible without a manual reload.
     setTimeout(async () => {
