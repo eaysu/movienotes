@@ -962,7 +962,8 @@ AS $$
 BEGIN
   IF NOT EXISTS (
     SELECT 1 FROM public.users
-    WHERE id = p_user_id AND account_status = 'active'
+    WHERE id = p_user_id
+      AND account_status IN ('active', 'verification_deferred')
   ) THEN
     RAISE EXCEPTION 'active account not found';
   END IF;
@@ -1063,7 +1064,9 @@ DECLARE
   v_count INTEGER;
 BEGIN
   IF NOT EXISTS (
-    SELECT 1 FROM public.users WHERE id = p_user_id AND account_status = 'active'
+    SELECT 1 FROM public.users
+    WHERE id = p_user_id
+      AND account_status IN ('active', 'verification_deferred')
   ) THEN
     RAISE EXCEPTION 'active account not found';
   END IF;

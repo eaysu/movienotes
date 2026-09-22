@@ -1164,6 +1164,13 @@ def test_deferred_bio_verification_status_is_in_the_database_schema():
     assert "'verification_deferred'" in schema
 
 
+def test_deferred_accounts_can_receive_private_profile_sync_data():
+    """The fallback remains private, but its own film import must work."""
+    schema = (Path(__file__).parents[1] / "supabase" / "schema.sql").read_text()
+
+    assert schema.count("account_status IN ('active', 'verification_deferred')") >= 2
+
+
 def test_bulk_letterbox_open_is_a_script_not_a_schema_line():
     """Re-applying the schema must not undo someone's choice to close it."""
     schema = (Path(__file__).parents[1] / "supabase" / "schema.sql").read_text()
