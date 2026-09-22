@@ -3,6 +3,7 @@ from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 from app import profile_sync
+from app.scraper import AccessBlockedError
 
 
 def _iso(dt):
@@ -485,6 +486,28 @@ class RunnerTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("blocked", service.job["last_error"])
         self.assertTrue(service.job["backoff_until"])
         self.assertFalse(profile_sync.is_running(7))
+
+    async def test_upstream_access_block_uses_the_short_retry_backoff(self):
+        service = FakeService()
+        service.job = {
+            "user_id": 7,
+            "state": "queued",
+            "phase": "diary",
+            "scope": "full",
+            "cursor_page": 1,
+            "films_processed": 0,
+            "films_total": 0,
+        }
+
+        class Blocked(FakePipeline):
+            async def scrape_watched_window(self, username, start_page):
+                raise AccessBlockedError("Letterboxd HTTP 403", status=403)
+
+        started = datetime.now(timezone.utc)
+        await profile_sync.run_job(Blocked(service, {}), service, _account())
+        retry_at = datetime.fromisoformat(service.job["backoff_until"])
+
+        self.assertLessEqual(retry_at - started, timedelta(minutes=3))
 
 
 class TruncatedCrawlTests(unittest.IsolatedAsyncioTestCase):

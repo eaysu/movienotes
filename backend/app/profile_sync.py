@@ -19,6 +19,8 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
+from .scraper import AccessBlockedError
+
 log = logging.getLogger("uvicorn.error")
 
 # `/films/` grid pages fetched per crawl step (~72 posters per page).
@@ -275,7 +277,7 @@ async def run_job(pipeline, service, account) -> None:
         with contextlib.suppress(Exception):
             backoff = (
                 SCRAPE_RETRY_BACKOFF
-                if isinstance(exc, IncompleteScrapeError)
+                if isinstance(exc, (IncompleteScrapeError, AccessBlockedError))
                 else FAILURE_BACKOFF
             )
             await asyncio.to_thread(
