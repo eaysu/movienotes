@@ -281,7 +281,7 @@ def test_existing_film_archive_is_never_replaced_by_an_empty_bootstrap_snapshot(
     """A failed incremental job must not make a mature account look new."""
     account = _account()
     saved = {
-        "taste": {"sample_size": 564, "algorithm_version": "taste-v5-fav4-top5-directors"},
+        "taste": {"sample_size": 564, "algorithm_version": "taste-v4-fav4-directors"},
         "favorite_films": [{"slug": "a-film", "title": "A Film"}],
     }
     fake_service = SimpleNamespace(
@@ -302,7 +302,7 @@ def test_existing_film_archive_is_never_replaced_by_an_empty_bootstrap_snapshot(
 def test_existing_archive_sync_skips_heavy_limit_and_does_not_restart_incremental_crawl():
     account = _account()
     stored = {
-        "taste": {"sample_size": 564, "algorithm_version": "taste-v5-fav4-top5-directors"},
+        "taste": {"sample_size": 564, "algorithm_version": "taste-v4-fav4-directors"},
         "favorite_films": [],
     }
     job = {
@@ -534,6 +534,41 @@ def test_registration_verification_can_issue_session_without_second_login_reques
     scrape.assert_awaited_once_with(
         "film_fan", max_retries=1, resolve_posters=False
     )
+
+
+def test_bio_check_keeps_signup_moving_when_letterboxd_blocks_the_profile_read():
+    account = _account()
+    session = AuthSession(
+        account=account,
+        access_token="access-token",
+        refresh_token="refresh-token",
+        expires_in=3600,
+    )
+    fake_service = SimpleNamespace(
+        defer_ownership_verification=lambda *_args, **_kwargs: account,
+        login=lambda *_args, **_kwargs: session,
+    )
+    scrape = AsyncMock(side_effect=AccessBlockedError("Letterboxd HTTP 403", status=403))
+    with (
+        patch("app.main.get_settings", return_value=_settings(scrape_max_retries=1)),
+        patch("app.main._auth_service", return_value=fake_service),
+        patch("app.main._enforce_auth_rate_limit", new=AsyncMock()),
+        patch("app.main.scrape_profile", new=scrape),
+        TestClient(main.app, base_url="https://testserver") as client,
+    ):
+        response = client.post(
+            "/api/auth/register/verify",
+            json={
+                "username": "film_fan",
+                "code": "MOVIENOTES-ABC123",
+                "password": "long-enough-password",
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.json()["verification_deferred"] is True
+    assert response.json()["logged_in"] is True
+    assert any(cookie.startswith("mb_access=") for cookie in response.headers.get_list("set-cookie"))
 
 
 def test_authenticated_user_can_create_consent_based_blend_request():

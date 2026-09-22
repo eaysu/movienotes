@@ -14,7 +14,31 @@ import time
 from dataclasses import asdict, dataclass, field
 from typing import Optional
 
-from curl_cffi.requests import AsyncSession
+try:
+    from curl_cffi.requests import AsyncSession
+except ImportError:  # pragma: no cover - only for minimal/local runtimes
+    import httpx
+
+    class AsyncSession:  # type: ignore[no-redef]
+        """Compatibility client when curl-cffi's native library is unavailable.
+
+        Production uses curl-cffi for its browser TLS fingerprint. Keeping this
+        tiny fallback means a broken optional native wheel cannot take the app
+        (or its scraper tests) down before a request is even attempted.
+        """
+
+        def __init__(self, **_kwargs):
+            self._client = httpx.AsyncClient(follow_redirects=True)
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            await self._client.aclose()
+
+        async def get(self, url: str, **kwargs):
+            kwargs.pop("impersonate", None)
+            return await self._client.get(url, **kwargs)
 from bs4 import BeautifulSoup
 
 log = logging.getLogger("moviebox")
@@ -258,6 +282,33 @@ async def _fetch_profile_with_fresh_sessions(
                     impersonate=impersonate,
                 )
                 last_status = response.status_code
+                if last_status in (403, 429):
+                    # The public RSS feed is served from a lighter Letterboxd
+                    # path and reliably sets a fresh site cookie even when the
+                    # rendered profile page gets a Cloudflare challenge. Only
+                    # use it after a block, then retry the same tiny profile
+                    # read in this new browser session. This path is for bio
+                    # verification, not film crawling, so it adds no work to
+                    # successful syncs.
+                    rss = await _budgeted_get(
+                        session,
+                        f"{profile_url}rss/",
+                        headers={
+                            "Accept": "application/rss+xml,application/xml;q=0.9,*/*;q=0.8",
+                            "Referer": profile_url,
+                        },
+                        timeout=10,
+                        impersonate=impersonate,
+                    )
+                    if 200 <= rss.status_code < 300:
+                        response = await _budgeted_get(
+                            session,
+                            profile_url,
+                            headers={**_NAV_HEADERS, "Referer": f"{BASE_URL}/"},
+                            timeout=14,
+                            impersonate=impersonate,
+                        )
+                        last_status = response.status_code
         except Exception as exc:
             last_status = -1
             log.warning(

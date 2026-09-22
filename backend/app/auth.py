@@ -619,6 +619,49 @@ class AuthService:
         self._audit(service, int(row["id"]), f"{kind}_verified", ip_hash)
         return self._account(updated)
 
+    def defer_ownership_verification(
+        self, username: str, code: str, *, ip_hash: str = ""
+    ) -> Account:
+        """Open a private, provisional session when Letterboxd blocks a bio read.
+
+        The user must still possess the one-time code we issued. The account is
+        deliberately kept out of every active/social query until a later bio
+        check can promote it, so a temporary upstream block never strands a
+        legitimate signup or turns into an ownership bypass.
+        """
+        service = self._service_client()
+        row = self._account_row_by_username(service, username)
+        if row is None or not row.get("auth_user_id"):
+            raise VerificationError("Doğrulama başarısız.")
+        challenge = self._active_challenge(service, int(row["id"]), "register")
+        if challenge is None:
+            raise VerificationError("Doğrulama başarısız.")
+        if int(challenge.get("attempts") or 0) >= self.MAX_CHALLENGE_ATTEMPTS:
+            raise VerificationError("Doğrulama deneme sınırına ulaşıldı.")
+        expires = datetime.fromisoformat(challenge["expires_at"].replace("Z", "+00:00"))
+        if expires <= datetime.now(timezone.utc):
+            raise VerificationExpiredError("Doğrulama kodunun süresi doldu.")
+        if not hmac.compare_digest(challenge["code_hash"], self.challenge_hash(code)):
+            service.table("auth_challenges").update(
+                {"attempts": int(challenge.get("attempts") or 0) + 1}
+            ).eq("id", challenge["id"]).execute()
+            raise OwnershipProofError("Doğrulama kodu geçersiz.")
+
+        now = datetime.now(timezone.utc).isoformat()
+        updated = self._first(
+            service.table("users").update(
+                {
+                    "account_status": "verification_deferred",
+                    "profile_sync_status": "pending",
+                    "updated_at": now,
+                }
+            ).eq("id", row["id"]).execute()
+        ) or self._account_row_by_username(service, username)
+        if updated is None:
+            raise TransientStorageError("Doğrulama durumu kaydedilemedi.")
+        self._audit(service, int(row["id"]), "register_verification_deferred", ip_hash)
+        return self._account(updated)
+
     def start_password_reset(
         self, username: str, *, ip_hash: str = ""
     ) -> RegistrationChallenge:
@@ -670,7 +713,7 @@ class AuthService:
             if (
                 response.session is None
                 or row is None
-                or row.get("account_status") != "active"
+                or row.get("account_status") not in {"active", "verification_deferred"}
             ):
                 raise InvalidCredentialsError("Kullanıcı adı veya parola hatalı.")
         except InvalidCredentialsError:
@@ -702,7 +745,7 @@ class AuthService:
             )
             result = service.table("users").select(columns).eq(
                 "auth_user_id", auth_user_id
-            ).eq("account_status", "active").limit(1).execute()
+            ).in_("account_status", ["active", "verification_deferred"]).limit(1).execute()
             row = self._first(result)
             if row is None:
                 raise InvalidCredentialsError("Oturum geçersiz.")

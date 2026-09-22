@@ -8,24 +8,24 @@ import {
   finishApiRequest,
   scrapeErrorMessage,
   streamErrorMessage,
-} from './api.js?v=20260920.22';
+} from './api.js?v=20260920.23';
 import {
   cookieValue,
   csrfHeaders,
   setAuthMessage,
   setAuthMode,
   setPasswordVisibility,
-} from './auth.js?v=20260920.22';
-import { directorAvatar, directorFilmGrid, directorFilmTile } from './profile.js?v=20260920.22';
+} from './auth.js?v=20260920.23';
+import { directorAvatar, directorFilmGrid, directorFilmTile } from './profile.js?v=20260920.23';
 import { animateScore, getScoreInfo } from './blend.js?v=20260902.15';
-import { createRecommendationCards } from './recommendations.js?v=20260920.22';
+import { createRecommendationCards } from './recommendations.js?v=20260920.23';
 import {
   getLocale,
   initI18n,
   localePreference,
   setLocalePreference,
   t,
-} from './i18n.js?v=20260920.22';
+} from './i18n.js?v=20260920.23';
 
 initI18n();
 
@@ -34,7 +34,7 @@ const uiLocale = () => (getLocale() === 'en' ? 'en-US' : 'tr-TR');
 let _shareCardsModule;
 function loadShareCardsModule() {
   if (!_shareCardsModule) {
-    _shareCardsModule = import('./share-cards.js?v=20260920.22');
+    _shareCardsModule = import('./share-cards.js?v=20260920.23');
   }
   return _shareCardsModule;
 }
@@ -1419,6 +1419,7 @@ let _persistedProfile = null;
 let _lastUnreadNotificationCount = null;
 let _feedNotificationPollTimer = null;
 let _verification = null;
+let _deferredVerificationTimer = null;
 let _resetChallenge = null;
 // Parola, kayıt sırasında girildiği haliyle bio doğrulaması bitene kadar
 // bellekte tutulur; doğrulama başarılıysa oturum otomatik açılır, sonra silinir.
@@ -5628,7 +5629,8 @@ async function verifyRegistration() {
       }),
     });
     clearReassurance();
-    _verification = null;
+    const verificationDeferred = Boolean(data.verification_deferred);
+    if (!verificationDeferred) _verification = null;
 
     // Doğrulama ve oturum açma artık aynı istekte tamamlanıyor. Eski bir
     // sunucu yanıtı logged_in döndürmezse manuel giriş ekranına düş.
@@ -5636,6 +5638,12 @@ async function verifyRegistration() {
       _pendingRegPassword = null;
       setAuthMessage(null);
       enterApp(data.account, { fromRegistration: true });
+      if (verificationDeferred) {
+        setTimeout(() => setIdleNotice(
+          data.message || 'Letterboxd bio kontrolü sıraya alındı; bu sırada yalnızca sana açık şekilde devam edebilirsin.'
+        ), 300);
+        scheduleDeferredRegistrationVerification();
+      }
       return;
     }
     _pendingRegPassword = null;
@@ -5648,6 +5656,37 @@ async function verifyRegistration() {
     clearReassurance();
     button.disabled = false;
   }
+}
+
+function scheduleDeferredRegistrationVerification() {
+  if (_deferredVerificationTimer) clearTimeout(_deferredVerificationTimer);
+  if (!_verification) return;
+  const expiresAt = Date.parse(_verification.expires_at || '');
+  const remaining = Number.isFinite(expiresAt) ? expiresAt - Date.now() : 0;
+  if (remaining < 15_000) return;
+  _deferredVerificationTimer = setTimeout(async () => {
+    if (!_verification) return;
+    try {
+      const data = await apiJSON('/api/auth/register/verify', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          username: _verification.username,
+          code: _verification.verification_code,
+        }),
+      });
+      if (data.verification_deferred) {
+        scheduleDeferredRegistrationVerification();
+        return;
+      }
+      _verification = null;
+      if (data.account) applyAccount(data.account);
+      setIdleNotice(t('Letterboxd bio kontrolü tamamlandı. Hesabın artık tamamen doğrulandı.'));
+    } catch (_) {
+      // A still-pending bio edit and a temporary upstream block are both
+      // expected here. The member is already in the app, so retry quietly.
+      scheduleDeferredRegistrationVerification();
+    }
+  }, Math.min(60_000, Math.max(15_000, remaining - 5_000)));
 }
 
 // Deneme oturumu: yazılan ad taranır ve o profil bu oturumun kimliği olur.

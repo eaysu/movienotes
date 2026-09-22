@@ -265,9 +265,36 @@ class ProfileRetryTests(unittest.IsolatedAsyncioTestCase):
             [url for session in sessions for url in session.urls],
             [
                 "https://letterboxd.com/sample_user/",
+                "https://letterboxd.com/sample_user/rss/",
                 "https://letterboxd.com/sample_user/",
             ],
         )
+
+    async def test_blocked_profile_retries_after_a_successful_rss_cookie_warmup(self):
+        class FakeSession:
+            def __init__(self, **_kwargs):
+                self.profile_requests = 0
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_args):
+                return None
+
+            async def get(self, url, **_kwargs):
+                if url.endswith("/rss/"):
+                    return SimpleNamespace(status_code=200, text="<rss/>")
+                self.profile_requests += 1
+                status = 403 if self.profile_requests == 1 else 200
+                return SimpleNamespace(status_code=status, text="profile")
+
+        with patch("app.scraper.AsyncSession", FakeSession):
+            response, status = await _fetch_profile_with_fresh_sessions(
+                "sample_user", max_retries=1
+            )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(response.text, "profile")
 
     async def test_review_full_text_requests_are_bounded_and_parallel(self):
         reviews = """

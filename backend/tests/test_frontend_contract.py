@@ -1438,10 +1438,10 @@ def test_shell_asset_content_changes_force_a_version_bump():
     files that no longer existed.
     """
     expected = {
-        "js/app.js": "3ac191d9c2aaa1a8692f1806db377fd35c46a080977892d9ba3d10f765771bdc",
+        "js/app.js": "716bae3c30c43461f6d57bb0b6b956e61168f31ddaf6ad351401542e2c35b74b",
         "app.css": "5f763f94b8393ca456d31cb0cb9ded070201fe3b8dca83ac33350d958625287a",
-        "js/share-cards.js": "737b2b5a762ce1b9762f8d79600a5191971c39b99af5db1c81c6b85a422636e8",
-        "js/i18n.js": "cfbaf8a1a85d14893dc61b9d09210566081e907de0ef5c36dc8c538875150a01",
+        "js/share-cards.js": "75ec636dc005a1728c5039ba1d888fca802b0464d8f0492e47b5c1640692e904",
+        "js/i18n.js": "42c6fc681904dd21f35bb880b81b3156fe37ef45ec6f401a0fe57b769bcf2643",
         "site.webmanifest": "7a7de349179ed9f226d38632dfde5a8478edd10305972ea52641b0dc6aa7f405",
         "movienotes-mark.png": "850aa9117aa52768952843f8e2c410c0c17868877d81b2058274290373b4ee1e",
         "movienotes-icon-192.png": "3b04c52ffd23799ce424f1acefd0a1d7c386b8c968b09be9bd5c87b623c6ac12",
@@ -1477,24 +1477,24 @@ def test_every_app_shell_asset_has_an_explicit_immutable_version():
     source_css = (FRONTEND / "css" / "source.css").read_text()
 
     dependency_version = "v=20260902.15"
-    api_version = "v=20260920.22"
+    api_version = "v=20260920.23"
     css_version = "v=20260920.22"
     assert f"/static/app.css?{css_version}" in html
-    assert "/static/js/app.js?v=20260920.22" in html
-    assert "./i18n.js?v=20260920.22" in app_js
+    assert "/static/js/app.js?v=20260920.23" in html
+    assert "./i18n.js?v=20260920.23" in app_js
     assert app_js.count(f"?{dependency_version}") == 2
     assert f"./api.js?{api_version}" in app_js
-    assert "./recommendations.js?v=20260920.22" in app_js
-    assert "./share-cards.js?v=20260920.22" in app_js
-    assert "./auth.js?v=20260920.22" in app_js
+    assert "./recommendations.js?v=20260920.23" in app_js
+    assert "./share-cards.js?v=20260920.23" in app_js
+    assert "./auth.js?v=20260920.23" in app_js
     assert f"./dom.js?{dependency_version}" in auth_js
-    assert "./i18n.js?v=20260920.22" in auth_js
+    assert "./i18n.js?v=20260920.23" in auth_js
     assert f"./dom.js?{dependency_version}" in profile_js
-    assert "./i18n.js?v=20260920.22" in profile_js
+    assert "./i18n.js?v=20260920.23" in profile_js
     assert f"./dom.js?{dependency_version}" in recommendations_js
-    assert "./i18n.js?v=20260920.22" in recommendations_js
+    assert "./i18n.js?v=20260920.23" in recommendations_js
     assert f"./api.js?{api_version}" in share_js
-    assert "./i18n.js?v=20260920.22" in share_js
+    assert "./i18n.js?v=20260920.23" in share_js
     assert f"criterion-closet-bg.jpg?{dependency_version}" in source_css
 
 
@@ -1564,7 +1564,7 @@ def test_png_share_renderer_is_lazy_loaded_on_first_share_action():
 
     imports = app_js.split("// ── Cinema facts", 1)[0]
     assert "from './share-cards.js" not in imports
-    assert "import('./share-cards.js?v=20260920.22')" in imports
+    assert "import('./share-cards.js?v=20260920.23')" in imports
     assert "const shareCards = await loadShareCardsModule();" in app_js
 
 

@@ -313,6 +313,7 @@ const EN = Object.freeze({
   'Topluluk notları': 'Community notes', 'Bir filmde ara': 'Search for a film', 'Toplulukta notu olan filmlerde ara': 'Search films with community notes',
   'Takip isteği güncellenemedi.': 'Follow request could not be updated.', 'Mektup kutusu açılamadı.': 'Letterbox could not be opened.',
   'Filmler yükleniyor…': 'Films are loading…', 'Filmler yüklenemedi; tekrar dene.': 'Films could not be loaded; try again.',
+  'Letterboxd bio kontrolü tamamlandı. Hesabın artık tamamen doğrulandı.': 'Your Letterboxd bio has been checked. Your account is now fully verified.',
   'İzleme geçmişin ve Fav 4 filmlerin analiz ediliyor…': 'Your viewing history and Fav 4 films are being analysed…',
   'Kısa ve tatlı bir geçmişin var. Analizin birazdan hazır, daha esnemeye fırsat bulamadan döneriz.': 'You have a short and sweet history. Your analysis will be ready soon.',
   'Dolu dolu bir arşiv! Filmleri tek tek okuyoruz, yalnızca bir-iki dakika. Sen keyfine bak.': 'That is a rich archive! We are reading the films one by one; it will only take a minute or two.',

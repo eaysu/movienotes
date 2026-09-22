@@ -1707,6 +1707,36 @@ async def register_verify(
                 # fallback if the combined auth handshake has a transient
                 # failure, instead of making the user repeat verification.
                 session = None
+    except AccessBlockedError:
+        # A public bio is still the ownership proof, but Cloudflare blocks a
+        # Render IP from time to time. Do not trap a member on this screen:
+        # open a private provisional session and keep the account out of every
+        # active/social surface until a later successful bio read promotes it.
+        try:
+            account = await asyncio.to_thread(
+                _auth_service().defer_ownership_verification,
+                req.username,
+                req.code.strip(),
+                ip_hash=_ip_hash(request),
+            )
+            if req.password is not None:
+                session = await asyncio.to_thread(
+                    _auth_service().login,
+                    req.username,
+                    req.password,
+                    ip_hash=_ip_hash(request),
+                )
+        except AuthError as exc:
+            _raise_auth_http(exc)
+        if session is not None:
+            _set_session_cookies(response, session, remember=True)
+        return {
+            "ok": True,
+            "account": account.__dict__,
+            "logged_in": session is not None,
+            "verification_deferred": True,
+            "message": "Letterboxd bio kontrolü geçici olarak ertelendi; hesabın yalnızca sana açık şekilde devam ediyor.",
+        }
     except ScrapeError as exc:
         _raise_scrape_http(exc)
     except ValueError as exc:
