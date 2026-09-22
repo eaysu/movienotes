@@ -1,3 +1,4 @@
+import asyncio
 import unittest
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
@@ -508,6 +509,54 @@ class RunnerTests(unittest.IsolatedAsyncioTestCase):
         retry_at = datetime.fromisoformat(service.job["backoff_until"])
 
         self.assertLessEqual(retry_at - started, timedelta(minutes=3))
+
+    async def test_waiting_job_claims_lease_only_after_execution_slot_opens(self):
+        class TrackingService(FakeService):
+            def __init__(self):
+                super().__init__()
+                self.claims = []
+
+            def claim_sync_job(self, uid, lease_token, lease_seconds):
+                self.claims.append(uid)
+                return super().claim_sync_job(uid, lease_token, lease_seconds)
+
+        class GatePipeline(FakePipeline):
+            def __init__(self, service, entered, release):
+                super().__init__(service, {})
+                self.entered = entered
+                self.release = release
+
+            async def scrape_watched_window(self, username, start_page):
+                self.entered.set()
+                await self.release.wait()
+                return []
+
+        first_service = TrackingService()
+        first_service.job = {
+            "user_id": 7, "state": "queued", "phase": "diary", "scope": "full",
+            "cursor_page": 1, "films_processed": 0,
+        }
+        second_service = TrackingService()
+        second_service.job = {
+            "user_id": 8, "state": "queued", "phase": "diary", "scope": "full",
+            "cursor_page": 1, "films_processed": 0,
+        }
+        entered = asyncio.Event()
+        release = asyncio.Event()
+        first = asyncio.create_task(
+            profile_sync.run_job(GatePipeline(first_service, entered, release), first_service, _account())
+        )
+        await asyncio.wait_for(entered.wait(), timeout=1)
+        second = asyncio.create_task(
+            profile_sync.run_job(FakePipeline(second_service, {}), second_service, _account(8, "other"))
+        )
+        await asyncio.sleep(0)
+
+        self.assertEqual(first_service.claims, [7])
+        self.assertEqual(second_service.claims, [])
+        release.set()
+        await asyncio.gather(first, second)
+        self.assertEqual(second_service.claims, [8])
 
 
 class TruncatedCrawlTests(unittest.IsolatedAsyncioTestCase):

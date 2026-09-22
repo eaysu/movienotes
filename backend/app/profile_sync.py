@@ -236,60 +236,64 @@ def start(pipeline, service, account) -> None:
 async def run_job(pipeline, service, account) -> None:
     uid = account.id
     lease_token = str(uuid.uuid4())
-    claimed = await asyncio.to_thread(
-        service.claim_sync_job, uid, lease_token, LEASE_SECONDS
-    )
-    if not claimed:
-        log.warning("profile_sync lease BUSY user=%s", uid)
-        return
-    job = {}
-    with contextlib.suppress(Exception):
-        job = await asyncio.to_thread(service.get_sync_job, uid) or {}
-    await _record_event(
-        service,
-        uid,
-        "profile_sync_started",
-        {"scope": job.get("scope") or "full"},
-    )
-    try:
-        async with _job_sem:
-            await _crawl(pipeline, service, account, lease_token=lease_token)
-        finished = await asyncio.to_thread(service.get_sync_job, uid) or {}
-        await _record_event(
-            service,
-            uid,
-            "profile_sync_completed",
-            {
-                "scope": finished.get("scope") or job.get("scope") or "full",
-                "films": int(finished.get("films_processed") or 0),
-            },
+    # Claim only after a process-local execution slot is available. Claiming
+    # first made every queued task look ``running`` and hold a six-minute DB
+    # lease while it merely waited behind another user. That obscured real
+    # progress and could starve the next checkpoint after a rate-limit block.
+    async with _job_sem:
+        claimed = await asyncio.to_thread(
+            service.claim_sync_job, uid, lease_token, LEASE_SECONDS
         )
-    except asyncio.CancelledError:
-        raise
-    except Exception as exc:  # keep the last good snapshot; retry after a cooldown
-        log.warning("profile_sync job FAILED user=%s: %s", uid, exc)
-        await _record_event(
-            service,
-            uid,
-            "profile_sync_failed",
-            {"error": type(exc).__name__},
-        )
+        if not claimed:
+            log.warning("profile_sync lease BUSY user=%s", uid)
+            return
+        job = {}
         with contextlib.suppress(Exception):
-            backoff = (
-                SCRAPE_RETRY_BACKOFF
-                if isinstance(exc, (IncompleteScrapeError, AccessBlockedError))
-                else FAILURE_BACKOFF
-            )
-            await asyncio.to_thread(
-                service.touch_sync_job,
+            job = await asyncio.to_thread(service.get_sync_job, uid) or {}
+        await _record_event(
+            service,
+            uid,
+            "profile_sync_started",
+            {"scope": job.get("scope") or "full"},
+        )
+        try:
+            await _crawl(pipeline, service, account, lease_token=lease_token)
+            finished = await asyncio.to_thread(service.get_sync_job, uid) or {}
+            await _record_event(
+                service,
                 uid,
-                owned_by=lease_token,
-                state="failed",
-                last_error=str(exc)[:400],
-                backoff_until=(_now() + backoff).isoformat(),
-                lease_token=None,
-                lease_expires_at=None,
+                "profile_sync_completed",
+                {
+                    "scope": finished.get("scope") or job.get("scope") or "full",
+                    "films": int(finished.get("films_processed") or 0),
+                },
             )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # keep the last good snapshot; retry after a cooldown
+            log.warning("profile_sync job FAILED user=%s: %s", uid, exc)
+            await _record_event(
+                service,
+                uid,
+                "profile_sync_failed",
+                {"error": type(exc).__name__},
+            )
+            with contextlib.suppress(Exception):
+                backoff = (
+                    SCRAPE_RETRY_BACKOFF
+                    if isinstance(exc, (IncompleteScrapeError, AccessBlockedError))
+                    else FAILURE_BACKOFF
+                )
+                await asyncio.to_thread(
+                    service.touch_sync_job,
+                    uid,
+                    owned_by=lease_token,
+                    state="failed",
+                    last_error=str(exc)[:400],
+                    backoff_until=(_now() + backoff).isoformat(),
+                    lease_token=None,
+                    lease_expires_at=None,
+                )
 
 
 async def _touch(service, user_id: int, owner_token: str | None, **fields) -> None:
