@@ -269,6 +269,10 @@ class SseIntegrationTests(unittest.TestCase):
             patch("app.main._load_user_films", side_effect=load),
             patch("app.main.rank_watchlist", autospec=True, return_value=[film]),
             patch("app.main.rank_candidates", new=AsyncMock(return_value=result)),
+            # This checks endpoint quotas, not Letterboxd's film-page service.
+            # Keep the clock-sensitive burst assertion independent of the
+            # network and of the scraper's intentional pacing policy.
+            patch("app.main.scrape_film_rating", new=AsyncMock(return_value=None)),
             TestClient(main.app) as client,
         ):
             first = client.post("/api/recommend", json={"username": "film_fan"}, headers=headers)

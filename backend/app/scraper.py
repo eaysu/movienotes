@@ -49,19 +49,34 @@ _scrape_flights: dict[tuple, asyncio.Task] = {}
 _scrape_flight_lock = asyncio.Lock()
 
 
+class LetterboxdCircuitOpenError(RuntimeError):
+    """Raised locally while the shared, upstream-protection circuit is open."""
+
+    def __init__(self, retry_after: float):
+        super().__init__("Letterboxd request circuit is temporarily open")
+        self.retry_after = retry_after
+
+
 class _LetterboxdRequestBudget:
     """Process-wide adaptive budget for every request to Letterboxd.
 
-    Normal traffic may use up to three concurrent sockets. A 403/429 immediately
-    serializes traffic and opens a short circuit; sustained successful responses
-    cautiously restore capacity. This protects profile syncs and recommendations
-    from independently overwhelming the same upstream host.
+    Requests are deliberately serialized. A 403/429 opens a process-wide
+    circuit for long enough that a queued sync can checkpoint and retry later,
+    instead of turning one upstream block into many near-identical requests.
+    This protects profile syncs, entry syncs, and recommendation jobs from
+    independently overwhelming the same upstream host.
     """
 
-    def __init__(self, max_concurrency: int = 3, min_interval: float = 0.18):
+    def __init__(
+        self,
+        max_concurrency: int = 1,
+        min_interval: float = 2.5,
+        block_seconds: float = 120.0,
+    ):
         self.max_concurrency = max_concurrency
         self.current_limit = max_concurrency
         self.min_interval = min_interval
+        self.block_seconds = block_seconds
         self._active = 0
         self._next_allowed = 0.0
         self._blocked_until = 0.0
@@ -74,6 +89,8 @@ class _LetterboxdRequestBudget:
             delay = 0.0
             async with self._condition:
                 now = time.monotonic()
+                if now < self._blocked_until:
+                    raise LetterboxdCircuitOpenError(self._blocked_until - now)
                 delay = max(self._blocked_until - now, self._next_allowed - now, 0.0)
                 if delay <= 0 and self._active < self.current_limit:
                     self._active += 1
@@ -96,12 +113,10 @@ class _LetterboxdRequestBudget:
                     self._penalties = min(self._penalties + 1, 5)
                     self._success_streak = 0
                     self.current_limit = 1
-                    # A block is a signal to checkpoint the crawl, not to keep a
-                    # user waiting for minutes inside one HTTP request.  The sync
-                    # runner resumes from the blocked page on its next attempt.
-                    # Keep the shared circuit short enough to protect Letterboxd
-                    # without multiplying a few 403s into multi-minute waits.
-                    cooldown = min(12.0, 2.0 * (2 ** (self._penalties - 1)))
+                    # A block is a signal to checkpoint every crawl, not to
+                    # retry through it.  This intentionally matches the durable
+                    # sync retry window so a job resumes from its saved page.
+                    cooldown = self.block_seconds
                     self._blocked_until = max(
                         self._blocked_until, time.monotonic() + cooldown
                     )
@@ -152,14 +167,11 @@ async def _coalesce_scrape(key: tuple, factory):
     return await asyncio.shield(task)
 
 
-# ── Tarayıcı taklidi ────────────────────────────────────────────────────────
-# curl-cffi `impersonate` ile Chrome/Safari TLS + HTTP/2 parmak izini taklit eder.
-# Her retry'da havuzdan farklı bir parmak izi seçilir — tek bir parmak izine
-# kilitli kalmak yerine, bloklandığında başka bir "tarayıcı" gibi görünürüz.
+# ── HTTP istemcisi ayarları ─────────────────────────────────────────────────
+# Tüm taramalar tek, sabit bir istemci profili kullanır. Bir erişim engelinden
+# sonra profil değiştirmek veya art arda tekrar denemek yerine ortak devre
+# kesiciye saygı duyulur.
 _DEFAULT_IMPERSONATE = "chrome"
-_IMPERSONATE_POOL = [
-    "chrome", "safari", "chrome124", "safari17_0",
-]
 
 # Gerçek tarayıcı navigasyon başlıkları — TLS parmak izini davranışsal olarak tamamlar.
 _NAV_HEADERS = {
@@ -213,24 +225,27 @@ async def _warmup(session, username: str) -> int | None:
 async def _fetch_with_retry(
     session, url: str, referer: str, *, max_retries: int = 3, timeout: float = 14.0
 ):
-    """Bir sayfayı getir; 403/429'da backoff + parmak izi rotasyonu ile tekrar dene.
+    """Bir sayfayı getir; ağ hatalarını sınırlı tekrar dene, blokları hemen dön.
 
-    Cloudflare datacenter IP'lerini olasılıksal olarak engeller — aynı istek
-    biraz bekleyip farklı parmak iziyle tekrar denendiğinde sıklıkla geçer.
-
-    Döner: (resp | None, last_status). resp None → tüm denemeler ağ hatası ile bitti.
-    Engelli (403/429) son yanıt da döndürülür; karar çağırana bırakılır.
+    403/429 bir yeniden deneme sinyali değildir. İlk yanıt ortak devre kesiciyi
+    açar; çağıran işi kalıcı checkpoint'inden daha sonra sürdürür.
     """
     headers = {**_NAV_HEADERS, "Referer": referer}
     resp = None
     last_status = 0
     for attempt in range(max_retries):
-        impersonate = _IMPERSONATE_POOL[attempt % len(_IMPERSONATE_POOL)]
         try:
             resp = await _budgeted_get(
                 session,
-                url, headers=headers, timeout=timeout, impersonate=impersonate
+                url, headers=headers, timeout=timeout, impersonate=_DEFAULT_IMPERSONATE
             )
+        except LetterboxdCircuitOpenError as exc:
+            log.info(
+                "scraper: shared circuit open; skipped %s retry_after=%.1fs",
+                url,
+                exc.retry_after,
+            )
+            return None, 403
         except Exception as exc:
             last_status = -1
             log.warning("scraper: network error (attempt %d) %s: %s", attempt + 1, url, exc)
@@ -242,13 +257,7 @@ async def _fetch_with_retry(
         last_status = resp.status_code
         if resp.status_code not in (403, 429):
             return resp, resp.status_code
-
-        # Engellendi → backoff (artan) + jitter, sonra farklı parmak iziyle tekrar
-        if attempt < max_retries - 1:
-            backoff = (attempt + 1) * 2.5 + random.uniform(0.5, 2.0)
-            log.warning("scraper: HTTP %d on %s — retry %d/%d after %.1fs",
-                        resp.status_code, url, attempt + 2, max_retries, backoff)
-            await asyncio.sleep(backoff)
+        return resp, last_status
 
     return resp, last_status
 
@@ -256,85 +265,33 @@ async def _fetch_with_retry(
 async def _fetch_profile_with_fresh_sessions(
     username: str, *, max_retries: int = 3
 ):
-    """Fetch a profile while replacing cookies/connections after a block.
+    """Fetch the small public profile document once.
 
-    Reusing a session after Cloudflare marks it as suspicious makes a TLS
-    fingerprint rotation mostly ineffective. Profile reads are infrequent and
-    security-sensitive, so each blocked attempt gets a fresh browser session.
+    Account creation never waits through a block. The caller can admit the
+    user in deferred-verification mode, and the durable profile sync resumes
+    once the shared request budget permits another attempt.
     """
     profile_url = f"{BASE_URL}/{username}/"
-    response = None
-    last_status = 0
-    attempts = max(1, max_retries)
-    for attempt in range(attempts):
-        impersonate = _IMPERSONATE_POOL[attempt % len(_IMPERSONATE_POOL)]
-        try:
-            async with AsyncSession(impersonate=impersonate) as session:
-                # A fresh cookie jar and TLS fingerprint are enough for a retry.
-                # A homepage warm-up here used an extra upstream request after a
-                # block, delayed ownership-code delivery, and did not make the
-                # profile request more likely to succeed.
-                response = await _budgeted_get(
-                    session,
-                    profile_url,
-                    headers={**_NAV_HEADERS, "Referer": f"{BASE_URL}/"},
-                    timeout=14,
-                    impersonate=impersonate,
-                )
-                last_status = response.status_code
-                if last_status in (403, 429):
-                    # The public RSS feed is served from a lighter Letterboxd
-                    # path and reliably sets a fresh site cookie even when the
-                    # rendered profile page gets a Cloudflare challenge. Only
-                    # use it after a block, then retry the same tiny profile
-                    # read in this new browser session. This path is for bio
-                    # verification, not film crawling, so it adds no work to
-                    # successful syncs.
-                    rss = await _budgeted_get(
-                        session,
-                        f"{profile_url}rss/",
-                        headers={
-                            "Accept": "application/rss+xml,application/xml;q=0.9,*/*;q=0.8",
-                            "Referer": profile_url,
-                        },
-                        timeout=10,
-                        impersonate=impersonate,
-                    )
-                    if 200 <= rss.status_code < 300:
-                        response = await _budgeted_get(
-                            session,
-                            profile_url,
-                            headers={**_NAV_HEADERS, "Referer": f"{BASE_URL}/"},
-                            timeout=14,
-                            impersonate=impersonate,
-                        )
-                        last_status = response.status_code
-        except Exception as exc:
-            last_status = -1
-            log.warning(
-                "profile scraper: network error attempt=%d fingerprint=%s: %s",
-                attempt + 1,
-                impersonate,
-                exc,
+    try:
+        async with AsyncSession(impersonate=_DEFAULT_IMPERSONATE) as session:
+            response = await _budgeted_get(
+                session,
+                profile_url,
+                headers={**_NAV_HEADERS, "Referer": f"{BASE_URL}/"},
+                timeout=14,
+                impersonate=_DEFAULT_IMPERSONATE,
             )
-            if attempt == attempts - 1:
-                return None, last_status
-        else:
-            if last_status not in (403, 429):
-                return response, last_status
-
-        if attempt < attempts - 1:
-            backoff = (attempt + 1) * 2.0 + random.uniform(0.4, 1.2)
-            log.warning(
-                "profile scraper: HTTP %s fingerprint=%s retry=%d/%d after %.1fs",
-                last_status,
-                impersonate,
-                attempt + 2,
-                attempts,
-                backoff,
-            )
-            await asyncio.sleep(backoff)
-    return response, last_status
+            return response, response.status_code
+    except LetterboxdCircuitOpenError as exc:
+        log.info(
+            "profile scraper: shared circuit open user=%s retry_after=%.1fs",
+            username,
+            exc.retry_after,
+        )
+        return None, 403
+    except Exception as exc:
+        log.warning("profile scraper: network error user=%s: %s", username, exc)
+        return None, -1
 
 
 class ScrapeError(Exception):
@@ -793,10 +750,6 @@ async def _scrape_profile(
         username, max_retries=max_retries
     )
 
-    if response is None:
-        raise ScrapeNetworkError(
-            "Letterboxd'a ağ üzerinden ulaşılamadı. Lütfen tekrar dene."
-        )
     if status == 404:
         raise ProfileNotFoundError(
             f"Letterboxd kullanıcısı '@{username}' bulunamadı.", status=404
@@ -804,6 +757,10 @@ async def _scrape_profile(
     if status in (403, 429):
         raise AccessBlockedError(
             f"Letterboxd erişimi engelledi (HTTP {status}).", status=status
+        )
+    if response is None:
+        raise ScrapeNetworkError(
+            "Letterboxd'a ağ üzerinden ulaşılamadı. Lütfen tekrar dene."
         )
     if status != 200:
         raise ScrapeError(
@@ -905,6 +862,16 @@ async def _scrape_list(
             )
 
             # ── Durum kodu değerlendirmesi ─────────────────────────────────────
+            if status in (403, 429):
+                if page == start_page:
+                    raise AccessBlockedError(
+                        f"Letterboxd erişimi engelledi (HTTP {status}). "
+                        "Sunucu IP'si geçici olarak bloklu olabilir.",
+                        status=status,
+                    )
+                complete = False  # bloklandı → kalan sayfalar eksik
+                next_page = page
+                break
             if resp is None:
                 if page == start_page:
                     raise ScrapeNetworkError(
@@ -932,16 +899,6 @@ async def _scrape_list(
                         f"Letterboxd kullanıcısı '@{username}' bulunamadı.", status=404
                     )
                 exhausted = True
-                break
-            if status in (403, 429):
-                if page == start_page:
-                    raise AccessBlockedError(
-                        f"Letterboxd erişimi engelledi (HTTP {status}). "
-                        "Sunucu IP'si geçici olarak bloklu olabilir.",
-                        status=status,
-                    )
-                complete = False  # bloklandı → kalan sayfalar eksik
-                next_page = page
                 break
             if status != 200:
                 if page == start_page:

@@ -6,9 +6,11 @@ from unittest.mock import AsyncMock, patch
 
 from app.scraper import (
     EmptyListError,
+    LetterboxdCircuitOpenError,
     MarkupChangedError,
     _LetterboxdRequestBudget,
     _empty_page_error,
+    _fetch_with_retry,
     _fetch_profile_with_fresh_sessions,
     _parse_film_rating,
     _parse_page,
@@ -227,14 +229,26 @@ class ProfileRetryTests(unittest.IsolatedAsyncioTestCase):
             await budget.request(lambda: response(200))
         self.assertEqual(budget.current_limit, 2)
 
-    async def test_blocked_profile_retry_uses_a_fresh_browser_session(self):
-        statuses = iter((403, 200))
+    async def test_open_circuit_skips_the_next_outbound_request(self):
+        budget = _LetterboxdRequestBudget(min_interval=0, block_seconds=60)
+        calls = 0
+
+        async def blocked():
+            nonlocal calls
+            calls += 1
+            return SimpleNamespace(status_code=403)
+
+        await budget.request(blocked)
+        with self.assertRaises(LetterboxdCircuitOpenError):
+            await budget.request(blocked)
+        self.assertEqual(calls, 1)
+
+    async def test_blocked_profile_returns_after_one_request(self):
         sessions = []
 
         class FakeSession:
             def __init__(self, *, impersonate):
                 self.impersonate = impersonate
-                self.profile_status = next(statuses)
                 self.urls = []
                 sessions.append(self)
 
@@ -246,55 +260,51 @@ class ProfileRetryTests(unittest.IsolatedAsyncioTestCase):
 
             async def get(self, url, **_kwargs):
                 self.urls.append(url)
-                return SimpleNamespace(status_code=self.profile_status, text="profile")
+                return SimpleNamespace(status_code=403, text="profile")
 
         with (
             patch("app.scraper.AsyncSession", FakeSession),
-            patch("app.scraper._human_pause", new=AsyncMock()),
-            patch("app.scraper.asyncio.sleep", new=AsyncMock()),
+            patch(
+                "app.scraper._letterboxd_budget",
+                _LetterboxdRequestBudget(min_interval=0, block_seconds=0),
+            ),
         ):
             response, status = await _fetch_profile_with_fresh_sessions(
                 "sample_user", max_retries=2
             )
 
-        self.assertEqual(status, 200)
+        self.assertEqual(status, 403)
         self.assertEqual(response.text, "profile")
-        self.assertEqual(len(sessions), 2)
-        self.assertNotEqual(sessions[0].impersonate, sessions[1].impersonate)
+        self.assertEqual(len(sessions), 1)
         self.assertEqual(
             [url for session in sessions for url in session.urls],
-            [
-                "https://letterboxd.com/sample_user/",
-                "https://letterboxd.com/sample_user/rss/",
-                "https://letterboxd.com/sample_user/",
-            ],
+            ["https://letterboxd.com/sample_user/"],
         )
 
-    async def test_blocked_profile_retries_after_a_successful_rss_cookie_warmup(self):
+    async def test_blocked_list_request_does_not_retry_within_one_job(self):
         class FakeSession:
-            def __init__(self, **_kwargs):
-                self.profile_requests = 0
-
-            async def __aenter__(self):
-                return self
-
-            async def __aexit__(self, *_args):
-                return None
+            def __init__(self):
+                self.urls = []
 
             async def get(self, url, **_kwargs):
-                if url.endswith("/rss/"):
-                    return SimpleNamespace(status_code=200, text="<rss/>")
-                self.profile_requests += 1
-                status = 403 if self.profile_requests == 1 else 200
-                return SimpleNamespace(status_code=status, text="profile")
+                self.urls.append(url)
+                return SimpleNamespace(status_code=403, text="blocked")
 
-        with patch("app.scraper.AsyncSession", FakeSession):
-            response, status = await _fetch_profile_with_fresh_sessions(
-                "sample_user", max_retries=1
+        session = FakeSession()
+        with patch(
+            "app.scraper._letterboxd_budget",
+            _LetterboxdRequestBudget(min_interval=0, block_seconds=0),
+        ):
+            response, status = await _fetch_with_retry(
+                session,
+                "https://letterboxd.com/sample_user/films/page/2/",
+                "https://letterboxd.com/sample_user/films/",
+                max_retries=3,
             )
 
-        self.assertEqual(status, 200)
-        self.assertEqual(response.text, "profile")
+        self.assertEqual(status, 403)
+        self.assertEqual(response.text, "blocked")
+        self.assertEqual(len(session.urls), 1)
 
     async def test_review_full_text_requests_are_bounded_and_parallel(self):
         reviews = """
