@@ -12,7 +12,7 @@ from dataclasses import asdict, dataclass, field
 
 from .enrich import EnrichedFilm
 
-TASTE_PROFILE_VERSION = "taste-v5-fav4-top5-directors"
+TASTE_PROFILE_VERSION = "taste-v6-bilingual-narratives"
 
 # Recency half-life in "films watched ago". With the full watched history now
 # feeding the profile, a flat linear taper is meaningless across thousands of
@@ -34,6 +34,10 @@ class TasteProfileSnapshot:
     # deterministic fallback. Without it a silent LLM failure is invisible.
     analysis_source: str = "local"
     personality: str = ""
+    # Editorial prose is held per language. Numeric taste signals remain
+    # language-neutral, while the UI can select a complete narrative without
+    # translating Turkish text in the browser.
+    localized_narratives: dict = field(default_factory=dict)
     sample_size: int = 0
     rated_count: int = 0
     metadata_coverage: int = 0

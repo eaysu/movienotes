@@ -84,6 +84,33 @@ def _build_prompt(
         _film_label(film) for film in watched if film.slug in favorite_four_set
     ) or "(seçim yapılmamış)"
 
+    if locale == "en":
+        english_heading = {
+            "rated_likes": "Films the member rated highly",
+            "unrated_history": "Recent viewing history (ratings are unavailable)",
+        }.get(reference_mode, "No strong positive rating signal is available")
+        english_candidates = "\n".join(
+            f"[{index}] {film.title} ({film.year or '?'}) — directed by {film.director or 'unknown'} "
+            f"— genres: {', '.join(film.genres or []) or 'n/a'}\n    {(film.overview or '')[:240]}"
+            for index, film in enumerate(candidates, start=1)
+        )
+        english_favorites = "; ".join(
+            _film_label(film) for film in watched if film.slug in favorite_four_set
+        ) or "(not set)"
+        return (
+            "You are an experienced film recommendation editor. Write every value in natural English.\n\n"
+            f"{english_heading}:\n{watched_block}\n\n"
+            f"Letterboxd Favourite Four (the strongest preference signal):\n{english_favorites}\n\n"
+            "These are watchlist candidates already prefiltered for similarity to the member's history:\n"
+            f"{english_candidates}\n\n"
+            f"Choose and rank the best {n} films. For each `reason`, write a warm two- or three-sentence paragraph "
+            "addressing the member as ‘you’; make concrete connections to films, directors, or themes in their history, "
+            "and explain why this particular film may resonate. For `taste_summary`, write a two- or three-sentence "
+            "reading of their taste. Do not mention how many films you selected. Keep titles and proper names unchanged.\n\n"
+            "Return only this JSON, with no markdown:\n"
+            '{"taste_summary":"...","picks":[{"index":1,"reason":"..."}]}'
+        )
+
     prompt = (
         "Sen deneyimli bir film öneri uzmanısın.\n\n"
         f"{reference_heading}:\n{watched_block}\n\n"
@@ -103,12 +130,6 @@ def _build_prompt(
         '{"taste_summary": "...", '
         '"picks": [{"index": <yukarıdaki liste numarası>, "reason": "..."}]}'
     )
-    if locale == "en":
-        prompt += (
-            "\n\nOUTPUT LANGUAGE OVERRIDE: Return every value in the JSON, including "
-            "taste_summary and reason, in natural English. Keep film titles and "
-            "proper names in their original form."
-        )
     return prompt
 
 
@@ -248,6 +269,25 @@ def _taste_analysis_prompt(
         if rated
         else "puan verisi az"
     )
+    if locale == "en":
+        english_rating = (
+            f"average rating {sum(rated)/len(rated):.1f}/5 across {len(rated)} rated films"
+            if rated else "little rating data"
+        )
+        return (
+            "Create a nuanced cinephile taste reading from this viewing data. Write all values in natural English, "
+            "as connected prose rather than clipped bullet points. Avoid clichés such as ‘true cinephile’, ‘wide range’, "
+            "or ‘loves every genre’. Do not list film titles or genres; interpret the pattern instead.\n\n"
+            f"Genre distribution: {_genre_histogram(watched)}\n"
+            f"Decade distribution: {_decade_histogram(watched)}\n"
+            f"Ratings: {english_rating}\n\n"
+            f"Examples from films they enjoy:\n{watched_lines}\n\n"
+            f"Letterboxd Favourite Four:\n{fav_lines}\n\n"
+            "Return only this JSON:\n"
+            '{"analysis":["A three- to four-sentence connected taste reading, one sentence per array item."],'
+            '"personality":"A two- to three-sentence reading of temperament and worldview drawn from the Favourite Four. '
+            'Do not repeat film or director names; translate their shared meaning into a human observation."}'
+        )
     prompt = (
         "Bir sinefilin izleme verisinden analiz üret. Türkçe, akıcı, doğal bir dille "
         "yaz — madde işareti gibi kesik cümleler değil, birbirine bağlanan cümleler. "
@@ -270,8 +310,6 @@ def _taste_analysis_prompt(
         'ortak ne söylediğini insana dair bir okumaya çevir."\n'
         '}'
     )
-    if locale == "en":
-        prompt += "\n\nOUTPUT LANGUAGE OVERRIDE: Write every JSON value in natural English."
     return prompt
 
 

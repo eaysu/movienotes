@@ -86,7 +86,7 @@ class TasteProfileTests(unittest.TestCase):
         self.assertEqual(profile.favorite_director, "First")
         # A single watched film is not a "favorite director".
         self.assertNotIn("Once Only", profile.top_directors)
-        self.assertEqual(profile.algorithm_version, "taste-v5-fav4-top5-directors")
+        self.assertEqual(profile.algorithm_version, "taste-v6-bilingual-narratives")
 
     def test_fav4_and_the_five_most_watched_directors_define_the_analysis_signal(self):
         # Six directors, so the sixth is genuinely outside the top five.

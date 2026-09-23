@@ -1038,6 +1038,60 @@ def _response_locale(account: Account | None, request: Request) -> str:
     return "en" if request.headers.get("accept-language", "").lower().startswith("en") else "tr"
 
 
+_NARRATIVE_LOCALES = ("tr", "en")
+
+
+def _local_taste_narrative(taste: dict, locale: str) -> dict:
+    """Language-correct fallback while the richer AI prose is being prepared."""
+    if locale != "en":
+        return {
+            "summary": str(taste.get("summary") or ""),
+            "analysis": list(taste.get("analysis") or []),
+            "personality": str(taste.get("personality") or ""),
+            "source": str(taste.get("analysis_source") or "local"),
+        }
+    genres = ", ".join(str(item) for item in (taste.get("top_genres") or [])[:2])
+    director = str(taste.get("favorite_director") or "")
+    if genres and director:
+        summary = f"A taste profile drawn to {genres}, with a clear affinity for {director}."
+    elif genres:
+        summary = f"A viewing profile with a clear pull toward {genres}."
+    elif director:
+        summary = f"A viewing profile with a clear affinity for {director}."
+    else:
+        summary = "Your viewing history is saved; this taste profile will deepen as more film details arrive."
+    sample = int(taste.get("sample_size") or 0)
+    analysis = [
+        (
+            f"This reading currently draws on {sample} films and will become more specific as the archive fills out."
+            if sample else "Your taste reading will become more specific as your viewing history grows."
+        )
+    ]
+    directors = [str(item) for item in (taste.get("top_directors") or [])[:3] if item]
+    if directors:
+        analysis.append(f"You return most often to the cinematic worlds of {', '.join(directors)}.")
+    if genres:
+        analysis.append(f"The strongest genre signal in your recent profile sits around {genres}.")
+    personality = "Your favourites point to a viewer who looks for a distinct emotional and formal point of view, rather than simply familiarity."
+    return {"summary": summary, "analysis": analysis, "personality": personality, "source": "local"}
+
+
+def _apply_taste_locale(profile: dict, locale: str) -> dict:
+    """Overlay the requested complete prose without altering neutral metrics."""
+    taste = dict(profile.get("taste") or {})
+    narratives = taste.get("localized_narratives") or {}
+    narrative = narratives.get(locale) if isinstance(narratives, dict) else None
+    if not isinstance(narrative, dict) or not narrative.get("analysis"):
+        narrative = _local_taste_narrative(taste, locale)
+    taste.update({
+        "summary": str(narrative.get("summary") or ""),
+        "analysis": list(narrative.get("analysis") or []),
+        "personality": str(narrative.get("personality") or ""),
+        "analysis_source": str(narrative.get("source") or taste.get("analysis_source") or "local"),
+    })
+    return {**profile, "taste": taste}
+
+
 _film_load_flights: dict[tuple[str, str], asyncio.Task] = {}
 _film_load_lock = asyncio.Lock()
 
@@ -2043,6 +2097,17 @@ async def profile_me(request: Request) -> dict:
     )
     if isinstance(profile, BaseException):
         raise profile
+    locale = _response_locale(account, request)
+    profile = _apply_taste_locale(profile, locale)
+    narratives = (profile.get("taste") or {}).get("localized_narratives") or {}
+    missing_narrative = any(
+        not isinstance(narratives.get(language), dict)
+        or not narratives[language].get("analysis")
+        for language in _NARRATIVE_LOCALES
+    )
+    if missing_narrative and (profile.get("taste") or {}).get("sample_size"):
+        _schedule_favorite_taste_refresh(account, force_analysis=True, locale=locale)
+        profile["taste_refreshing"] = True
     profile["needs_refresh"] = bool(
         not profile.get("taste")
         or profile["taste"].get("algorithm_version") != TASTE_PROFILE_VERSION
@@ -2145,7 +2210,6 @@ async def update_profile_locale(
         locale = await asyncio.to_thread(
             _auth_service().set_preferred_locale, account, req.locale
         )
-        await asyncio.to_thread(_auth_service().clear_taste_narrative, account)
     except Exception as exc:
         log.warning("locale preference update failed account=%s", account.id, exc_info=True)
         raise HTTPException(
@@ -2153,8 +2217,8 @@ async def update_profile_locale(
             detail="Language preference could not be saved.",
         ) from exc
     account.preferred_locale = locale
-    # Rebuild prose from the already-saved film catalogue. This avoids a new
-    # Letterboxd crawl solely because the member changed app language.
+    # Rebuild both prose versions from the saved film catalogue; a language
+    # switch never needs a new Letterboxd crawl.
     asyncio.create_task(
         _refresh_locale_taste(account, _response_locale(account, request))
     )
@@ -4184,17 +4248,6 @@ class _SyncPipeline:
             ]
         await _resolve_favorite_posters(favorites, rows, service, enricher)
         taste = build_taste_profile(watched, favorites)
-        if account.preferred_locale == "en":
-            genres = ", ".join(taste.top_genres[:2])
-            director = taste.favorite_director
-            if genres and director:
-                taste.summary = f"A taste profile drawn to {genres}, with a clear affinity for {director}."
-            elif genres:
-                taste.summary = f"A viewing profile with a clear pull toward {genres}."
-            elif director:
-                taste.summary = f"A viewing profile with a clear affinity for {director}."
-            else:
-                taste.summary = "Your viewing history is saved; your taste profile will become richer as film details are completed."
         taste.source_fingerprint = taste_source_fingerprint(profile, watched)
         taste.personality = personality_from_favorites(favorites)
         await _apply_director_photos(taste, enricher, service)
@@ -4211,44 +4264,49 @@ class _SyncPipeline:
         # new algorithm version, or an edited Fav 4 — while the watched films
         # behind the fingerprint are unchanged. Inheriting here is what kept
         # members looking at their old analysis after every version bump.
-        if not force_analysis and not source_changed and stored_taste.get("analysis"):
-            taste.analysis = stored_taste["analysis"]
-
-        # A full first snapshot gets an LLM pass. Later passes only refresh the
-        # profile prose when its source changes; merely opening the app does not.
-        # A repair/maintenance rebuild can deliberately opt out of external
-        # prose generation. In that mode it must never send a member's film
-        # history to the LLM merely because the stored fingerprint changed.
+        stored_narratives = stored_taste.get("localized_narratives") or {}
+        complete_narratives = all(
+            isinstance(stored_narratives.get(language), dict)
+            and stored_narratives[language].get("analysis")
+            for language in _NARRATIVE_LOCALES
+        )
+        # A full first snapshot gets both language variants. Later passes only
+        # refresh prose when the source changes or one language is missing.
+        # This avoids translating generated Turkish in the client and keeps a
+        # language switch instant after the first generation.
         should_analyze = use_llm and (
-            force_analysis or source_changed or not stored_taste.get("analysis")
+            force_analysis or source_changed or not complete_narratives
         )
         refresh_personality = _personality_refresh_needed(stored_snapshot, favorites)
-        taste.analysis_source = "local"
-        if should_analyze:
-            with contextlib.suppress(Exception):
-                extra = await analyze_taste(
-                    self.settings,
-                    taste_analysis_signal(watched, favorites),
-                    favorites,
-                    locale=locale
-                    or ("en" if account.preferred_locale == "en" else "tr"),
-                )
-                if extra.get("analysis"):
-                    taste.analysis = extra["analysis"]
-                    taste.analysis_source = "llm"
-                if (refresh_personality or force_analysis) and extra.get("personality"):
-                    taste.personality = extra["personality"]
-            if taste.analysis_source != "llm":
-                # The deterministic lines are still current for this version, so
-                # the member is never stuck on old text — but say so loudly,
-                # because silent LLM failures used to be invisible here.
-                log.warning(
-                    "taste analysis fell back to local prose account=%s has_openai=%s",
-                    account.id,
-                    self.settings.has_openai,
-                )
-        if not refresh_personality and not force_analysis and stored_taste.get("personality"):
-            taste.personality = stored_taste["personality"]
+        narratives: dict[str, dict] = {}
+        signal = taste_analysis_signal(watched, favorites)
+        for language in _NARRATIVE_LOCALES:
+            local = _local_taste_narrative(taste.to_dict(), language)
+            previous = stored_narratives.get(language)
+            if (
+                not force_analysis and not source_changed
+                and isinstance(previous, dict) and previous.get("analysis")
+            ):
+                narratives[language] = previous
+                continue
+            if should_analyze:
+                with contextlib.suppress(Exception):
+                    extra = await analyze_taste(
+                        self.settings, signal, favorites, locale=language
+                    )
+                    if extra.get("analysis"):
+                        local["analysis"] = extra["analysis"]
+                        local["source"] = "llm"
+                    if extra.get("personality") and (refresh_personality or force_analysis or source_changed):
+                        local["personality"] = extra["personality"]
+            narratives[language] = local
+        selected_locale = locale or ("en" if account.preferred_locale == "en" else "tr")
+        selected = narratives.get(selected_locale) or narratives["tr"]
+        taste.summary = selected["summary"]
+        taste.analysis = selected["analysis"]
+        taste.personality = selected["personality"]
+        taste.analysis_source = selected["source"]
+        taste.localized_narratives = narratives
         await asyncio.to_thread(
             service.save_profile_snapshot, account, profile, favorites, taste
         )

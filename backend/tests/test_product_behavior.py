@@ -484,11 +484,12 @@ class ForcedTasteRebuildTests(unittest.TestCase):
             "async def _refresh_locale_taste", 1
         )[0]
 
-        assert "if not force_analysis and not source_changed and stored_taste.get(\"analysis\"):" in rebuild
-        # A silent LLM failure must be visible rather than looking like old text.
-        assert 'taste.analysis_source = "local"' in rebuild
-        assert 'taste.analysis_source = "llm"' in rebuild
-        assert "taste analysis fell back to local prose" in rebuild
+        assert "not force_analysis and not source_changed" in rebuild
+        assert "stored_narratives" in rebuild
+        assert "for language in _NARRATIVE_LOCALES:" in rebuild
+        # A forced run regenerates each language rather than inheriting prose.
+        assert "force_analysis or source_changed or not complete_narratives" in rebuild
+        assert "taste.localized_narratives = narratives" in rebuild
 
 
 class RandomRatingFloorTests(unittest.TestCase):

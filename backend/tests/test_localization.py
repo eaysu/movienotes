@@ -164,29 +164,32 @@ class ServerMessageCoverageTests(unittest.TestCase):
 
 
 class WrittenAnalysisLanguageTests(unittest.TestCase):
-    """The AI prose is stored, so a language change has to rewrite it."""
+    """AI prose is generated and stored independently in both languages."""
 
     def setUp(self):
         self.main = (ROOT / "app" / "main.py").read_text()
         self.llm = (ROOT / "app" / "llm.py").read_text()
 
     def test_the_prompt_can_be_switched_to_english(self):
-        self.assertIn("OUTPUT LANGUAGE OVERRIDE", self.llm)
+        self.assertIn("Write every value in natural English", self.llm)
+        self.assertIn("Create a nuanced cinephile taste reading", self.llm)
         for name in ("def analyze_taste", "def rank_candidates"):
             block = self.llm.split(name, 1)[1].split(") -> ", 1)[0]
             self.assertIn("locale", block, name)
 
-    def test_changing_the_language_rewrites_the_stored_prose(self):
+    def test_changing_the_language_keeps_both_stored_prose_versions(self):
         block = self.main.split('@app.post("/api/profile/locale")', 1)[1]
         block = block.split("\n@app.", 1)[0]
 
-        self.assertIn("clear_taste_narrative", block)
+        self.assertNotIn("clear_taste_narrative", block)
         # Resolved at the request: a member left on "auto" has no stored
         # preference to read, and used to get Turkish prose under an English UI.
         self.assertIn("_refresh_locale_taste(account, _response_locale(account, request))", block)
         rebuild = self.main.split("async def _refresh_locale_taste", 1)[1]
         rebuild = rebuild.split("\nasync def ", 1)[0]
         self.assertIn("locale=locale", rebuild)
+        self.assertIn("localized_narratives", self.main)
+        self.assertIn("for language in _NARRATIVE_LOCALES", self.main)
 
 
 class RandomReasonLanguageTests(unittest.TestCase):

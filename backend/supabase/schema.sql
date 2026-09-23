@@ -88,6 +88,7 @@ CREATE TABLE IF NOT EXISTS public.taste_profiles (
   top_keywords        JSONB NOT NULL DEFAULT '[]'::jsonb,
   analysis            JSONB NOT NULL DEFAULT '[]'::jsonb,
   personality         TEXT NOT NULL DEFAULT '',
+  localized_narratives JSONB NOT NULL DEFAULT '{}'::jsonb,
   sample_size         INTEGER NOT NULL DEFAULT 0,
   rated_count         INTEGER NOT NULL DEFAULT 0,
   metadata_coverage   INTEGER NOT NULL DEFAULT 0 CHECK (metadata_coverage BETWEEN 0 AND 100),
@@ -109,6 +110,8 @@ ALTER TABLE public.taste_profiles
   ADD COLUMN IF NOT EXISTS analysis JSONB NOT NULL DEFAULT '[]'::jsonb;
 ALTER TABLE public.taste_profiles
   ADD COLUMN IF NOT EXISTS personality TEXT NOT NULL DEFAULT '';
+ALTER TABLE public.taste_profiles
+  ADD COLUMN IF NOT EXISTS localized_narratives JSONB NOT NULL DEFAULT '{}'::jsonb;
 
 CREATE TABLE IF NOT EXISTS public.profile_favorites (
   user_id       BIGINT NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
@@ -970,7 +973,7 @@ BEGIN
 
   INSERT INTO public.taste_profiles (
     user_id, summary, favorite_director, top_directors, top_directors_detail,
-    top_genres, top_keywords, analysis, personality,
+    top_genres, top_keywords, analysis, personality, localized_narratives,
     sample_size, rated_count, metadata_coverage, confidence_level,
     confidence_score, algorithm_version, source_fingerprint, generated_at, updated_at
   ) VALUES (
@@ -983,6 +986,7 @@ BEGIN
     COALESCE(p_taste->'top_keywords', '[]'::jsonb),
     COALESCE(p_taste->'analysis', '[]'::jsonb),
     COALESCE(p_taste->>'personality', ''),
+    COALESCE(p_taste->'localized_narratives', '{}'::jsonb),
     COALESCE((p_taste->>'sample_size')::INTEGER, 0),
     COALESCE((p_taste->>'rated_count')::INTEGER, 0),
     COALESCE((p_taste->>'metadata_coverage')::INTEGER, 0),
@@ -1002,6 +1006,7 @@ BEGIN
     top_keywords = EXCLUDED.top_keywords,
     analysis = EXCLUDED.analysis,
     personality = EXCLUDED.personality,
+    localized_narratives = EXCLUDED.localized_narratives,
     sample_size = EXCLUDED.sample_size,
     rated_count = EXCLUDED.rated_count,
     metadata_coverage = EXCLUDED.metadata_coverage,

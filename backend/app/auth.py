@@ -875,7 +875,8 @@ class AuthService:
         favorites: list[EnrichedFilm],
         taste: TasteProfileSnapshot,
     ) -> None:
-        self._service_client().rpc(
+        service = self._service_client()
+        service.rpc(
             "save_profile_snapshot",
             {
                 "p_user_id": account.id,
@@ -898,6 +899,14 @@ class AuthService:
                 ],
             },
         ).execute()
+        # Old installations can add this one column independently of the
+        # snapshot RPC rollout. Keep the prose payload separate so a deployed
+        # server and a just-migrated database immediately support both
+        # languages without requiring the user to replace a long SQL function.
+        with contextlib.suppress(Exception):
+            service.table("taste_profiles").update({
+                "localized_narratives": taste.localized_narratives or {},
+            }).eq("user_id", account.id).execute()
 
     def save_profile_identity_and_favorites(
         self, account: Account, profile: ScrapedProfile, favorites: list[EnrichedFilm]
