@@ -37,9 +37,17 @@ MAX_CONCURRENT_JOBS = 1
 LEASE_SECONDS = 360
 # Cooldown after a hard failure before the job is retried.
 FAILURE_BACKOFF = timedelta(minutes=30)
-# A Letterboxd block is expected to be temporary.  Keep the durable checkpoint
-# and retry it soon, instead of treating it like a data/configuration failure.
-SCRAPE_RETRY_BACKOFF = timedelta(minutes=2)
+# A Letterboxd block is expected to be temporary, but repeatedly testing a
+# blocked datacenter address makes recovery less likely.  Keep the durable
+# checkpoint and use a deliberately sparse, per-account schedule instead of
+# retrying every worker pass.  The final step is also a safe steady state for
+# a persistent upstream block; explicit member refresh still remains possible.
+SCRAPE_RETRY_BACKOFFS = (
+    timedelta(minutes=5),
+    timedelta(minutes=15),
+    timedelta(hours=1),
+    timedelta(hours=6),
+)
 # Opening the app should be cheap. A completed profile gets at most one
 # opportunistic Letterboxd check per day; explicit refresh remains available.
 INCREMENTAL_MIN_INTERVAL = timedelta(hours=24)
@@ -61,6 +69,12 @@ def _reached_the_end(processed: int, expected_total: int) -> bool:
     if expected_total <= 0:
         return True          # nothing to check it against; take it at its word
     return processed >= expected_total * SWEEP_COMPLETE_RATIO
+
+
+def scrape_retry_backoff(attempts: int) -> timedelta:
+    """Return the sparse retry delay for a blocked Letterboxd checkpoint."""
+    attempt = max(1, int(attempts or 1))
+    return SCRAPE_RETRY_BACKOFFS[min(attempt - 1, len(SCRAPE_RETRY_BACKOFFS) - 1)]
 
 
 @dataclass
@@ -204,6 +218,11 @@ async def ensure_started(
             lease_expires_at=None,
         )
     elif job.get("state") == "failed":
+        # Opening the PWA must not erase a live upstream cooldown. The retry
+        # loop will resume this checkpoint when it is eligible; `force` above
+        # remains the explicit member choice to start a fresh import now.
+        if not job_is_resumable(job):
+            return job
         # Resume from the checkpoint rather than recrawling from page 1.
         job = await asyncio.to_thread(
             service.upsert_sync_job,
@@ -280,7 +299,7 @@ async def run_job(pipeline, service, account) -> None:
             )
             with contextlib.suppress(Exception):
                 backoff = (
-                    SCRAPE_RETRY_BACKOFF
+                    scrape_retry_backoff(int(job.get("attempts") or 0) + 1)
                     if isinstance(exc, (IncompleteScrapeError, AccessBlockedError))
                     else FAILURE_BACKOFF
                 )

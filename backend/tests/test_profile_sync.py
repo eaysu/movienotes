@@ -86,6 +86,13 @@ class JobHelperTests(unittest.TestCase):
             )
         )
 
+    def test_scrape_retry_backoff_escalates_and_caps(self):
+        self.assertEqual(profile_sync.scrape_retry_backoff(1), timedelta(minutes=5))
+        self.assertEqual(profile_sync.scrape_retry_backoff(2), timedelta(minutes=15))
+        self.assertEqual(profile_sync.scrape_retry_backoff(3), timedelta(hours=1))
+        self.assertEqual(profile_sync.scrape_retry_backoff(4), timedelta(hours=6))
+        self.assertEqual(profile_sync.scrape_retry_backoff(99), timedelta(hours=6))
+
     def test_progress_of(self):
         self.assertIsNone(profile_sync.progress_of(None))
         mid = profile_sync.progress_of(
@@ -488,7 +495,7 @@ class RunnerTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(service.job["backoff_until"])
         self.assertFalse(profile_sync.is_running(7))
 
-    async def test_upstream_access_block_uses_the_short_retry_backoff(self):
+    async def test_upstream_access_block_uses_the_initial_sparse_retry_backoff(self):
         service = FakeService()
         service.job = {
             "user_id": 7,
@@ -508,7 +515,31 @@ class RunnerTests(unittest.IsolatedAsyncioTestCase):
         await profile_sync.run_job(Blocked(service, {}), service, _account())
         retry_at = datetime.fromisoformat(service.job["backoff_until"])
 
-        self.assertLessEqual(retry_at - started, timedelta(minutes=3))
+        self.assertGreaterEqual(retry_at - started, timedelta(minutes=4))
+        self.assertLessEqual(retry_at - started, timedelta(minutes=6))
+
+    async def test_entry_does_not_clear_an_active_block_backoff(self):
+        service = FakeService()
+        retry_at = datetime.now(timezone.utc) + timedelta(hours=1)
+        service.job = {
+            "user_id": 7,
+            "state": "failed",
+            "phase": "diary",
+            "scope": "full",
+            "cursor_page": 2,
+            "films_processed": 72,
+            "attempts": 3,
+            "backoff_until": retry_at.isoformat(),
+            "last_error": "Letterboxd HTTP 403",
+        }
+
+        job = await profile_sync.ensure_started(
+            FakePipeline(service, {}), service, _account(), scope="full"
+        )
+
+        self.assertEqual(job["state"], "failed")
+        self.assertEqual(job["cursor_page"], 2)
+        self.assertEqual(job["backoff_until"], retry_at.isoformat())
 
     async def test_waiting_job_claims_lease_only_after_execution_slot_opens(self):
         class TrackingService(FakeService):
