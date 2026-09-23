@@ -1,4 +1,5 @@
 import asyncio
+from types import SimpleNamespace
 
 import pytest
 
@@ -16,6 +17,23 @@ class _Service:
 
     def get_watched_slugs(self, _user_id):
         return self.watched
+
+
+class _CatalogService(_Service):
+    def get_film_assets(self, _slugs):
+        return {
+            "unseen": {
+                "tmdb_id": 99,
+                "poster_url": "https://image.tmdb.org/t/p/w500/unseen.jpg",
+                "overview": "A restored overview.",
+                "genres": ["Drama"],
+                "director": "A Director",
+                "keywords": ["memory"],
+                "vote_average": 8.1,
+                "matched": True,
+                "details_loaded": True,
+            }
+        }
 
 
 class _Cache:
@@ -74,6 +92,47 @@ def test_official_list_pool_uses_a_cached_page_without_scraping(monkeypatch):
 
     assert [film.slug for film in films] == ["unseen"]
     assert films[0].poster_url == "https://poster"
+
+
+def test_official_list_pool_reuses_catalog_metadata(monkeypatch):
+    cache = _Cache([
+        {"title": "Unseen", "year": 2000, "slug": "unseen"},
+    ])
+    monkeypatch.setattr(main._random, "sample", lambda pages, _count: [pages[0]])
+
+    films = asyncio.run(main._official_list_pool(
+        "official_top_500", _CatalogService(set()), _Account(), cache
+    ))
+
+    assert films[0].poster_url == "https://image.tmdb.org/t/p/w500/unseen.jpg"
+    assert films[0].overview == "A restored overview."
+    assert films[0].director == "A Director"
+
+
+def test_random_pick_hydration_uses_full_tmdb_match_for_official_rows(monkeypatch):
+    class _Enricher:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        async def enrich(self, _films, *, include_details):
+            assert include_details is True
+            return [main.EnrichedFilm(
+                title="Matched", slug="unseen", tmdb_id=99,
+                poster_url="https://poster", overview="A real overview.",
+                details_loaded=True,
+            )]
+
+    monkeypatch.setattr(main, "Enricher", _Enricher)
+    chosen = asyncio.run(main._hydrate_random_picks(
+        [main.EnrichedFilm(title="Unseen", slug="unseen")],
+        SimpleNamespace(has_tmdb=True, tmdb_api_key="key"),
+        object(),
+        object(),
+    ))
+
+    assert chosen[0].tmdb_id == 99
+    assert chosen[0].poster_url == "https://poster"
+    assert chosen[0].overview == "A real overview."
 
 
 def test_official_list_sources_are_the_only_extra_random_sources():

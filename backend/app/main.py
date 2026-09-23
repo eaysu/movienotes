@@ -2740,17 +2740,73 @@ async def _official_list_pool(source: str, service, account, cache) -> list[Enri
         watched = await asyncio.to_thread(service.get_watched_slugs, account.id)
         unseen = [row for row in rows if row.get("slug") and row["slug"] not in watched]
         if unseen:
+            # Official-list cache rows intentionally start as lightweight
+            # Letterboxd data. Merge any TMDb metadata already learned from a
+            # previous spin so later recommendations render with their poster,
+            # overview and genres without another external lookup.
+            assets: dict[str, dict] = {}
+            asset_getter = getattr(service, "get_film_assets", None)
+            if asset_getter:
+                with contextlib.suppress(Exception):
+                    assets = await asyncio.to_thread(
+                        asset_getter, [str(row.get("slug") or "") for row in unseen]
+                    )
             return [
                 EnrichedFilm(
-                    title=str(row.get("title") or "").strip(),
-                    year=row.get("year"),
+                    title=str(
+                        (assets.get(str(row.get("slug") or ""), {}).get("title"))
+                        or row.get("title")
+                        or ""
+                    ).strip(),
+                    year=(
+                        assets.get(str(row.get("slug") or ""), {}).get("release_year")
+                        or row.get("year")
+                    ),
                     slug=str(row.get("slug") or ""),
-                    poster_url=row.get("poster_url") or None,
+                    tmdb_id=assets.get(str(row.get("slug") or ""), {}).get("tmdb_id"),
+                    overview=assets.get(str(row.get("slug") or ""), {}).get("overview") or "",
+                    genres=assets.get(str(row.get("slug") or ""), {}).get("genres") or [],
+                    director=assets.get(str(row.get("slug") or ""), {}).get("director") or "",
+                    keywords=assets.get(str(row.get("slug") or ""), {}).get("keywords") or [],
+                    vote_average=float(
+                        assets.get(str(row.get("slug") or ""), {}).get("vote_average") or 0
+                    ),
+                    poster_url=(
+                        assets.get(str(row.get("slug") or ""), {}).get("poster_url")
+                        or row.get("poster_url")
+                        or None
+                    ),
+                    matched=bool(
+                        assets.get(str(row.get("slug") or ""), {}).get("matched")
+                        or assets.get(str(row.get("slug") or ""), {}).get("tmdb_id")
+                    ),
+                    details_loaded=bool(
+                        assets.get(str(row.get("slug") or ""), {}).get("details_loaded")
+                    ),
                 )
                 for row in unseen
                 if str(row.get("title") or "").strip()
             ]
     return []
+
+
+async def _hydrate_random_picks(chosen: list[EnrichedFilm], settings, cache, service) -> list[EnrichedFilm]:
+    """Ensure recommendation cards have the metadata the UI actually renders."""
+    missing_details = [
+        film for film in chosen if not film.poster_url or not film.overview
+    ]
+    if missing_details and settings.has_tmdb:
+        enricher = Enricher(settings.tmdb_api_key, cache, asset_store=service)
+        # `ensure_details` only fills known TMDb ids. Official Letterboxd list
+        # rows start without an id, so they must go through the full title/year
+        # match once. `enrich` also persists the result in the shared catalog.
+        with contextlib.suppress(Exception):
+            chosen = await enricher.enrich(chosen, include_details=True)
+    still_missing = [film for film in chosen if not film.poster_url and film.slug]
+    if still_missing:
+        with contextlib.suppress(Exception):
+            await resolve_missing_posters(still_missing)
+    return chosen
 
 
 def _add_random_reasons(films: list, *, source: str, locale: str = "tr") -> list:
@@ -5950,19 +6006,7 @@ async def random_pick(req: RandomRequest, request: Request):
             reason = OFFICIAL_LIST_SOURCES[source]["reason"]["en" if response_locale == "en" else "tr"]
             for film in chosen:
                 film.reason = reason
-        missing_details = [
-            film for film in chosen if not film.poster_url or not film.overview
-        ]
-        if missing_details and settings.has_tmdb:
-            enricher = Enricher(settings.tmdb_api_key, cache, asset_store=service)
-            with contextlib.suppress(Exception):
-                await enricher.ensure_details(missing_details)
-        still_missing = [
-            film for film in chosen if not film.poster_url and film.slug
-        ]
-        if still_missing:
-            with contextlib.suppress(Exception):
-                await resolve_missing_posters(still_missing)
+        chosen = await _hydrate_random_picks(chosen, settings, cache, service)
 
         _add_random_reasons(chosen, source=source, locale=response_locale)
         await _record_activity_event(
