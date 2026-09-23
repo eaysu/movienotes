@@ -18,14 +18,14 @@ import {
 } from './auth.js?v=20260920.23';
 import { directorAvatar, directorFilmGrid, directorFilmTile } from './profile.js?v=20260920.23';
 import { animateScore, getScoreInfo } from './blend.js?v=20260902.15';
-import { createRecommendationCards } from './recommendations.js?v=20260920.23';
+import { createRecommendationCards } from './recommendations.js?v=20260923.26';
 import {
   getLocale,
   initI18n,
   localePreference,
   setLocalePreference,
   t,
-} from './i18n.js?v=20260923.25';
+} from './i18n.js?v=20260923.26';
 
 initI18n();
 

@@ -38,6 +38,7 @@ const EN = Object.freeze({
   'İzleme listen okunuyor': 'Reading your watchlist', 'Başka bir tane': 'Another one',
   'Watchlist\'ler gizli veya ortak film yok.': 'Watchlists are private or have no shared films.',
   'Öner': 'Recommend', 'Öneri': 'Recommendation', 'Film ekle': 'Add a film',
+  'Konu': 'Plot',
   'Filme göre filtrele': 'Filter by film', 'Kullanıcıya göre filtrele': 'Filter by user',
   'Hangi film?': 'Which film?', 'Notlar': 'Notes', 'Notların': 'Your notes',
   'Cevapla': 'Reply', 'Daha fazla': 'More', 'Daha fazla göster': 'Show more',

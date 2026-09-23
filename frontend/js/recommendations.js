@@ -1,5 +1,5 @@
 import { escapeHTML, safeImageURL, letterboxdFilmURL } from './dom.js?v=20260902.15';
-import { t } from './i18n.js?v=20260920.23';
+import { t } from './i18n.js?v=20260923.26';
 
 export function createRecommendationCards() {
 // Make a poster clickable through to its Letterboxd page.
@@ -10,10 +10,12 @@ function posterLink(inner, film) {
     : inner;
 }
 
-// Konu özeti kartta yer almıyor: okunması gereken tek paragraf "sana neden
-// önerdik" — filmin kendi tanıtımı Letterboxd bağlantısının ardında.
-function overviewBlock() {
-  return '';
+function overviewBlock(film) {
+  if (!film.overview) return '';
+  return `<div class="rounded-xl border border-outline-variant/20 bg-surface-container-low/55 p-3">
+      <p class="mb-1 font-label-sm text-label-sm uppercase tracking-[.18em] text-on-surface-variant/70">${t('Konu')}</p>
+      <p class="font-body-md text-body-md text-on-surface-variant leading-relaxed line-clamp-4">${escapeHTML(film.overview)}</p>
+    </div>`;
 }
 
 // "Sana neden önerdik?" — the LLM's reasoning for this pick.
@@ -102,8 +104,9 @@ function buildAltCard(film, idx) {
     : `<div class="w-full h-full flex items-center justify-center bg-surface-container">
           <span class="material-symbols-outlined text-[40px] text-on-surface-variant/20">movie</span>
        </div>`;
-  // Yan kartlarda da konu özeti yok; sebep paragrafı kalıyor.
-  const shortOverview = '';
+  const shortOverview = film.overview
+    ? `<p class="font-label-sm text-label-sm leading-relaxed text-on-surface-variant/75 line-clamp-3">${escapeHTML(film.overview)}</p>`
+    : '';
   const shortReason = film.reason
     ? `<div class="mt-1 rounded-lg border border-primary-container/20 bg-primary-container/[0.06] p-2.5">
          <p class="font-label-sm text-[9px] uppercase tracking-[.14em] text-primary-container mb-1">${t('Sana neden önerdik?')}</p>

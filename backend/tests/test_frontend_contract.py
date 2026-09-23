@@ -1182,14 +1182,15 @@ def test_the_recommendation_card_can_be_swiped_on_a_phone():
     assert "prefers-reduced-motion" in css
 
 
-def test_the_recommendation_card_keeps_only_the_reason():
-    """Reported: the taste paragraph and the plot summary were noise."""
+def test_the_recommendation_card_shows_plot_and_reason():
+    """A pick needs both the film's plot and the personalised rationale."""
     app_js = (FRONTEND / "js" / "app.js").read_text()
     reco_js = (FRONTEND / "js" / "recommendations.js").read_text()
 
-    # Poster, title, director, genres and "sana neden önerdik" — nothing else.
-    assert "function overviewBlock() {\n  return '';\n}" in reco_js
-    assert "const shortOverview = '';" in reco_js
+    assert "function overviewBlock(film)" in reco_js
+    assert "${t('Konu')}" in reco_js
+    assert "escapeHTML(film.overview)" in reco_js
+    assert "const shortOverview = film.overview" in reco_js
     assert "whyBlock" in reco_js
     # And the summary paragraph above the card is gone.
     assert "escapeHTML(o.summary)" not in app_js
@@ -1438,10 +1439,10 @@ def test_shell_asset_content_changes_force_a_version_bump():
     files that no longer existed.
     """
     expected = {
-        "js/app.js": "d87d5a19411a29bcdc263caa39ae42c537a65de4f4a65a28c872d47132c1ede3",
+        "js/app.js": "23c020c42eec626d05dbf356ce61856ea4eca7dab6543be5a41ce60519b7e210",
         "app.css": "5f763f94b8393ca456d31cb0cb9ded070201fe3b8dca83ac33350d958625287a",
         "js/share-cards.js": "75ec636dc005a1728c5039ba1d888fca802b0464d8f0492e47b5c1640692e904",
-        "js/i18n.js": "1b8e1a8d246aa980fe2223d20d0fd29864fe02eff3978a68bc87961dbe614355",
+        "js/i18n.js": "875102e381999c9c69f37abbeae78e6cfcf68bc161b9a2f141cd11aab88735d7",
         "site.webmanifest": "7a7de349179ed9f226d38632dfde5a8478edd10305972ea52641b0dc6aa7f405",
         "movienotes-mark.png": "850aa9117aa52768952843f8e2c410c0c17868877d81b2058274290373b4ee1e",
         "movienotes-icon-192.png": "3b04c52ffd23799ce424f1acefd0a1d7c386b8c968b09be9bd5c87b623c6ac12",
@@ -1480,11 +1481,11 @@ def test_every_app_shell_asset_has_an_explicit_immutable_version():
     api_version = "v=20260920.23"
     css_version = "v=20260920.22"
     assert f"/static/app.css?{css_version}" in html
-    assert "/static/js/app.js?v=20260923.25" in html
-    assert "./i18n.js?v=20260923.25" in app_js
+    assert "/static/js/app.js?v=20260923.26" in html
+    assert "./i18n.js?v=20260923.26" in app_js
     assert app_js.count(f"?{dependency_version}") == 2
     assert f"./api.js?{api_version}" in app_js
-    assert "./recommendations.js?v=20260920.23" in app_js
+    assert "./recommendations.js?v=20260923.26" in app_js
     assert "./share-cards.js?v=20260920.23" in app_js
     assert "./auth.js?v=20260920.23" in app_js
     assert f"./dom.js?{dependency_version}" in auth_js
@@ -1492,7 +1493,7 @@ def test_every_app_shell_asset_has_an_explicit_immutable_version():
     assert f"./dom.js?{dependency_version}" in profile_js
     assert "./i18n.js?v=20260920.23" in profile_js
     assert f"./dom.js?{dependency_version}" in recommendations_js
-    assert "./i18n.js?v=20260920.23" in recommendations_js
+    assert "./i18n.js?v=20260923.26" in recommendations_js
     assert f"./api.js?{api_version}" in share_js
     assert "./i18n.js?v=20260920.23" in share_js
     assert f"criterion-closet-bg.jpg?{dependency_version}" in source_css
