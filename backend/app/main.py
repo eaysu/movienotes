@@ -2537,18 +2537,10 @@ OFFICIAL_LIST_SOURCES = {
     "official_top_500": {
         "slug": "letterboxds-top-500-films",
         "pages": 5,
-        "reason": {
-            "tr": "Letterboxd'ın tüm zamanların en çok beğenilen 500 filmi arasından.",
-            "en": "From Letterboxd's 500 most highly rated films of all time.",
-        },
     },
     "official_most_fans": {
         "slug": "top-250-films-with-the-most-fans",
         "pages": 3,
-        "reason": {
-            "tr": "Letterboxd'da en çok hayranı olan 250 film arasından.",
-            "en": "From Letterboxd's 250 films with the most fans.",
-        },
     },
 }
 
@@ -2587,6 +2579,38 @@ _RANDOM_REASONS: dict[str, dict[str, str]] = {
     "chance": {
         "tr": " Kararsız kaldığın bir anda şansı bu filme bırakabilirsin.",
         "en": " When you cannot decide, you could leave it to chance and take this one.",
+    },
+    "official_top_director": {
+        "tr": "{title}, en sık döndüğün yönetmenlerden {director}'ın filmi; ayrıca Letterboxd Top 500'de yer alıyor.",
+        "en": "{title} is by {director}, one of the directors you return to most, and it also appears in Letterboxd's Top 500.",
+    },
+    "official_top_genre": {
+        "tr": "{title}, sık izlediğin {genre} tarafına yakın olduğu ve Letterboxd Top 500'de yer aldığı için öne çıktı.",
+        "en": "{title} stood out because it aligns with the {genre} films you return to and appears in Letterboxd's Top 500.",
+    },
+    "official_top_detail": {
+        "tr": "{title}, {director} imzalı bir {genre}; Letterboxd Top 500'deki yeriyle keşfetmeye değer.",
+        "en": "{title} is a {genre} film by {director}, with a place in Letterboxd's Top 500 worth exploring.",
+    },
+    "official_top_fallback": {
+        "tr": "{title}, Letterboxd Top 500'de yer alıyor ve henüz izlediklerinde görünmüyor.",
+        "en": "{title} is in Letterboxd's Top 500 and is not yet among your watched films.",
+    },
+    "official_fans_director": {
+        "tr": "{title}, en sık döndüğün yönetmenlerden {director}'ın filmi; Letterboxd'ın en çok hayranı olan 250 filmi arasında.",
+        "en": "{title} is by {director}, one of the directors you return to most, and is among Letterboxd's 250 films with the most fans.",
+    },
+    "official_fans_genre": {
+        "tr": "{title}, sık izlediğin {genre} tarafına yakın ve Letterboxd'da güçlü bir hayran kitlesi var.",
+        "en": "{title} aligns with the {genre} films you return to and has a strong Letterboxd fan base.",
+    },
+    "official_fans_detail": {
+        "tr": "{title}, {director} imzalı bir {genre}; Letterboxd'da en çok hayranı olan 250 filmden biri.",
+        "en": "{title} is a {genre} film by {director}, and one of Letterboxd's 250 films with the most fans.",
+    },
+    "official_fans_fallback": {
+        "tr": "{title}, Letterboxd'da en çok hayranı olan 250 filmden biri ve henüz izlediklerinde görünmüyor.",
+        "en": "{title} is one of Letterboxd's 250 films with the most fans and is not yet among your watched films.",
     },
 }
 
@@ -2809,9 +2833,57 @@ async def _hydrate_random_picks(chosen: list[EnrichedFilm], settings, cache, ser
     return chosen
 
 
-def _add_random_reasons(films: list, *, source: str, locale: str = "tr") -> list:
-    """Fill in the explanation for picks that did not come with one."""
+def _official_pick_reason(
+    film: EnrichedFilm,
+    source: str,
+    locale: str,
+    favorite_directors: list[str] | None,
+    favorite_genres: list[str] | None,
+) -> str:
+    """Give every official-list card a film-specific, taste-aware rationale."""
+    title = film.title or "Bu film"
+    director = (film.director or "").strip()
+    genres = [str(genre).strip() for genre in (film.genres or []) if str(genre).strip()]
+    director_matches = {
+        str(name).strip().casefold() for name in (favorite_directors or []) if name
+    }
+    genre_matches = {
+        str(name).strip().casefold() for name in (favorite_genres or []) if name
+    }
+    is_top = source == "official_top_500"
+    prefix = "official_top" if is_top else "official_fans"
+
+    if director and director.casefold() in director_matches:
+        return _random_reason(
+            f"{prefix}_director", locale, title=title, director=director
+        )
+    matching_genre = next((genre for genre in genres if genre.casefold() in genre_matches), "")
+    if matching_genre:
+        return _random_reason(
+            f"{prefix}_genre", locale, title=title, genre=matching_genre
+        )
+    if director and genres:
+        return _random_reason(
+            f"{prefix}_detail", locale, title=title, director=director, genre=genres[0]
+        )
+    return _random_reason(f"{prefix}_fallback", locale, title=title)
+
+
+def _add_random_reasons(
+    films: list,
+    *,
+    source: str,
+    locale: str = "tr",
+    favorite_directors: list[str] | None = None,
+    favorite_genres: list[str] | None = None,
+) -> list:
+    """Give every pick a concrete source and film/taste-specific explanation."""
     for film in films:
+        if source in OFFICIAL_LIST_SOURCES:
+            film.reason = _official_pick_reason(
+                film, source, locale, favorite_directors, favorite_genres
+            )
+            continue
         director = getattr(film, "director", "") or ""
         genres = getattr(film, "genres", None) or []
         lead = getattr(film, "reason", "") or _random_reason(
@@ -6002,13 +6074,15 @@ async def random_pick(req: RandomRequest, request: Request):
             favorite_directors=taste_directors,
             favorite_genres=taste_genres,
         )
-        if source in OFFICIAL_LIST_SOURCES:
-            reason = OFFICIAL_LIST_SOURCES[source]["reason"]["en" if response_locale == "en" else "tr"]
-            for film in chosen:
-                film.reason = reason
         chosen = await _hydrate_random_picks(chosen, settings, cache, service)
 
-        _add_random_reasons(chosen, source=source, locale=response_locale)
+        _add_random_reasons(
+            chosen,
+            source=source,
+            locale=response_locale,
+            favorite_directors=taste_directors,
+            favorite_genres=taste_genres,
+        )
         await _record_activity_event(
             service,
             account,

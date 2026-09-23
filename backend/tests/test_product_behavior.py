@@ -110,6 +110,35 @@ class ProductBehaviorTests(unittest.TestCase):
 
         self.assertIn("TMDb", film.reason)
 
+    def test_official_picks_explain_the_individual_taste_match(self):
+        director_match = EnrichedFilm(
+            title="Director Pick", slug="director-pick", director="A Director", genres=["Drama"]
+        )
+        genre_match = EnrichedFilm(
+            title="Genre Pick", slug="genre-pick", director="Someone Else", genres=["Mystery"]
+        )
+        detail_only = EnrichedFilm(
+            title="Detail Pick", slug="detail-pick", director="Third Director", genres=["Comedy"]
+        )
+
+        _add_random_reasons(
+            [director_match], source="official_top_500",
+            favorite_directors=["A Director"], favorite_genres=["Drama"],
+        )
+        _add_random_reasons(
+            [genre_match], source="official_top_500",
+            favorite_directors=["A Director"], favorite_genres=["Mystery"],
+        )
+        _add_random_reasons(
+            [detail_only], source="official_most_fans",
+            favorite_directors=["A Director"], favorite_genres=["Drama"],
+        )
+
+        self.assertIn("en sık döndüğün yönetmen", director_match.reason)
+        self.assertIn("sık izlediğin Mystery", genre_match.reason)
+        self.assertIn("Third Director", detail_only.reason)
+        self.assertIn("Comedy", detail_only.reason)
+
     def test_random_pool_comes_from_other_members_not_the_watchlist(self):
         rows = [
             {
