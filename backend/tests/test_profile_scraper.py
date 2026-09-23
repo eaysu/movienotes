@@ -61,6 +61,26 @@ class ProfileParserTests(unittest.TestCase):
         self.assertEqual(films[0].year, 2023)
         self.assertEqual(films[0].user_rating, 4.0)
 
+    def test_parses_current_lazy_poster_link_and_accessible_svg_rating(self):
+        # Current Letterboxd cards publish a film link and expose a member's
+        # rating through an SVG aria-label, rather than `rated-N` alone.
+        films = _parse_page(
+            """
+            <article data-item-link="/film/come-and-see/"
+                     data-item-name="Come and See (1985)">
+              <picture><source srcset="/resized/film-poster.jpg 1x"></picture>
+              <svg class="glyph -rating" aria-label="★★★★½"><title>★★★★½</title></svg>
+            </article>
+            """
+        )
+
+        self.assertEqual(len(films), 1)
+        self.assertEqual(films[0].slug, "come-and-see")
+        self.assertEqual(films[0].title, "Come and See")
+        self.assertEqual(films[0].year, 1985)
+        self.assertEqual(films[0].poster_url, "https://letterboxd.com/resized/film-poster.jpg")
+        self.assertEqual(films[0].user_rating, 4.5)
+
     def test_parses_avatar_identity_bio_and_ordered_favorite_four(self):
         profile = _parse_profile_page("sample_user", FIXTURE.read_text())
 
@@ -104,6 +124,25 @@ class ProfileParserTests(unittest.TestCase):
         self.assertEqual(profile.stats.get("this_year"), 73)
         self.assertEqual(profile.stats.get("followers"), 5)
         self.assertIn("stats", profile.to_dict())
+
+    def test_profile_keeps_working_if_utility_classes_change(self):
+        profile = _parse_profile_page(
+            "sample_user",
+            """
+            <section data-profile-summary>
+              <h1 class="person-display-name">Sample User</h1>
+              <div data-profile-avatar><img src="/avatar/sample.jpg"></div>
+              <div data-profile-bio>new markup bio</div>
+            </section>
+            <section id="favorites">
+              <div data-item-link="/film/perfect-days/" data-item-name="Perfect Days (2023)"></div>
+            </section>
+            """,
+        )
+        self.assertEqual(profile.display_name, "Sample User")
+        self.assertEqual(profile.avatar_url, "https://letterboxd.com/avatar/sample.jpg")
+        self.assertEqual(profile.bio, "new markup bio")
+        self.assertEqual([film.slug for film in profile.favorite_films], ["perfect-days"])
 
 
 class ProfileRetryTests(unittest.IsolatedAsyncioTestCase):
@@ -391,6 +430,15 @@ class FilmRatingParsingTests(unittest.TestCase):
     def test_malformed_json_does_not_raise(self):
         html = '<script type="application/ld+json">{not json</script>'
         self.assertIsNone(_parse_film_rating(html))
+
+    def test_reads_a_movie_rating_from_a_json_ld_graph(self):
+        html = """
+        <script nonce="new-attribute" type="application/ld+json">
+          {"@graph":[{"@type":"BreadcrumbList"}, {"@type":"Movie",
+          "aggregateRating":{"ratingValue":"4.32"}}]}
+        </script>
+        """
+        self.assertEqual(_parse_film_rating(html), 4.32)
 
 
 if __name__ == "__main__":

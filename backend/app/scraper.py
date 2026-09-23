@@ -13,6 +13,7 @@ import re
 import time
 from dataclasses import asdict, dataclass, field
 from typing import Optional
+from urllib.parse import urljoin
 
 try:
     from curl_cffi.requests import AsyncSession
@@ -434,19 +435,53 @@ def _parse_year_from_name(name: str) -> tuple[str, Optional[int]]:
     return name.strip(), None
 
 
+_FILM_PATH_RE = re.compile(r"(?:https?://letterboxd\.com)?/film/([^/?#]+)/?")
+
+
+def _slug_from_film_link(value: object) -> str:
+    """Return a film slug only from an actual Letterboxd ``/film/`` URL."""
+    match = _FILM_PATH_RE.search(str(value or "").strip())
+    return match.group(1).strip().lower() if match else ""
+
+
+def _stars_to_value(value: object) -> Optional[float]:
+    """Parse Letterboxd's accessible star text (for example ``★★★½``)."""
+    text = str(value or "").strip()
+    if not text or not any(char in text for char in _STAR_VALUES):
+        return None
+    total = sum(_STAR_VALUES.get(char, 0.0) for char in text)
+    return total if 0.5 <= total <= 5.0 else None
+
+
+def _rating_from_node(node) -> Optional[float]:
+    """Read either legacy CSS ratings or the current accessible SVG rating."""
+    classes = " ".join(node.get("class", []))
+    match = re.search(r"rated-(?:large-)?(\d{1,2})", classes)
+    if match and 1 <= int(match.group(1)) <= 10:
+        return int(match.group(1)) / 2.0
+
+    # Letterboxd's current markup exposes the rating to assistive technology
+    # through `aria-label` and also retains it in `<title>`.  Read both so the
+    # parser survives either minified or accessibility-first renderings.
+    return _stars_to_value(node.get("aria-label")) or _stars_to_value(
+        node.get_text("", strip=True)
+    )
+
+
 def _extract_rating(el) -> Optional[float]:
-    """Member rating from a `/films/` grid item's `rating rated-N` class (N = stars×2)."""
+    """Member rating from legacy grids and current SVG-based activity cards."""
     scopes = [el]
     if el.parent is not None:
         scopes.append(el.parent)
     for scope in scopes:
-        ratings = scope.select("span.rating, .rating")
-        if len(ratings) != 1:
-            continue  # a multi-poster scope would give the wrong film's rating
-        classes = " ".join(ratings[0].get("class", []))
-        m = re.search(r"rated-(?:large-)?(\d{1,2})", classes)
-        if m and 1 <= int(m.group(1)) <= 10:
-            return int(m.group(1)) / 2.0
+        ratings = scope.select(
+            'span.rating, .rating, svg.glyph.-rating, svg[aria-label*="★"]'
+        )
+        if len(ratings) == 1:
+            # Do not borrow a rating from a multi-poster parent/list container.
+            rating = _rating_from_node(ratings[0])
+            if rating is not None:
+                return rating
     return None
 
 
@@ -458,7 +493,8 @@ def _parse_page(html: str) -> list[ScrapedFilm]:
         slug = (
             el.get("data-item-slug")
             or el.get("data-film-slug")
-            or el.get("data-target-link", "").strip("/").split("/")[-1]
+            or _slug_from_film_link(el.get("data-item-link"))
+            or _slug_from_film_link(el.get("data-target-link"))
         ).strip()
         if not slug or slug in ("", "/"):
             return None
@@ -467,11 +503,7 @@ def _parse_page(html: str) -> list[ScrapedFilm]:
             or el.get("data-item-name", "")
             or el.get("data-film-name", "")
         ).strip())
-        title, year = (
-            _parse_year_from_name(display_name)
-            if display_name
-            else (_slug_to_title(slug), None)
-        )
+        title, year = _parse_year_from_name(display_name) if display_name else ("", None)
         if not year:
             raw_year = el.get("data-film-release-year", "")
             if raw_year.isdigit():
@@ -485,14 +517,30 @@ def _parse_page(html: str) -> list[ScrapedFilm]:
         if img:
             if img.get("alt") and not title:
                 title = img["alt"].strip()
-            # Letterboxd bazen src, bazen data-src, bazen srcset kullanır.
+            # Letterboxd has used eager images, lazy image attributes and
+            # picture/source elements across its recent grid renderers.
             # srcset örneği: "https://a.ltrbxd.com/.../0-70-0-105-crop.jpg 1x, ...2x"
-            src = img.get("src", "") or img.get("data-src", "")
+            src = (
+                img.get("src", "")
+                or img.get("data-src", "")
+                or img.get("data-original", "")
+            )
             if not src:
-                srcset = img.get("srcset", "")
+                srcset = img.get("srcset", "") or img.get("data-srcset", "")
+                if not srcset:
+                    source = el.select_one("picture source[srcset], source[srcset]")
+                    srcset = source.get("srcset", "") if source else ""
                 if srcset:
                     src = srcset.split(",")[0].strip().split(" ")[0]
-            if src and "empty-poster" not in src and src.startswith("http"):
+            src = urljoin(BASE_URL, src) if src else ""
+            if src and "empty-poster" not in src and src.startswith("https://"):
+                poster_url = src
+        else:
+            source = el.select_one("picture source[srcset], source[srcset]")
+            srcset = source.get("srcset", "") if source else ""
+            src = srcset.split(",")[0].strip().split(" ")[0] if srcset else ""
+            src = urljoin(BASE_URL, src) if src else ""
+            if src and "empty-poster" not in src and src.startswith("https://"):
                 poster_url = src
         if not title:
             title = _slug_to_title(slug)
@@ -533,11 +581,16 @@ def _parse_page(html: str) -> list[ScrapedFilm]:
     # Newer list markup: li[data-film-slug] or li[data-item-slug]
     if not candidates:
         candidates = soup.select("li[data-film-slug], li[data-item-slug]")
-    # poster-list items with data-target-link pointing to /film/slug/
+    # Current LazyPoster cards expose both data-item-link and data-target-link.
+    # Accept either so a partial rollout of the newer markup cannot blank a
+    # whole collection. Restrict the fallback to real film links, not user/list
+    # links that happen to be rendered in the same page.
     if not candidates:
         candidates = [
-            el for el in soup.select("[data-target-link]")
-            if "/film/" in el.get("data-target-link", "")
+            el for el in soup.select("[data-item-link], [data-target-link]")
+            if _slug_from_film_link(
+                el.get("data-item-link") or el.get("data-target-link")
+            )
         ]
 
     seen: set[str] = set()
@@ -637,27 +690,35 @@ async def resolve_missing_posters(films: list) -> int:
 # A film page publishes its community average as schema.org JSON-LD, on the
 # five-star scale members actually rate in. TMDb's ten-point vote is a different
 # crowd on a different scale, so it cannot stand in for it.
-_LD_JSON_RE = re.compile(
-    r'<script type="application/ld\+json">(.*?)</script>', re.DOTALL
-)
-
-
 def _parse_film_rating(html: str) -> Optional[float]:
-    for block in _LD_JSON_RE.findall(html):
-        payload = block.strip()
+    """Read schema.org ratings from either current JSON-LD script shape."""
+    soup = BeautifulSoup(html, "lxml")
+    for script in soup.select('script[type="application/ld+json"]'):
+        payload = script.get_text().strip()
         # Letterboxd wraps the JSON in a CDATA comment.
         payload = payload.removeprefix("/* <![CDATA[ */").removesuffix("/* ]]> */")
         try:
             data = json.loads(payload.strip())
         except ValueError:
             continue
-        rating = (data.get("aggregateRating") or {}).get("ratingValue")
-        try:
-            value = float(rating)
-        except (TypeError, ValueError):
-            continue
-        if 0.0 < value <= 5.0:
-            return round(value, 2)
+
+        # JSON-LD may be a single Movie object, a list, or an @graph as the
+        # site changes how it combines structured metadata on a film page.
+        roots = data if isinstance(data, list) else [data]
+        for root in roots:
+            nodes = root.get("@graph", []) if isinstance(root, dict) else []
+            if isinstance(root, dict):
+                nodes = [root, *nodes] if isinstance(nodes, list) else [root]
+            for node in nodes:
+                if not isinstance(node, dict):
+                    continue
+                rating = (node.get("aggregateRating") or {}).get("ratingValue")
+                try:
+                    value = float(rating)
+                except (TypeError, ValueError):
+                    continue
+                if 0.0 < value <= 5.0:
+                    return round(value, 2)
     return None
 
 
@@ -688,27 +749,32 @@ async def scrape_film_rating(slug: str) -> Optional[float]:
 def _parse_profile_page(username: str, html: str) -> ScrapedProfile:
     """Parse public profile identity and ordered Favorite films metadata."""
     soup = BeautifulSoup(html, "lxml")
-    summary = soup.select_one(".profile-summary")
+    summary = soup.select_one(".profile-summary, [data-profile-summary]")
     if summary is None:
         raise _empty_page_error(username, "profile", html)
 
-    display_el = summary.select_one(".person-display-name .label")
+    display_el = summary.select_one(
+        ".person-display-name .label, .person-display-name, [data-profile-name]"
+    )
     display_name = (
         _html.unescape(display_el.get_text(" ", strip=True))
         if display_el is not None
         else username
     )
-    avatar = summary.select_one("#avatar-large img") or summary.select_one(
-        ".profile-avatar img"
+    avatar = (
+        summary.select_one("#avatar-large img")
+        or summary.select_one(".profile-avatar img, [data-profile-avatar] img")
     )
-    avatar_url = avatar.get("src", "").strip() if avatar is not None else ""
+    avatar_url = urljoin(BASE_URL, avatar.get("src", "").strip()) if avatar else ""
     if not avatar_url.startswith("https://"):
         avatar_url = ""
 
-    bio_el = summary.select_one(".js-bio-content") or summary.select_one(".js-bio")
+    bio_el = summary.select_one(
+        ".js-bio-content, .js-bio, .profile-bio, [data-profile-bio]"
+    )
     bio = _html.unescape(bio_el.get_text(" ", strip=True)) if bio_el else ""
 
-    favorites_section = soup.select_one("#favourites")
+    favorites_section = soup.select_one("#favourites, #favorites, [data-favourites]")
     favorite_films = (
         _parse_page(str(favorites_section))[:4] if favorites_section is not None else []
     )
@@ -1078,11 +1144,8 @@ def _entry_date(stamp) -> str:
 
 def _stars_to_rating(article) -> Optional[float]:
     """`★★★½` → 3.5. Puanı olmayan kayıtta yıldız düğümü hiç yok."""
-    title = article.select_one("svg.glyph.-rating title")
-    if not title:
-        return None
-    total = sum(_STAR_VALUES.get(char, 0.0) for char in title.get_text(strip=True))
-    return total or None
+    rating = article.select_one("svg.glyph.-rating, svg[aria-label]")
+    return _rating_from_node(rating) if rating is not None else None
 
 
 def _parse_review_page(page_html: str) -> list[DiaryEntry]:
@@ -1096,7 +1159,11 @@ def _parse_review_page(page_html: str) -> list[DiaryEntry]:
     out: list[DiaryEntry] = []
     for article in soup.select("article.production-viewing"):
         match = _VIEWING_ID.match(article.get("data-object-id") or "")
+        # The current page retains `.js-review-body`; keep the semantic/body
+        # fallbacks for a class-name-only front-end refactor.
         body = article.select_one(".js-review-body")
+        if body is None:
+            body = article.select_one("[data-full-text-url], .js-review .body-text.-prose")
         if not match or not body:
             continue
         poster = article.select_one("[data-item-slug]")
