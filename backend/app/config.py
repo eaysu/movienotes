@@ -56,9 +56,9 @@ class Settings(BaseSettings):
     sandbox_mode: bool = False
 
     # --- Sinema gündemi (bülten) ---
-    # Ships dark: the release layer and the venue framework are inert until this
-    # is turned on for an account cohort.
-    bulletin_enabled: bool = False
+    # Sinema gündemi ve ona bağlı haftalık vizyon bildirimi varsayılan olarak
+    # açıktır. Kaynaklar boşsa kart yalnızca hazırlanıyor durumunu gösterir.
+    bulletin_enabled: bool = True
     bulletin_region: str = "TR"
     # Kart üzerindeki şehir seçicisi; boş seçim ülke geneli vizyon demektir.
     bulletin_cities: str = "İstanbul,Ankara,İzmir"
@@ -87,17 +87,24 @@ class Settings(BaseSettings):
     # değil, koştaki üye sayısı: bir sayfadan üç kayıt okumakla on iki kayıt
     # okumak aynı isteği harcıyor.
     diary_scan_enabled: bool = True
-    diary_scan_members_per_run: int = 20   # saatlik bütçe — üye sayısından bağımsız
+    diary_scan_members_per_run: int = 24   # saatlik bütçe — üye sayısından bağımsız
     diary_scan_entries: int = 3            # üye başına en yeni kaç yorumlu kayıt
     # Yazan üye sık, yazmayan üye seyrek taranıyor. Ardışık boş taramada eşik
     # ikiye katlanıp tavana kadar çıkıyor; ilk yeni kayıtta tabana dönüyor.
     # Üye sayısı büyüdükçe bütçeyi asıl koruyan mekanizma bu.
     diary_scan_min_hours: int = 1
-    diary_scan_max_hours: int = 24
+    diary_scan_max_hours: int = 12
     # Yeni üyenin arşivi: uygulamaya girdikten sonra, koş başına birkaç sayfa.
     # Sayfa başına on iki kayıt, yani bir koşta ~36 kayıt yeniden eskiye doğru.
     diary_backfill_members_per_run: int = 2
     diary_backfill_pages_per_run: int = 3
+
+    # Bildirimler sunucu saatine değil, ürünün yayın saatine göre çalışır.
+    # Her teslim `event_key` ile idempotent olduğundan Render yeniden başlasa
+    # bile aynı akşam ikinci bir bildirim oluşmaz.
+    nightly_pick_enabled: bool = True
+    nightly_pick_hour: int = 22
+    nightly_pick_timezone: str = "Europe/Istanbul"
 
     # --- Storage ---
     data_dir: str = "data"

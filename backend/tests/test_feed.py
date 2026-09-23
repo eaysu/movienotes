@@ -671,8 +671,9 @@ class DiaryScheduleTests(unittest.TestCase):
         self.assertIn('getattr(settings, "diary_scan_members_per_run", 20)', block)
         self.assertIn('getattr(settings, "diary_scan_entries", 3)', block)
         self.assertIn("[:keep]", block)
-        self.assertIn("diary_scan_members_per_run: int = 20", self.config)
+        self.assertIn("diary_scan_members_per_run: int = 24", self.config)
         self.assertIn("diary_scan_entries: int = 3", self.config)
+        self.assertIn("diary_scan_max_hours: int = 12", self.config)
 
     def test_a_member_who_never_writes_is_scanned_less_and_less_often(self):
         """Sabit bütçenin üyelik büyüdükçe yetmesini sağlayan mekanizma."""

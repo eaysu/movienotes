@@ -28,6 +28,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import urljoin, urlsplit
+from zoneinfo import ZoneInfo
 
 import httpx
 from fastapi import FastAPI, HTTPException, Request, Response
@@ -115,6 +116,8 @@ async def _lifespan(_app):
     # us, rather than requiring another visit to resume the crawl.
     if getattr(settings, "has_auth", False):
         schedulers.append(asyncio.create_task(_profile_sync_retry_loop()))
+        if getattr(settings, "nightly_pick_enabled", True):
+            schedulers.append(asyncio.create_task(_nightly_pick_loop()))
     try:
         yield
     finally:
@@ -1498,6 +1501,7 @@ def health() -> dict:
         "supabase_enabled": settings.has_supabase,
         "auth_enabled": getattr(settings, "has_auth", False),
         "web_push_enabled": settings.has_web_push,
+        "bulletin_enabled": bool(getattr(settings, "bulletin_enabled", False)),
         # The shell reads this to drop the password fields: there is no account
         # to protect, and asking for a password nobody set would be theatre.
         "sandbox": bool(getattr(settings, "sandbox_mode", False)),
@@ -3041,6 +3045,11 @@ def _kick_bulletin_ingest(settings, service) -> None:
                 await asyncio.to_thread(
                     service.clear_bulletin_digests, screenings.week_start().isoformat()
                 )
+                # Vizyon bildirimi eskiden yalnız kullanıcı kartı açtığında
+                # oluşuyordu. Yeni program geldiyse herkes için arka planda
+                # hesaplanır; bu yol yalnız mevcut veriyi okur, Letterboxd'a
+                # yeni bir istek göndermez.
+                await _notify_bulletin_members(settings, service)
         except Exception as exc:  # noqa: BLE001 - never surface to the caller
             log.warning("bulletin ingest failed: %s", exc)
 
@@ -3057,6 +3066,134 @@ async def _notify_bulletin(service, account, week: str, payload: dict) -> None:
         service.notify, account.id, "bulletin", None, None,
         event_key=f"bulletin:{week}",
     )
+
+
+async def _notify_bulletin_members(settings, service) -> None:
+    """Proactively deliver the weekly cinema highlight to relevant members.
+
+    The notification's event key is week-scoped, so a venue update can safely
+    invoke this again without producing a second alert. A missing watchlist or
+    taste profile simply means no alert for that member.
+    """
+    rows = await asyncio.to_thread(service.list_screenings)
+    if not rows:
+        return
+    accounts = await asyncio.to_thread(service.ready_notification_accounts)
+    if not accounts:
+        return
+    supabase_client, _ = _make_cache(settings)
+    pcache = _make_persistent_cache(settings, supabase_client)
+    week = screenings.week_start().isoformat()
+    delivered = 0
+    for account in accounts:
+        try:
+            watchlist: list = []
+            if pcache is not None:
+                entry = await asyncio.to_thread(
+                    pcache.get_with_freshness, "films_watchlist", account.username, ttl=None
+                )
+                watchlist = (entry[0] if entry else []) or []
+            watched, profile = await asyncio.gather(
+                asyncio.to_thread(service.get_rated_watched_films, account.id),
+                asyncio.to_thread(service.get_profile, account),
+            )
+            payload = screenings.build_bulletin(
+                rows, watched, watchlist, (profile or {}).get("taste") or {}
+            )
+            if not payload.get("highlighted"):
+                continue
+            inserted = await asyncio.to_thread(
+                service.notify, account.id, "bulletin", None, None,
+                event_key=f"bulletin:{week}", push_url="/#/profil",
+            )
+            delivered += int(bool(inserted))
+        except Exception:  # noqa: BLE001 - one member cannot stop the cohort
+            log.warning("bulletin notification skipped account=%s", account.id, exc_info=True)
+    if delivered:
+        log.info("bulletin notifications delivered=%s week=%s", delivered, week)
+
+
+_nightly_pick_task: asyncio.Task | None = None
+
+
+def _nightly_pick_copy(account: Account, title: str) -> dict:
+    """Only the movie title travels in a push payload; no private taste data."""
+    return {"film_title": title[:120]}
+
+
+def _kick_nightly_picks(settings, service, local_now: datetime) -> None:
+    """Start the 22:00 Istanbul recommendation delivery once per process.
+
+    The database event key is the actual delivery guarantee. The in-process
+    task guard only avoids duplicate work while one Render instance is alive.
+    """
+    global _nightly_pick_task
+    if _nightly_pick_task is not None and not _nightly_pick_task.done():
+        return
+    local_date = local_now.date().isoformat()
+
+    async def _run():
+        delivered = 0
+        accounts = await asyncio.to_thread(service.ready_notification_accounts)
+        for account in accounts:
+            try:
+                # This RPC only samples the local Movienotes catalogue and
+                # excludes films the member has already watched. It never
+                # scrapes Letterboxd and therefore cannot interfere with the
+                # serialized import queue.
+                pool = await asyncio.to_thread(
+                    service.community_random_films, account.id, 16
+                )
+                candidates = [
+                    row for row in pool
+                    if str(row.get("title") or "").strip()
+                ]
+                if not candidates:
+                    continue
+                # The pool is already a fresh random sample. A stable index
+                # makes a retry within the same evening select the same entry
+                # when the source sample happens to preserve its order.
+                digest = hashlib.sha256(
+                    f"{account.id}:{local_date}".encode("utf-8")
+                ).digest()
+                film = candidates[int.from_bytes(digest[:2], "big") % len(candidates)]
+                inserted = await asyncio.to_thread(
+                    service.notify, account.id, "bulletin", None, None,
+                    event_key=f"nightly-pick:{local_date}",
+                    push_kind="nightly_pick",
+                    push_context=_nightly_pick_copy(account, str(film["title"])),
+                    push_url="/#/araclar",
+                )
+                delivered += int(bool(inserted))
+            except Exception:  # noqa: BLE001 - keep the delivery cohort moving
+                log.warning("nightly pick skipped account=%s", account.id, exc_info=True)
+            # Space local reads and push sends too; this job has no reason to
+            # burst against Supabase or a browser push gateway.
+            await asyncio.sleep(0.08)
+        if delivered:
+            log.info("nightly picks delivered=%s date=%s", delivered, local_date)
+
+    _nightly_pick_task = asyncio.create_task(_run())
+
+
+async def _nightly_pick_loop() -> None:
+    """Wake every minute and trigger the idempotent 22:00 Istanbul delivery."""
+    settings = get_settings()
+    service = _auth_service()
+    try:
+        local_tz = ZoneInfo(settings.nightly_pick_timezone)
+    except Exception:
+        local_tz = ZoneInfo("Europe/Istanbul")
+    while True:
+        try:
+            now = datetime.now(local_tz)
+            if now.hour == max(0, min(23, int(settings.nightly_pick_hour))):
+                _kick_nightly_picks(settings, service, now)
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001 - scheduling must not affect requests
+            log.warning("nightly pick scheduler failed", exc_info=True)
+        await asyncio.sleep(60)
 
 
 @app.get("/api/bulletin")

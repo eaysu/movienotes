@@ -45,6 +45,45 @@ FEED_DIARY_WINDOW_DAYS = 7
 FEED_FOLLOWING_WINDOW_DAYS = 30
 
 
+# Push bildirimi, uygulama içi bildirimin kısa ve ekranda bağımsız okunabilen
+# karşılığıdır. Metinler olayın kendisini söyler; "yeni bildirimin var" gibi
+# boş bir uyarı üyeyi uygulamayı açmaya zorlamaz.
+_PUSH_COPY: dict[str, dict[str, tuple[str, str]]] = {
+    "follow": {
+        "tr": ("Yeni bir takipçi", "Bir sinefil seni takibe aldı. Ortak filmlerinizin izini sürmek için profiline göz at."),
+        "en": ("A new follower", "A cinephile has started following you. Take a look at the films you may have in common."),
+    },
+    "follow_request": {
+        "tr": ("Yeni takip isteği", "Bir sinefil seni takip etmek istiyor. İsteğini bildirimlerden değerlendirebilirsin."),
+        "en": ("New follow request", "A cinephile would like to follow you. You can review the request in Notifications."),
+    },
+    "follow_accepted": {
+        "tr": ("Takip isteğin kabul edildi", "Artık birbirinizin sinema dünyasını daha yakından keşfedebilirsiniz."),
+        "en": ("Your follow request was accepted", "You can now explore each other’s cinema worlds more closely."),
+    },
+    "blend_request": {
+        "tr": ("Yeni bir Blend isteği", "Bir sinefil zevklerinizi karşılaştırmak istiyor. Kesişiminizde hangi filmler var, birlikte görün."),
+        "en": ("A new Blend request", "A cinephile wants to compare your tastes. See which films meet in the middle."),
+    },
+    "blend_accepted": {
+        "tr": ("Blend’in hazır", "İsteğin kabul edildi. Ortak film haritanız şimdi seni bekliyor."),
+        "en": ("Your Blend is ready", "Your request was accepted. Your shared film map is ready to explore."),
+    },
+    "blend_rejected": {
+        "tr": ("Blend isteğin yanıtlandı", "Bu kez eşleşemediniz; sinema başka bir ortak noktada yeniden buluşturabilir."),
+        "en": ("Your Blend request was answered", "Not a match this time — cinema may bring you together elsewhere."),
+    },
+    "bulletin": {
+        "tr": ("Perdede sana göre bir film var", "Bu hafta vizyonda zevkine yakın bir film seni bekliyor. Seanslara göz at."),
+        "en": ("A film for you is on screen", "A film close to your taste is in theatres this week. Have a look at the showtimes."),
+    },
+    "nightly_pick": {
+        "tr": ("Bu gece ne izlesen?", "{title} seni bekliyor. Işıkları kıs, ilk sahneyi aç."),
+        "en": ("What should you watch tonight?", "{title} is waiting for you. Dim the lights and press play."),
+    },
+}
+
+
 def _clip_review(body: str) -> str:
     """Çok uzun yorumu sınırda keser; kesildiğini görünür kılar."""
     body = body.strip()
@@ -1954,6 +1993,27 @@ class AuthService:
                 break
         return never + due
 
+    def ready_notification_accounts(self, *, limit: int = 1000) -> list[Account]:
+        """Members with enough saved film data for a useful system message.
+
+        This is deliberately a database-only cohort. Scheduled notifications
+        must never cause Letterboxd requests or wake a stalled profile import.
+        """
+        fields = (
+            "id,auth_user_id,username,display_name,avatar_url,account_status,"
+            "profile_sync_status,onboarding_completed_at,letterboxd_stats,"
+            "discoverable,letter_receiving_enabled,private_account"
+        )
+        try:
+            rows = self._service_client().table("users").select(fields).eq(
+                "account_status", "active"
+            ).eq("profile_sync_status", "ready").not_.is_(
+                "auth_user_id", "null"
+            ).order("id").limit(max(1, min(int(limit), 2000))).execute().data or []
+        except Exception:
+            return []
+        return [self._account(row) for row in rows]
+
     def diary_backfill_candidates(self, *, limit: int = 2) -> list[dict]:
         """Arşivi henüz taranmamış üyeler; en erken kaydolan önce.
 
@@ -2521,7 +2581,9 @@ class AuthService:
     def notify(
         self, user_id: int, kind: str, actor_id: int | None = None,
         post_id: str | None = None, *, event_key: str | None = None,
-    ) -> None:
+        push_kind: str | None = None, push_context: dict | None = None,
+        push_url: str = "/#/bildirimler",
+    ) -> bool:
         """Bir bildirim yazar. `actor_id` yoksa bildirim sistemdendir
         ("bu hafta perdede" gibi). `event_key` verilirse tekil indeks aynı
         olayın ikinci kez bildirilmesini engelliyor."""
@@ -2532,8 +2594,14 @@ class AuthService:
                 "event_key": event_key,
             }).execute()
         except Exception:
-            return
-        self._send_web_push(user_id, kind)
+            # `event_key` aynı olayın ikinci kez teslim edilmesini engeller.
+            # Satır yazılmadıysa push da atılmaz; zamanlayıcılar böylece
+            # güvenle tekrar çalışabilir.
+            return False
+        self._send_web_push(
+            user_id, push_kind or kind, context=push_context, url=push_url,
+        )
+        return True
 
     def upsert_push_subscription(self, account: Account, subscription: dict, user_agent: str = "") -> None:
         endpoint = str(subscription.get("endpoint") or "")
@@ -2546,7 +2614,32 @@ class AuthService:
             "user_agent": user_agent[:500], "updated_at": datetime.now(timezone.utc).isoformat(),
         }, on_conflict="endpoint").execute()
 
-    def _send_web_push(self, user_id: int, kind: str) -> None:
+    def _push_locale(self, user_id: int) -> str:
+        """Background jobs have no device headers; explicit English wins.
+
+        `auto` follows the device in the web UI. A scheduled delivery cannot
+        know that device language, so Turkish remains the product default.
+        """
+        try:
+            row = self._first(self._service_client().table("users").select(
+                "preferred_locale"
+            ).eq("id", user_id).limit(1).execute()) or {}
+            return "en" if row.get("preferred_locale") == "en" else "tr"
+        except Exception:
+            return "tr"
+
+    def _push_message(self, user_id: int, kind: str, context: dict | None = None) -> tuple[str, str]:
+        locale = self._push_locale(user_id)
+        title, body = _PUSH_COPY.get(kind, {}).get(
+            locale, ("Movienotes", "Yeni bir bildirimin var.")
+        )
+        values = {"title": str((context or {}).get("film_title") or "Bu film")[:120]}
+        return title.format(**values), body.format(**values)
+
+    def _send_web_push(
+        self, user_id: int, kind: str, *, context: dict | None = None,
+        url: str = "/#/bildirimler",
+    ) -> None:
         if not self.settings.has_web_push or webpush is None:
             return
         try:
@@ -2555,7 +2648,8 @@ class AuthService:
             ).eq("user_id", user_id).execute().data or []
         except Exception:
             return
-        payload = json.dumps({"title": "Movienotes", "body": "Yeni bir bildirimin var.", "kind": kind})
+        title, body = self._push_message(user_id, kind, context)
+        payload = json.dumps({"title": title, "body": body, "kind": kind, "url": url})
         for row in rows:
             try:
                 webpush(
@@ -2574,7 +2668,7 @@ class AuthService:
         service = self._service_client()
         try:
             rows = service.table("notifications").select(
-                "id,kind,actor_id,post_id,read_at,created_at"
+                "id,kind,actor_id,post_id,event_key,read_at,created_at"
             ).eq("user_id", account.id).order("created_at", desc=True).limit(limit).execute().data or []
         except Exception:
             return []

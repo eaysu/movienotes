@@ -368,6 +368,7 @@ const EN = Object.freeze({
   'Blend isteğini kabul etti': 'accepted your Blend request',
   'Blend isteğini reddetti': 'declined your Blend request',
   'İzleme listendeki bir film bu hafta perdede': 'A film from your watchlist is in theatres this week',
+  'bu gece için bir film önerisi hazırladı': 'prepared a film recommendation for tonight',
   'bir şey yaptı': 'did something',
   'Bir sinefil': 'A cinephile',
   '{count} yeni bildirimin var.': 'You have {count} new notifications.',

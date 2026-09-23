@@ -202,7 +202,7 @@ yüzden sınır üyede: `DIARY_SCAN_MEMBERS_PER_RUN` (20) koş başına istek sa
 üyelik büyüse de sabit tutuyor. Sabit bütçeyi gerçekten yazan üyelere ayıran
 şey geri çekilme: `users.diary_idle_streak` ardışık kaç taramanın boş geçtiğini
 sayıyor ve eşiği ikiye katlıyor (`DIARY_SCAN_MIN_HOURS` 1 saatten
-`DIARY_SCAN_MAX_HOURS` 24 saate kadar), ilk yeni kayıtta tabana dönüyor. Yazan
+`DIARY_SCAN_MAX_HOURS` 12 saate kadar), ilk yeni kayıtta tabana dönüyor. Yazan
 üye her saat, yıllardır yazmayan üye günde bir taranıyor. Bütçe yetmediğinde tek
 sonuç kaydın biraz geç düşmesi; akış penceresi en dar yerde yedi gün olduğu için
 görünürlüğü etkilemiyor.
@@ -210,7 +210,18 @@ görünürlüğü etkilemiyor.
 Üye başına yalnız üç kayıt okumanın bir bedeli var: bir üye aynı saat içinde
 üçten fazla yorum yazarsa fazlası o taramada atlanıyor ve bir daha bakılmıyor.
 Toplu tarama (`scripts.import_diary`) çalıştığında bu boşluklar kapanıyor.
-Sayıyı büyütmek fazladan istek getirmiyor, `DIARY_SCAN_ENTRIES` yeterli.
+Güncel varsayılan saatte 24 üyedir; bu, 133 üyelik mevcut havuzda en geç birkaç
+saat içinde yeniden kontrol anlamına gelir. Sayıyı büyütmek fazladan istek
+getirmiyor, `DIARY_SCAN_ENTRIES` yeterli.
+
+## Bildirimler
+
+Tarayıcı bildirimleri profil ayarından izin verildiğinde takip, Blend ve sinema
+gündemi olayları cihazda da görünür. Vizyon programı yenilendiğinde, izleme
+listesi veya zevk profiliyle eşleşen üyeler haftada en fazla bir kez bildirim
+alır. Her gün `NIGHTLY_PICK_HOUR` (varsayılan Türkiye saatiyle 22.00) anında
+izlenmemiş yerel katalogdan bir film seçilir; aynı günün teslimi `event_key`
+ile tekilleştiği için Render yeniden başlasa bile ikinci bildirim gönderilmez.
 
 **Yeni üyenin arşivi.** Kayıt sırasında değil, üye uygulamaya girdikten sonra
 taranıyor: akış açıldığında arka planda bir iş tetikleniyor ve koş başına

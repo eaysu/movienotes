@@ -25,7 +25,7 @@ import {
   localePreference,
   setLocalePreference,
   t,
-} from './i18n.js?v=20260923.26';
+} from './i18n.js?v=20260923.27';
 
 initI18n();
 
@@ -2585,11 +2585,12 @@ async function openProfileFollows(kind) {
 
 function notificationRow(item) {
   const actor = item.actor || {};
+  const nightlyPick = item.kind === 'bulletin' && String(item.event_key || '').startsWith('nightly-pick:');
   const who = escapeHTML(actor.display_name || actor.username || 'Bir sinefil');
   const post = item.post;
   const excerpt = post ? escapeHTML((post.body || '').slice(0, 90)) : '';
   const film = post && post.film_title ? escapeHTML(post.film_title) : '';
-  const what = {
+  const what = t({
     like: 'notunu beğendi',
     reply: 'notuna cevap yazdı',
     follow: 'seni takip etmeye başladı',
@@ -2599,11 +2600,13 @@ function notificationRow(item) {
     blend_request: 'sana Blend isteği gönderdi',
     blend_accepted: 'Blend isteğini kabul etti',
     blend_rejected: 'Blend isteğini reddetti',
-    // Aktörü olmayan tek tür: sistemden gelir.
-    bulletin: 'İzleme listendeki bir film bu hafta perdede',
-  }[item.kind] || 'bir şey yaptı';
-  const icon = { bulletin: 'theaters', like: 'favorite', reply: 'chat_bubble', follow: 'person_add', follow_request: 'person_add', follow_accepted: 'how_to_reg', letter: 'mail', blend_request: 'join_inner', blend_accepted: 'handshake', blend_rejected: 'close' }[item.kind] || 'notifications';
-  const destination = item.kind === 'letter'
+    // Aktörü olmayan sistem bildirimleri.
+    bulletin: nightlyPick ? 'bu gece için bir film önerisi hazırladı' : 'İzleme listendeki bir film bu hafta perdede',
+  }[item.kind] || 'bir şey yaptı');
+  const icon = { bulletin: nightlyPick ? 'movie' : 'theaters', like: 'favorite', reply: 'chat_bubble', follow: 'person_add', follow_request: 'person_add', follow_accepted: 'how_to_reg', letter: 'mail', blend_request: 'join_inner', blend_accepted: 'handshake', blend_rejected: 'close' }[item.kind] || 'notifications';
+  const destination = nightlyPick
+    ? 'tools'
+    : item.kind === 'letter'
     ? 'inbox'
     : (item.kind.startsWith('blend_') ? 'blends' : (item.kind === 'bulletin' ? 'profile' : ''));
   const unread = !item.read_at;

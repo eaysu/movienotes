@@ -10,7 +10,7 @@ self.addEventListener('push', event => {
     badge: '/static/movienotes-badge-96.png',
     // Adres, uygulamanın kendi yönlendirmesiyle aynı olmalı; `#notifications`
     // tanınmadığı için bildirime dokunmak akışa düşürüyordu.
-    data: { url: '/#/bildirimler' },
+    data: { url: payload.url || '/#/bildirimler' },
   }));
 });
 

@@ -30,6 +30,18 @@ services:
         value: "100"
       - key: FAVORITE_DIRECTOR_BOOST
         value: "0.08"
+      - key: DIARY_SCAN_MEMBERS_PER_RUN
+        value: "24"
+      - key: DIARY_SCAN_MAX_HOURS
+        value: "12"
+      - key: NIGHTLY_PICK_ENABLED
+        value: "true"
+      - key: NIGHTLY_PICK_HOUR
+        value: "22"
+      - key: NIGHTLY_PICK_TIMEZONE
+        value: "Europe/Istanbul"
+      - key: BULLETIN_ENABLED
+        value: "true"
       - key: SUPABASE_URL
         sync: false
       - key: SUPABASE_KEY
