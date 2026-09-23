@@ -985,6 +985,38 @@ async def scrape_watchlist(
     )
 
 
+async def scrape_official_list(
+    list_slug: str,
+    *,
+    start_page: int = 1,
+    max_pages: int = 1,
+    max_retries: int = 1,
+) -> ScrapeListResult:
+    """Read one small page window from a public Letterboxd official list.
+
+    Official lists are a catalogue source, not a member archive: callers cache
+    their pages and sample one at a time instead of downloading hundreds of
+    posters for every recommendation request.
+    """
+    normalized = list_slug.strip().strip("/").lower()
+    if not re.fullmatch(r"[a-z0-9-]+", normalized):
+        raise ScrapeError("Geçersiz Letterboxd resmi liste adı.")
+    page = max(1, int(start_page or 1))
+    pages = max(1, int(max_pages or 1))
+    key = ("official", normalized, page, pages, max_retries)
+    return await _coalesce_scrape(
+        key,
+        lambda: _scrape_list(
+            "official",
+            f"list/{normalized}",
+            delay=0,
+            max_pages=pages,
+            start_page=page,
+            max_retries=max_retries,
+        ),
+    )
+
+
 async def scrape_diary(
     username: str,
     *,

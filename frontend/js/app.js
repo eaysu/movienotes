@@ -25,7 +25,7 @@ import {
   localePreference,
   setLocalePreference,
   t,
-} from './i18n.js?v=20260920.23';
+} from './i18n.js?v=20260923.25';
 
 initI18n();
 
@@ -508,11 +508,19 @@ function setProfileWatchMode(mode) {
     btn.classList.toggle('text-on-surface-variant', !on);
     btn.classList.toggle('border-primary-container/50', on && mode === 'taste');
     btn.classList.toggle('border-tertiary-container/50', on && mode === 'random');
+    btn.classList.toggle('border-secondary-container/50', on && mode === 'official_top_500');
+    btn.classList.toggle('border-error-container/50', on && mode === 'official_most_fans');
     btn.classList.toggle('border-outline-variant/25', !on);
   });
-  $('profile-watch-go').className = `mt-4 w-full ${mode === 'random' ? 'bg-tertiary-container text-on-tertiary-container' : 'bg-primary-container text-black'} py-3.5 rounded-xl font-label-md text-label-md uppercase tracking-wider hover:opacity-90 active:scale-[0.98] transition-all duration-200 flex items-center justify-center gap-2 disabled:opacity-40`;
-  $('profile-watch-go-icon').textContent = mode === 'random' ? 'shuffle' : 'auto_awesome';
-  $('profile-watch-go-label').textContent = mode === 'random' ? 'Rastgele seç' : 'Öner';
+  const detail = {
+    taste: { color: 'bg-primary-container text-black', icon: 'auto_awesome', label: 'Öner' },
+    random: { color: 'bg-tertiary-container text-on-tertiary-container', icon: 'shuffle', label: 'Rastgele seç' },
+    official_top_500: { color: 'bg-secondary-container text-on-secondary-container', icon: 'workspace_premium', label: 'Top 500’den seç' },
+    official_most_fans: { color: 'bg-error-container text-on-error-container', icon: 'groups', label: 'Top Fans 250’den seç' },
+  }[mode] || { color: 'bg-primary-container text-black', icon: 'auto_awesome', label: 'Öner' };
+  $('profile-watch-go').className = `mt-4 w-full ${detail.color} py-3.5 rounded-xl font-label-md text-label-md uppercase tracking-wider hover:opacity-90 active:scale-[0.98] transition-all duration-200 flex items-center justify-center gap-2 disabled:opacity-40`;
+  $('profile-watch-go-icon').textContent = detail.icon;
+  $('profile-watch-go-label').textContent = t(detail.label);
 }
 
 // ── Shared SSE consumer for /api/recommend & /api/random ────────────────
@@ -703,7 +711,7 @@ function _recoLoadingHTML(mode) {
   return `
     <div class="flex flex-col items-center gap-4 py-6 text-center">
       <div class="spinner" style="width:44px;height:44px"></div>
-      <p id="profile-reco-status" class="font-label-md text-label-md text-on-surface-variant uppercase tracking-wide">${mode === 'random' ? 'Topluluk havuzu karıştırılıyor' : 'İzleme listen okunuyor'}</p>
+      <p id="profile-reco-status" class="font-label-md text-label-md text-on-surface-variant uppercase tracking-wide">${mode === 'taste' ? t('İzleme listen okunuyor') : mode === 'random' ? t('Topluluk havuzu karıştırılıyor') : t('Letterboxd listesi hazırlanıyor')}</p>
     </div>`;
 }
 
@@ -726,8 +734,8 @@ async function startInlineReco(mode, { preserveViewport = false } = {}) {
   }
 
   await consumeRecommendationStream(
-    mode === 'random' ? '/api/random' : '/api/recommend',
-    { username },
+    mode === 'taste' ? '/api/recommend' : '/api/random',
+    mode === 'taste' ? { username } : { username, source: mode === 'random' ? 'community' : mode },
     {
       timeoutMs: 300000,
       onStep: (step) => {
@@ -738,7 +746,7 @@ async function startInlineReco(mode, { preserveViewport = false } = {}) {
         _recoBusy = false;
         // Surface the result even if the user wandered off mid-request.
         $('profile-reco-panel').classList.add('open');
-        if (mode === 'random') renderInlineRandom(event);
+        if (mode !== 'taste') renderInlineRandom(event, mode);
         else renderInlineTaste(event);
       },
       onError: (msg) => {
@@ -823,7 +831,7 @@ function _toRandomBtn(total) {
 }
 
 // Rastgele: sınırsız. Havuz, topluluğun izlediği ama senin izlemediğin filmler.
-function renderInlineRandom(data) {
+function renderInlineRandom(data, mode = 'random') {
   const films = data.films || [];
   if (!films.length) {
     $('profile-reco-body').innerHTML = `<div class="rounded-xl px-4 py-3 bg-error-container/30 text-error font-body-md text-body-md">Film bulunamadı.</div>${_recoResetBtn()}`;
@@ -835,7 +843,7 @@ function renderInlineRandom(data) {
   $('profile-reco-body').innerHTML = `
     <div class="line-rise">${buildRandomCard(films[0])}</div>
     <div class="mt-3 grid grid-cols-2 gap-2">
-      <button type="button" id="profile-reco-reroll" class="flex items-center justify-center gap-1.5 rounded-xl border border-secondary-container/30 bg-secondary-container/10 px-2 py-2.5 text-center font-label-md text-label-md uppercase tracking-wide text-secondary-container hover:bg-secondary-container/20 transition-colors"><span class="material-symbols-outlined text-[18px] shrink-0">casino</span>Başka bir tane</button>
+      <button type="button" id="profile-reco-reroll" data-reco-source="${escapeHTML(mode)}" class="flex items-center justify-center gap-1.5 rounded-xl border border-secondary-container/30 bg-secondary-container/10 px-2 py-2.5 text-center font-label-md text-label-md uppercase tracking-wide text-secondary-container hover:bg-secondary-container/20 transition-colors"><span class="material-symbols-outlined text-[18px] shrink-0">casino</span>${t('Başka bir tane')}</button>
       <button type="button" id="profile-reco-totaste" class="flex items-center justify-center gap-1.5 rounded-xl border border-primary-container/30 bg-primary-container/10 px-2 py-2.5 text-center font-label-md text-label-md uppercase tracking-wide text-primary-container hover:bg-primary-container/20 transition-colors"><span class="material-symbols-outlined text-[18px] shrink-0">psychology</span>Zevkime göre öner</button>
     </div>`;
 }
@@ -6422,9 +6430,11 @@ $('profile-reco-body').addEventListener('click', event => {
     startInlineReco('random');
     return;
   }
-  if (event.target.closest('#profile-reco-reroll')) {
-    setProfileWatchMode('random');
-    startInlineReco('random', { preserveViewport: true });
+  const reroll = event.target.closest('#profile-reco-reroll');
+  if (reroll) {
+    const source = reroll.dataset.recoSource || 'random';
+    setProfileWatchMode(source);
+    startInlineReco(source, { preserveViewport: true });
     return;
   }
 });

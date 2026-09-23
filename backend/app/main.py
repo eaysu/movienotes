@@ -70,6 +70,7 @@ from .scraper import (
     scrape_films,
     scrape_profile,
     scrape_recent_watched,
+    scrape_official_list,
     resolve_missing_posters,
     scrape_watchlist,
     scrape_watched,
@@ -1279,6 +1280,15 @@ class RecommendRequest(_UsernameRequest):
 
 class RandomRequest(_UsernameRequest):
     username: str
+    source: str = "community"
+
+    @field_validator("source")
+    @classmethod
+    def validate_source(cls, value: str) -> str:
+        valid = {"community", "official_top_500", "official_most_fans"}
+        if value not in valid:
+            raise ValueError("Geçersiz öneri kaynağı.")
+        return value
 
 
 class DeleteDataRequest(_UsernameRequest):
@@ -2521,6 +2531,26 @@ RANDOM_POOL_SAMPLE = 40   # rows requested from the community pool per call
 # It is an aim, not a guarantee: an empty pool is worse than a mediocre film.
 RANDOM_MIN_AVERAGE = 3.5
 RANDOM_PICK_COUNT = 3
+OFFICIAL_LIST_CACHE_TTL = 30 * 24 * 3600
+OFFICIAL_LIST_CACHE_NAMESPACE = "letterboxd_official_list_pages"
+OFFICIAL_LIST_SOURCES = {
+    "official_top_500": {
+        "slug": "letterboxds-top-500-films",
+        "pages": 5,
+        "reason": {
+            "tr": "Letterboxd'ın tüm zamanların en çok beğenilen 500 filmi arasından.",
+            "en": "From Letterboxd's 500 most highly rated films of all time.",
+        },
+    },
+    "official_most_fans": {
+        "slug": "top-250-films-with-the-most-fans",
+        "pages": 3,
+        "reason": {
+            "tr": "Letterboxd'da en çok hayranı olan 250 film arasından.",
+            "en": "From Letterboxd's 250 films with the most fans.",
+        },
+    },
+}
 
 
 # The random mode writes its own explanations rather than paying for an LLM
@@ -2664,6 +2694,63 @@ async def _community_random_pool(
         )
         films.append(film)
     return films
+
+
+async def _official_list_pool(source: str, service, account, cache) -> list[EnrichedFilm]:
+    """Sample an official list page and remove every film the member watched.
+
+    The list page is retained for a month in the shared cache. A recommendation
+    normally reads one cached page and one local database query; it does not
+    trigger a profile crawl or download an entire public list.
+    """
+    config = OFFICIAL_LIST_SOURCES.get(source)
+    if not config or service is None or account is None:
+        return []
+
+    pages = list(range(1, int(config["pages"]) + 1))
+    # A heavily watched cinephile can have every title from a sampled page.
+    # Try a few distinct pages, still at most one network request per uncached
+    # page and zero Letterboxd requests for warm cache entries.
+    for page in _random.sample(pages, min(3, len(pages))):
+        cache_key = f"{source}:page:{page}"
+        cached = await asyncio.to_thread(
+            cache.get, OFFICIAL_LIST_CACHE_NAMESPACE, cache_key, OFFICIAL_LIST_CACHE_TTL
+        )
+        rows = cached if isinstance(cached, list) else []
+        if not rows:
+            try:
+                window = await scrape_official_list(
+                    config["slug"], start_page=page, max_pages=1, max_retries=1
+                )
+            except ScrapeError:
+                continue
+            rows = [film.to_dict() for film in window.films if film.slug]
+            if not rows:
+                continue
+            await asyncio.to_thread(
+                cache.set, OFFICIAL_LIST_CACHE_NAMESPACE, cache_key, rows
+            )
+            flush = getattr(cache, "flush", None)
+            if flush:
+                await asyncio.to_thread(flush)
+
+        slugs = [str(row.get("slug") or "") for row in rows if row.get("slug")]
+        if not slugs:
+            continue
+        watched = await asyncio.to_thread(service.get_watched_slugs, account.id)
+        unseen = [row for row in rows if row.get("slug") and row["slug"] not in watched]
+        if unseen:
+            return [
+                EnrichedFilm(
+                    title=str(row.get("title") or "").strip(),
+                    year=row.get("year"),
+                    slug=str(row.get("slug") or ""),
+                    poster_url=row.get("poster_url") or None,
+                )
+                for row in unseen
+                if str(row.get("title") or "").strip()
+            ]
+    return []
 
 
 def _add_random_reasons(films: list, *, source: str, locale: str = "tr") -> list:
@@ -5802,7 +5889,7 @@ async def recommend(req: RecommendRequest, request: Request):
 
 @app.post("/api/random")
 async def random_pick(req: RandomRequest, request: Request):
-    """SSE stream: topluluğun izlediği, kullanıcının izlemediği filmlerden seç.
+    """SSE stream: seçilen katalogda, kullanıcının izlemediği filmlerden seç.
 
     Watchlist'ten bağımsızdır ve günlük bir kota taşımaz: her istek yeni bir
     örnek çeker, böylece kullanıcı beğenene kadar çevirebilir. Letterboxd'a hiç
@@ -5820,9 +5907,12 @@ async def random_pick(req: RandomRequest, request: Request):
         supabase_client, cache = _make_cache(settings)
 
         yield _sse({"type": "step", "step": "enriching"})
-        pool = await _community_random_pool(service, account, locale=response_locale)
-        source = "community"
-        if not pool:
+        source = req.source
+        if source in OFFICIAL_LIST_SOURCES:
+            pool = await _official_list_pool(source, service, account, cache)
+        else:
+            pool = await _community_random_pool(service, account, locale=response_locale)
+        if not pool and source == "community":
             # No community history yet (or no account): fall back to TMDb Discover.
             pool = await _random_discover_pool(settings, service, account, cache)
             source = "discover"
@@ -5835,7 +5925,7 @@ async def random_pick(req: RandomRequest, request: Request):
             )
             yield _sse({
                 "type": "error",
-                "detail": "Şu an önerecek film bulamadık; biraz sonra tekrar dene.",
+                "detail": "Bu listede henüz izlemediğin bir film bulamadık; biraz sonra tekrar dene.",
             })
             return
 
@@ -5856,6 +5946,10 @@ async def random_pick(req: RandomRequest, request: Request):
             favorite_directors=taste_directors,
             favorite_genres=taste_genres,
         )
+        if source in OFFICIAL_LIST_SOURCES:
+            reason = OFFICIAL_LIST_SOURCES[source]["reason"]["en" if response_locale == "en" else "tr"]
+            for film in chosen:
+                film.reason = reason
         missing_details = [
             film for film in chosen if not film.poster_url or not film.overview
         ]
