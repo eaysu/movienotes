@@ -146,6 +146,13 @@ class ProfileParserTests(unittest.TestCase):
 
 
 class ProfileRetryTests(unittest.IsolatedAsyncioTestCase):
+    async def test_default_budget_is_single_file_and_low_rate(self):
+        with patch.dict("os.environ", {"LETTERBOXD_MIN_INTERVAL_SECONDS": "4"}):
+            budget = _LetterboxdRequestBudget()
+        self.assertEqual(budget.max_concurrency, 1)
+        self.assertEqual(budget.current_limit, 1)
+        self.assertGreaterEqual(budget.min_interval, 4.0)
+
     async def test_list_does_not_pause_after_its_final_requested_page(self):
         page_one = """
         <div data-item-slug="perfect-days" data-item-name="Perfect Days (2023)">
@@ -345,7 +352,7 @@ class ProfileRetryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.text, "blocked")
         self.assertEqual(len(session.urls), 1)
 
-    async def test_review_full_text_requests_are_bounded_and_parallel(self):
+    async def test_review_full_text_requests_are_serialized(self):
         reviews = """
         <article class="production-viewing" data-object-id="viewing:101">
           <time class="timestamp" datetime="2026-09-15"></time>
@@ -390,7 +397,7 @@ class ProfileRetryTests(unittest.IsolatedAsyncioTestCase):
         ):
             entries = await scrape_reviewed_diary("sample_user", max_pages=1)
 
-        self.assertEqual(peak, 2)
+        self.assertEqual(peak, 1)
         self.assertEqual(
             [entry.review for entry in entries],
             ["complete letterboxd-review-101", "complete letterboxd-review-102"],

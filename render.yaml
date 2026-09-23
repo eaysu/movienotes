@@ -10,7 +10,9 @@ services:
     # aksi hâlde elle oluşturulmuş servis bu dosyayı okumaz.
     rootDir: backend
     buildCommand: pip install -r requirements.txt
-    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT --log-level warning
+    # One process is intentional: the application's Letterboxd request budget
+    # and full-profile queue must remain process-wide and strictly serialized.
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 1 --log-level warning
     envVars:
       - key: PYTHON_VERSION
         value: "3.12.7"
@@ -22,6 +24,8 @@ services:
         value: gpt-5-mini-2025-08-07
       - key: NUM_RECOMMENDATIONS
         value: "5"
+      - key: LETTERBOXD_MIN_INTERVAL_SECONDS
+        value: "4"
       - key: RECOMMENDATION_HISTORY_LIMIT
         value: "100"
       - key: FAVORITE_DIRECTOR_BOOST

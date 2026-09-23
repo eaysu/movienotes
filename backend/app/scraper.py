@@ -8,6 +8,7 @@ import asyncio
 import html as _html
 import json
 import logging
+import os
 import random
 import re
 import time
@@ -61,7 +62,9 @@ class LetterboxdCircuitOpenError(RuntimeError):
 class _LetterboxdRequestBudget:
     """Process-wide adaptive budget for every request to Letterboxd.
 
-    Requests are deliberately serialized. A 403/429 opens a process-wide
+    Requests are deliberately serialized and spaced by at least four seconds.
+    This is a low-volume, source-friendly policy rather than an attempt to
+    work around an upstream access control. A 403/429 opens a process-wide
     circuit for long enough that a queued sync can checkpoint and retry later,
     instead of turning one upstream block into many near-identical requests.
     This protects profile syncs, entry syncs, and recommendation jobs from
@@ -71,12 +74,16 @@ class _LetterboxdRequestBudget:
     def __init__(
         self,
         max_concurrency: int = 1,
-        min_interval: float = 2.5,
+        min_interval: float | None = None,
         block_seconds: float = 120.0,
     ):
         self.max_concurrency = max_concurrency
         self.current_limit = max_concurrency
-        self.min_interval = min_interval
+        self.min_interval = (
+            max(0.0, float(os.environ.get("LETTERBOXD_MIN_INTERVAL_SECONDS", "4")))
+            if min_interval is None
+            else min_interval
+        )
         self.block_seconds = block_seconds
         self._active = 0
         self._next_allowed = 0.0
@@ -922,7 +929,8 @@ async def _scrape_list(
             else:
                 referer = f"{BASE_URL}/{username}/{list_path}/page/{page - 1}/"
 
-            # curl-cffi — retry + parmak izi rotasyonu
+            # One shared, rate-limited request at a time. A block is never
+            # retried by changing identity or by increasing request volume.
             resp, status = await _fetch_with_retry(
                 session, direct_url, referer, max_retries=max_retries
             )
@@ -1238,19 +1246,13 @@ async def scrape_reviewed_diary(
                 seen.update(entry.key for entry in fresh)
                 truncated = [entry for entry in fresh if entry.review.endswith("…")]
                 if truncated:
-                    # Review detail endpoints are independent.  Fetch a small
-                    # bounded batch in parallel instead of serially turning a
-                    # page of long reviews into N round trips.  The process-wide
-                    # Letterboxd budget remains the final concurrency guard.
-                    gate = asyncio.Semaphore(2)
-
-                    async def hydrate(entry: DiaryEntry) -> None:
-                        async with gate:
-                            entry.review = await _full_review_text(
-                                session, entry.key, entry.review,
-                            )
-
-                    await asyncio.gather(*(hydrate(entry) for entry in truncated))
+                    # Keep optional full-text reads in source order. The shared
+                    # budget serializes requests already; avoiding task fan-out
+                    # also prevents different users' review reads interleaving.
+                    for entry in truncated:
+                        entry.review = await _full_review_text(
+                            session, entry.key, entry.review,
+                        )
                     full_text_count += len(truncated)
                 out.extend(fresh)
                 if len(entries) < 12:
@@ -1424,14 +1426,16 @@ async def scrape_recent_watched(
     `/films/` sayfa 1 tarihsiz loglanan filmleri de yakalar ve grid'de puan
     taşır; RSS son ~50 diary puanını tamamlar. Blokluysa/boşsa boş liste döner.
     """
-    rss_task = asyncio.create_task(_scrape_watched_rss(username))
     try:
         diary_films, _complete = await scrape_films(
             username, start_page=1, max_pages=1, film_limit=72, max_retries=max_retries
         )
     except ScrapeError:
         diary_films = []
-    rss_films = await rss_task
+    # Start the auxiliary RSS read only after the films page has settled.
+    # It would wait behind the shared request budget anyway, so sequencing it
+    # makes the low-volume policy explicit and keeps the queue predictable.
+    rss_films = await _scrape_watched_rss(username)
 
     by_slug: dict[str, ScrapedFilm] = {}
     order: list[str] = []
@@ -1470,7 +1474,6 @@ async def scrape_watched(
     Döner: (films, complete) — complete, taramanın bir blokla yarıda kalıp kalmadığı.
     """
     diary_pages = max(1, -(-film_limit // 50))
-    rss_task = asyncio.create_task(_scrape_watched_rss(username))
     try:
         diary_films, complete = await scrape_diary(
             username,
@@ -1485,9 +1488,9 @@ async def scrape_watched(
     by_slug = {f.slug: f for f in diary_films if f.slug}
     combined = list(diary_films)
 
-    # RSS diary ile paralel çekilir ve liste dolmuş olsa bile rating'ler mevcut
-    # kayıtlara merge edilir; aksi halde kişisel puan sinyali kaybolur.
-    rss_films = await rss_task
+    # RSS puanları da taramanın geri kalanıyla aynı sıralı kuyruktan geçer.
+    # Liste dolsa bile mevcut kayıtların puanlarını güncellemek için merge edilir.
+    rss_films = await _scrape_watched_rss(username)
     for f in rss_films:
         if f.slug:
             if f.slug in by_slug:
