@@ -214,6 +214,11 @@ def test_png_posters_are_fetched_with_credentials_into_local_blobs():
     assert "const blob = await response.blob()" in share_js
     assert "URL.createObjectURL(blob)" in share_js
     assert "releaseShareImage(image)" in share_js
+    assert "const SHARE_IMAGE_CONCURRENCY = 2" in share_js
+    assert "const SHARE_IMAGE_ATTEMPTS = 3" in share_js
+    assert "async function loadShareImages(subjects)" in share_js
+    assert "image.crossOrigin = 'anonymous'" in share_js
+    assert "await decodeShareImage(image)" in share_js
 
 
 def test_existing_or_pending_blend_routes_to_its_current_location():
@@ -1439,9 +1444,9 @@ def test_shell_asset_content_changes_force_a_version_bump():
     files that no longer existed.
     """
     expected = {
-        "js/app.js": "2bc423c3a09c237be92bb7eaa9039e0fbda6a6251e5c799f9d4757c7f229f997",
+        "js/app.js": "47336774ef6aeebea1dcf2fb1c5b4e0ce61eaa2d35365b70dbbf789d7c37d190",
         "app.css": "5f763f94b8393ca456d31cb0cb9ded070201fe3b8dca83ac33350d958625287a",
-        "js/share-cards.js": "75ec636dc005a1728c5039ba1d888fca802b0464d8f0492e47b5c1640692e904",
+        "js/share-cards.js": "8397afa5225b6d5751be0d794a902d49b0857b77901ee6627c3dbd3302cce23f",
         "js/i18n.js": "4b1ab656db8c6afc9b11f0c884144eee80f18cf2e81749d286a43fbc1228338b",
         "site.webmanifest": "7a7de349179ed9f226d38632dfde5a8478edd10305972ea52641b0dc6aa7f405",
         "movienotes-mark.png": "850aa9117aa52768952843f8e2c410c0c17868877d81b2058274290373b4ee1e",
@@ -1481,12 +1486,12 @@ def test_every_app_shell_asset_has_an_explicit_immutable_version():
     api_version = "v=20260920.23"
     css_version = "v=20260920.22"
     assert f"/static/app.css?{css_version}" in html
-    assert "/static/js/app.js?v=20260923.27" in html
+    assert "/static/js/app.js?v=20260926.1" in html
     assert "./i18n.js?v=20260923.27" in app_js
     assert app_js.count(f"?{dependency_version}") == 2
     assert f"./api.js?{api_version}" in app_js
     assert "./recommendations.js?v=20260923.26" in app_js
-    assert "./share-cards.js?v=20260920.23" in app_js
+    assert "./share-cards.js?v=20260926.1" in app_js
     assert "./auth.js?v=20260920.23" in app_js
     assert f"./dom.js?{dependency_version}" in auth_js
     assert "./i18n.js?v=20260920.23" in auth_js
@@ -1565,7 +1570,7 @@ def test_png_share_renderer_is_lazy_loaded_on_first_share_action():
 
     imports = app_js.split("// ── Cinema facts", 1)[0]
     assert "from './share-cards.js" not in imports
-    assert "import('./share-cards.js?v=20260920.23')" in imports
+    assert "import('./share-cards.js?v=20260926.1')" in imports
     assert "const shareCards = await loadShareCardsModule();" in app_js
 
 

@@ -3,6 +3,9 @@ import { t } from './i18n.js?v=20260920.23';
 
 const WIDTH = 1080;
 const HEIGHT = 1350;
+const SHARE_IMAGE_CONCURRENCY = 2;
+const SHARE_IMAGE_ATTEMPTS = 3;
+const SHARE_IMAGE_TIMEOUT = 20000;
 // Kartın altına basılan adres; alan adı alınınca burası da değişir.
 const SITE_LABEL = 'movie-boxd.onrender.com';
 let previewObjectURL = '';
@@ -140,38 +143,59 @@ function drawFooter(ctx, label, width = WIDTH, height = HEIGHT) {
 }
 
 function shareImageProxyURL(subject) {
-  try {
-    const params = new URLSearchParams();
-    const value = typeof subject === 'string' ? subject : subject?.poster_url;
-    if (value) {
+  const params = new URLSearchParams();
+  const value = typeof subject === 'string' ? subject : subject?.poster_url;
+  if (value) {
+    try {
       const url = new URL(clean(value));
       if (url.protocol === 'https:') params.set('url', url.href);
+    } catch (_) {
+      // A stale or relative poster URL must not prevent the server from using
+      // the film's saved asset or TMDb id below.
     }
-    if (typeof subject === 'object' && subject) {
-      const slug = clean(subject.slug || subject.film_slug);
-      const tmdbId = Number(subject.tmdb_id);
-      if (slug) params.set('slug', slug);
-      if (Number.isInteger(tmdbId) && tmdbId > 0) params.set('tmdb_id', String(tmdbId));
-    }
-    const query = params.toString();
-    return query ? `${API_BASE}/api/share/image?${query}` : '';
+  }
+  if (typeof subject === 'object' && subject) {
+    const slug = clean(subject.slug || subject.film_slug);
+    const tmdbId = Number(subject.tmdb_id);
+    if (slug) params.set('slug', slug);
+    if (Number.isInteger(tmdbId) && tmdbId > 0) params.set('tmdb_id', String(tmdbId));
+  }
+  const query = params.toString();
+  return query ? `${API_BASE}/api/share/image?${query}` : '';
+}
+
+function directShareImageURL(subject) {
+  const value = typeof subject === 'string' ? subject : subject?.poster_url;
+  try {
+    const url = new URL(clean(value));
+    return url.protocol === 'https:' ? url.href : '';
   } catch (_) {
     return '';
   }
 }
 
-async function loadShareImage(subject) {
+async function decodeShareImage(image) {
+  // `load` alone is not enough on Safari: canvas can occasionally paint an
+  // image before its decoded pixels are ready. `decode()` makes the PNG output
+  // deterministic, while old browsers still have the onload fallback.
+  if (typeof image.decode === 'function') {
+    try { await image.decode(); } catch (_) { return false; }
+  }
+  return image.naturalWidth > 0 && image.naturalHeight > 0;
+}
+
+async function loadShareImageOnce(subject, cacheMode = 'force-cache') {
   const src = shareImageProxyURL(subject);
   if (!src) return null;
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 12000);
+  const timer = setTimeout(() => controller.abort(), SHARE_IMAGE_TIMEOUT);
   try {
     // Explicit fetch keeps auth cookies on the proxy request and converts the
     // response into a local blob URL. Canvas never sees the remote CDN origin,
     // so Safari/iOS cannot silently taint or drop the poster.
     const response = await fetch(src, {
       credentials: 'include',
-      cache: 'force-cache',
+      cache: cacheMode,
       signal: controller.signal,
     });
     if (!response.ok) return null;
@@ -180,7 +204,12 @@ async function loadShareImage(subject) {
     const objectURL = URL.createObjectURL(blob);
     return await new Promise(resolve => {
       const image = new Image();
-      image.onload = () => {
+      image.onload = async () => {
+        if (!await decodeShareImage(image)) {
+          URL.revokeObjectURL(objectURL);
+          resolve(null);
+          return;
+        }
         image._shareObjectURL = objectURL;
         resolve(image);
       };
@@ -196,6 +225,57 @@ async function loadShareImage(subject) {
   } finally {
     clearTimeout(timer);
   }
+}
+
+async function loadCorsShareImage(subject) {
+  const src = directShareImageURL(subject);
+  if (!src) return null;
+  return new Promise(resolve => {
+    const image = new Image();
+    image.crossOrigin = 'anonymous';
+    image.onload = async () => resolve(await decodeShareImage(image) ? image : null);
+    image.onerror = () => resolve(null);
+    image.src = src;
+  });
+}
+
+async function loadShareImage(subject) {
+  for (let attempt = 0; attempt < SHARE_IMAGE_ATTEMPTS; attempt += 1) {
+    const image = await loadShareImageOnce(subject, attempt ? 'no-store' : 'force-cache');
+    if (image) return image;
+    if (attempt < SHARE_IMAGE_ATTEMPTS - 1) {
+      await new Promise(resolve => setTimeout(resolve, 250 * (attempt + 1)));
+    }
+  }
+  // TMDb permits CORS and this also covers a poster that the member's browser
+  // already loaded but whose proxy request was transiently unavailable. It is
+  // used only when it remains safe to draw onto the canvas.
+  return loadCorsShareImage(subject);
+}
+
+async function loadShareImages(subjects) {
+  const images = new Array(subjects.length).fill(null);
+  let next = 0;
+  async function worker() {
+    while (next < subjects.length) {
+      const index = next;
+      next += 1;
+      images[index] = await loadShareImage(subjects[index]);
+    }
+  }
+  await Promise.all(Array.from(
+    { length: Math.min(SHARE_IMAGE_CONCURRENCY, subjects.length) }, worker,
+  ));
+  return images;
+}
+
+function requireSharePosters(images) {
+  if (!images.some(image => !image)) return;
+  // A share card is a record of these films, not a best-effort gallery. Do
+  // not let a retryable CDN hiccup turn into a PNG with a branded placeholder
+  // in place of one of the films.
+  images.forEach(releaseShareImage);
+  throw new Error(t('Bir veya daha fazla film posteri alınamadı. PNG eksiksiz oluşturulamadı; lütfen tekrar dene.'));
 }
 
 function releaseShareImage(image) {
@@ -247,7 +327,8 @@ async function drawPosterStrip(ctx, films, y, accent, options = {}) {
   const height = width * 1.5;
   const total = width * visible.length + gap * (visible.length - 1);
   const start = (WIDTH - total) / 2;
-  const images = await Promise.all(visible.map(film => loadShareImage(film)));
+  const images = await loadShareImages(visible);
+  if (options.requirePosters) requireSharePosters(images);
   visible.forEach((film, index) => {
     const x = start + index * (width + gap);
     drawPoster(ctx, images[index], film, x, y, width, height, accent);
@@ -261,13 +342,14 @@ async function drawPosterStrip(ctx, films, y, accent, options = {}) {
   });
 }
 
-async function drawCompactPosterGrid(ctx, films, y, accent) {
+async function drawCompactPosterGrid(ctx, films, y, accent, options = {}) {
   const visible = (films || []).filter(Boolean).slice(0, 10);
   const columns = Math.min(5, visible.length);
   const width = 172;
   const height = 258;
   const gap = 18;
-  const images = await Promise.all(visible.map(film => loadShareImage(film)));
+  const images = await loadShareImages(visible);
+  if (options.requirePosters) requireSharePosters(images);
   visible.forEach((film, index) => {
     const row = Math.floor(index / columns);
     const indexInRow = index % columns;
@@ -392,9 +474,11 @@ export async function renderBlendShareCard(data, mode = 'watched') {
   font(ctx, 18, 700);
   drawLines(ctx, [t(isWatchlist ? (data.common_watchlist_films?.length ? 'İKİMİZİN DE İZLEMEK İSTEDİĞİ' : 'İKİ ZEVKİ BULUŞTURACAK') : 'ÖNE ÇIKAN ORTAK FİLMLER')], 72, 652, 22, accent);
   if (!isWatchlist && films.length > 5) {
-    await drawCompactPosterGrid(ctx, films, 690, accent);
+    await drawCompactPosterGrid(ctx, films, 690, accent, { requirePosters: true });
   } else {
-    await drawPosterStrip(ctx, films, 700, accent, { limit: 5, maxPosterWidth: 172 });
+    await drawPosterStrip(ctx, films, 700, accent, {
+      limit: 5, maxPosterWidth: 172, requirePosters: true,
+    });
   }
   drawFooter(ctx, `${user1} × ${user2}`);
 
