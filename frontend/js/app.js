@@ -25,7 +25,7 @@ import {
   localePreference,
   setLocalePreference,
   t,
-} from './i18n.js?v=20260923.27';
+} from './i18n.js?v=20261003.1';
 
 initI18n();
 
@@ -1426,11 +1426,13 @@ let _account = null;
 let _persistedProfile = null;
 let _lastUnreadNotificationCount = null;
 let _feedNotificationPollTimer = null;
+// Legacy bio-verification state kept for older clients still finishing the
+// previous registration flow.
 let _verification = null;
 let _deferredVerificationTimer = null;
 let _resetChallenge = null;
-// Parola, kayıt sırasında girildiği haliyle bio doğrulaması bitene kadar
-// bellekte tutulur; doğrulama başarılıysa oturum otomatik açılır, sonra silinir.
+// Legacy password state: the current signup flow never puts a password in the
+// browser, but an older tab may still finish its bio-verification challenge.
 let _pendingRegPassword = null;
 let _registrationAccount = null;
 
@@ -5575,10 +5577,10 @@ function _scrapeWaitReassurance(startText) {
   return () => timers.forEach(clearTimeout);
 }
 
-function _challengeWaitReassurance() {
-  setAuthMessage('Doğrulama kodu hazırlanıyor…');
+function _registerWaitReassurance() {
+  setAuthMessage('Hesabın hazırlanıyor…');
   const timers = [
-    setTimeout(() => setAuthMessage('Kod hazırlanıyor, birkaç saniye daha…'), 4000),
+    setTimeout(() => setAuthMessage('Profil bağlantısı gecikti, birkaç saniye daha…'), 4000),
     setTimeout(() => setAuthMessage('Hesap bağlantısı gecikti ama hâlâ çalışıyor…'), 10000),
   ];
   return () => timers.forEach(clearTimeout);
@@ -5586,35 +5588,19 @@ function _challengeWaitReassurance() {
 
 async function startRegistration(event) {
   event.preventDefault();
-  const password = $('register-password').value;
-  if (password !== $('register-password-confirm').value) {
-    setAuthMessage('Parolalar eşleşmiyor.', true);
-    return;
-  }
   const button = $('btn-register');
   button.disabled = true;
-  const clearReassurance = _challengeWaitReassurance();
+  const clearReassurance = _registerWaitReassurance();
   try {
-    _verification = await apiJSON('/api/auth/register/start', {
+    const data = await apiJSON('/api/auth/register/quick', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         username: $('register-username').value.trim(),
-        password,
-        password_confirm: $('register-password-confirm').value,
       }),
     });
-    // Bio doğrulaması bitince oturumu otomatik açmak için parolayı sakla.
-    _pendingRegPassword = password;
-    $('register-password').value = '';
-    $('register-password-confirm').value = '';
-    $('register-form').classList.add('hidden');
-    $('register-form').classList.remove('flex');
-    $('auth-tabs').classList.add('hidden');
-    $('verification-code').textContent = _verification.verification_code;
-    $('verify-panel').classList.remove('hidden');
-    $('verify-panel').classList.add('flex');
-    setAuthMessage('Kod 15 dakika geçerli. Bio’yu kaydettikten sonra kontrol et.');
+    setAuthMessage(null);
+    enterApp(data.account, { fromRegistration: Boolean(data.created) });
   } catch (error) {
     setAuthMessage(error.message || 'Hesap oluşturulamadı.', true);
   } finally {

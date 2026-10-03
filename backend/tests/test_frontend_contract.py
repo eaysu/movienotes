@@ -1444,10 +1444,10 @@ def test_shell_asset_content_changes_force_a_version_bump():
     files that no longer existed.
     """
     expected = {
-        "js/app.js": "47336774ef6aeebea1dcf2fb1c5b4e0ce61eaa2d35365b70dbbf789d7c37d190",
+        "js/app.js": "3e0f6a24492864fadc28e83e6f78f2a4cd5a88d327eeebbe5a094286584aaddc",
         "app.css": "5f763f94b8393ca456d31cb0cb9ded070201fe3b8dca83ac33350d958625287a",
         "js/share-cards.js": "8397afa5225b6d5751be0d794a902d49b0857b77901ee6627c3dbd3302cce23f",
-        "js/i18n.js": "4b1ab656db8c6afc9b11f0c884144eee80f18cf2e81749d286a43fbc1228338b",
+        "js/i18n.js": "146a460675af0184d90fa9cf6847e12cd5bceb43b8ea7f99e8c492eb224e3b0d",
         "site.webmanifest": "7a7de349179ed9f226d38632dfde5a8478edd10305972ea52641b0dc6aa7f405",
         "movienotes-mark.png": "850aa9117aa52768952843f8e2c410c0c17868877d81b2058274290373b4ee1e",
         "movienotes-icon-192.png": "3b04c52ffd23799ce424f1acefd0a1d7c386b8c968b09be9bd5c87b623c6ac12",
@@ -1486,8 +1486,8 @@ def test_every_app_shell_asset_has_an_explicit_immutable_version():
     api_version = "v=20260920.23"
     css_version = "v=20260920.22"
     assert f"/static/app.css?{css_version}" in html
-    assert "/static/js/app.js?v=20260926.1" in html
-    assert "./i18n.js?v=20260923.27" in app_js
+    assert "/static/js/app.js?v=20261003.1" in html
+    assert "./i18n.js?v=20261003.1" in app_js
     assert app_js.count(f"?{dependency_version}") == 2
     assert f"./api.js?{api_version}" in app_js
     assert "./recommendations.js?v=20260923.26" in app_js

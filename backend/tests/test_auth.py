@@ -524,6 +524,36 @@ def test_account_mode_rejects_state_change_without_csrf_before_work_starts():
     assert response.json()["detail"] == "Güvenlik doğrulaması başarısız."
 
 
+def test_username_only_registration_opens_a_session_immediately():
+    account = _account("new_member")
+    session = AuthSession(
+        account=account,
+        access_token="quick-access-token",
+        refresh_token="quick-refresh-token",
+        expires_in=3600,
+    )
+    fake_service = SimpleNamespace(
+        register_username_only=lambda *_args, **_kwargs: (session, True),
+    )
+    with (
+        patch("app.main.get_settings", return_value=_settings()),
+        patch("app.main._auth_service", return_value=fake_service),
+        patch("app.main._enforce_auth_rate_limit", new=AsyncMock()),
+        TestClient(main.app, base_url="https://testserver") as client,
+    ):
+        response = client.post(
+            "/api/auth/register/quick",
+            json={"username": "new_member"},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["created"] is True
+    assert response.json()["logged_in"] is True
+    cookies = response.headers.get_list("set-cookie")
+    assert any(cookie.startswith("mb_access=quick-access-token") for cookie in cookies)
+    assert any(cookie.startswith("mb_refresh=quick-refresh-token") for cookie in cookies)
+
+
 def test_register_password_mismatch_stops_before_scraping():
     scrape = AsyncMock()
     with (

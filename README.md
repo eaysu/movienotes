@@ -1,9 +1,11 @@
 # Movienotes
 
 Letterboxd hesabına bağlanan bir **sinefil akışı** ve **yapay zekâ destekli film
-önerici**. Kullanıcı herkese açık Letterboxd kullanıcı adıyla kaydolur, geçici
-bir bio koduyla hesabın kendisine ait olduğunu kanıtlar; ardından izleme
-geçmişi, Fav 4'ü ve puan farkındalı zevk analizi kalıcı olarak saklanır.
+önerici**. Kullanıcı yalnızca herkese açık Letterboxd kullanıcı adıyla kaydolur;
+hesap hemen açılır ve izleme geçmişi, Fav 4'ü ve puan farkındalı zevk analizi
+arka planda kalıcı olarak saklanır. Bu düşük sürtünmeli kayıt sahiplik doğrulaması
+yapmaz; aynı kullanıcı adıyla mevcut hesaplara giriş de mümkündür ve yanlış profil
+bildirimleri manuel incelenir.
 
 Uygulamanın ana ekranı akıştır: üyeler film notu paylaşır, birbirini takip eder,
 Letterboxd güncesindeki yorumlu kayıtlar otomatik olarak akışa düşer. İzleme
@@ -130,9 +132,8 @@ ayrıca kendi makinesi dışından gelen çağrıyı 404 ile reddediyor.
 
 ### Yerel geliştirme
 
-Kayıt, herkese açık bir Letterboxd bio'suna kod yazmayı gerektiriyor: üretimde
-doğru kapı, test edilen şey onboarding olduğunda saf sürtünme. Tek komut hesabı
-hazırlar, sunucuyu başlatır ve tarayıcıyı giriş yapılmış hâlde açar:
+Yerel geliştirmede üretim kayıt akışını beklemeden onboarding'i test etmek için
+tek komut hesabı hazırlar, sunucuyu başlatır ve tarayıcıyı giriş yapılmış hâlde açar:
 
 ```bash
 PYTHONPATH=backend python -m scripts.dev_start              # enesaysu olarak gir, veriyi koru
@@ -414,7 +415,7 @@ kolonlarını `-` olarak yazdırır.
 | Grup | Uç noktalar |
 |------|-------------|
 | Servis | `GET /api/health`, `/api/readiness`, `/api/public/stats`, `/api/share/image` |
-| Auth | `POST /api/auth/register/start`, `register/verify`, `login`, `refresh`, `logout`, `password-reset/start`, `password-reset/finish`; `GET /api/auth/me`; `DELETE /api/data` |
+| Auth | `POST /api/auth/register/quick`, `register/start`, `register/verify`, `login`, `refresh`, `logout`, `password-reset/start`, `password-reset/finish`; `GET /api/auth/me`; `DELETE /api/data` |
 | Push | `GET /api/push/public-key`, `POST /api/push/subscriptions` |
 | Profil | `GET /api/profile/me`, `social-stats`, `sync-status`, `stats`, `watched`, `recent`, `film-overview`, `directors/{rank}/films`, `top-films`; `PUT /api/profile/top-films`; `POST /api/profile/sync`, `watchlist/check`, `onboarding-complete`, `discovery-settings`, `privacy-settings` |
 | Akış | `GET /api/feed`, `/api/feed/films`, `/api/feed/trending`, `/api/films/{slug}`, `/api/posts/{id}`; `POST /api/posts`, `/api/posts/{id}/replies`, `/like`, `/report`; `DELETE /api/posts/{id}`, `/like` |
@@ -494,8 +495,8 @@ okumaz — panel ayarı yine de yapılmalı.
 3. Dağıt. `/api/health` `auth_enabled: true` bildirmeli.
 4. `/api/readiness` `status: ready` dönmeli; 503 ya şemanın uygulanmadığını ya
    da Supabase'in erişilemez olduğunu söylüyor.
-5. Test kullanıcısı kaydet, kodu herkese açık Letterboxd bio'suna koy, doğrula,
-   giriş yap ve ilk profil senkronunu bekle.
+5. Test kullanıcısı için yalnızca Letterboxd kullanıcı adını gönder; hesap aynı
+   istekte açılır, ardından ilk profil senkronunu bekle.
 
 ## Açık işler
 

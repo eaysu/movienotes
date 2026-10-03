@@ -1368,6 +1368,12 @@ class RegisterStartRequest(_UsernameRequest):
     password_confirm: str
 
 
+class UsernameOnlyRegisterRequest(_UsernameRequest):
+    """Low-friction signup: a public Letterboxd name is the only input."""
+
+    username: str
+
+
 class OwnershipVerifyRequest(_UsernameRequest):
     username: str
     code: str
@@ -1711,6 +1717,35 @@ async def readiness(response: Response) -> dict:
         "status": "ready" if ready else "not_ready",
         "auth_configured": True,
         "schema_ready": ready,
+    }
+
+
+@app.post("/api/auth/register/quick")
+async def register_quick(
+    req: UsernameOnlyRegisterRequest, request: Request, response: Response
+) -> dict:
+    """Create/sign in a username-only account and open the app immediately.
+
+    This intentionally does not claim Letterboxd ownership. The product can
+    review impersonation complaints manually while the early signup funnel is
+    being measured. Using this path also switches an older account to the
+    username-only session credential.
+    """
+    await _enforce_auth_rate_limit(request)
+    try:
+        session, created = await asyncio.to_thread(
+            _auth_service().register_username_only,
+            req.username,
+            ip_hash=_ip_hash(request),
+        )
+    except AuthError as exc:
+        _raise_auth_http(exc)
+    _set_session_cookies(response, session, remember=True)
+    return {
+        "ok": True,
+        "account": session.account.__dict__,
+        "logged_in": True,
+        "created": created,
     }
 
 

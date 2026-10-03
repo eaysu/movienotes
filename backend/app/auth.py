@@ -367,6 +367,17 @@ class AuthService:
     def challenge_hash(self, code: str) -> str:
         return self._digest(code.upper(), purpose="challenge")
 
+    def username_only_password(self, username: str) -> str:
+        """Return the server-only password used by frictionless accounts.
+
+        Username-only registration deliberately trades ownership proof for a
+        one-field onboarding flow.  Supabase Auth still needs a password under
+        the hood, so derive an unguessable value from the server secret instead
+        of exposing or storing one in the browser.  Password-based accounts are
+        never changed by this path.
+        """
+        return self._digest(username, purpose="username_only_auth")
+
     @staticmethod
     def _account(row: dict) -> Account:
         return Account(
@@ -575,6 +586,112 @@ class AuthService:
             .execute()
         )
         return self._first(result)
+
+    def _username_only_session(self, username: str, row: dict) -> AuthSession:
+        """Sign in an account whose Supabase password is server-derived."""
+        if row.get("account_status") not in {"active", "verification_deferred"}:
+            raise InvalidCredentialsError("Kullanıcı adı veya parola hatalı.")
+        try:
+            response = self._auth_client().auth.sign_in_with_password(
+                {
+                    "email": self.identity_email(username),
+                    "password": self.username_only_password(username),
+                }
+            )
+            if response.session is None:
+                raise InvalidCredentialsError("Kullanıcı adı veya parola hatalı.")
+        except InvalidCredentialsError:
+            raise
+        except Exception as exc:
+            if self._is_transient_storage_error(exc):
+                raise TransientStorageError(
+                    "Oturum bağlantısı kısa süreli yanıt vermedi."
+                ) from exc
+            raise InvalidCredentialsError("Kullanıcı adı veya parola hatalı.") from exc
+        return AuthSession(
+            account=self._account(row),
+            access_token=response.session.access_token,
+            refresh_token=response.session.refresh_token,
+            expires_in=int(response.session.expires_in or 3600),
+        )
+
+    def register_username_only(
+        self, username: str, *, ip_hash: str = ""
+    ) -> tuple[AuthSession, bool]:
+        """Create or resume a username-only account and return a session.
+
+        This is intentionally separate from the legacy password + bio
+        ownership flow.  The product has explicitly chosen low friction over
+        ownership proof here: submitting any valid Letterboxd name opens that
+        name's account, including an existing password account. The boolean
+        says whether a new account row was made.
+        """
+        service = self._service_client()
+        existing = self._account_row_by_username(service, username)
+        if existing and existing.get("account_status") == "disabled":
+            raise AuthError("Bu hesap devre dışı.")
+        auth_user_id = ""
+        created_new_auth_user = False
+        password = self.username_only_password(username)
+        try:
+            if existing and existing.get("auth_user_id"):
+                auth_user_id = str(existing["auth_user_id"])
+                service.auth.admin.update_user_by_id(
+                    auth_user_id,
+                    {
+                        "password": password,
+                        "user_metadata": {
+                            "letterboxd_username": username,
+                            "username_only": True,
+                        },
+                    },
+                )
+            else:
+                created = service.auth.admin.create_user(
+                    {
+                        "email": self.identity_email(username),
+                        "password": password,
+                        "email_confirm": True,
+                        "user_metadata": {
+                            "letterboxd_username": username,
+                            "username_only": True,
+                        },
+                    }
+                )
+                auth_user_id = str(created.user.id)
+                created_new_auth_user = True
+
+            now = datetime.now(timezone.utc).isoformat()
+            account_result = service.table("users").upsert(
+                {
+                    "username": username,
+                    "auth_user_id": auth_user_id,
+                    "display_name": (existing or {}).get("display_name") or username,
+                    "avatar_url": (existing or {}).get("avatar_url") or None,
+                    "account_status": "active",
+                    "profile_sync_status": "pending",
+                    "updated_at": now,
+                },
+                on_conflict="username",
+            ).execute()
+            account_row = self._first(account_result) or self._account_row_by_username(
+                service, username
+            )
+            if account_row is None:
+                raise RuntimeError("Account row could not be created")
+            session = self._username_only_session(username, account_row)
+            self._audit(service, int(account_row["id"]), "username_only_register", ip_hash)
+            return session, True
+        except (AccountExistsError, InvalidCredentialsError, TransientStorageError):
+            if auth_user_id and created_new_auth_user:
+                with contextlib.suppress(Exception):
+                    service.auth.admin.delete_user(auth_user_id)
+            raise
+        except Exception as exc:
+            if auth_user_id and created_new_auth_user:
+                with contextlib.suppress(Exception):
+                    service.auth.admin.delete_user(auth_user_id)
+            raise AuthError("Hesap oluşturulamadı.") from exc
 
     def verify_ownership(
         self,
