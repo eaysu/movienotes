@@ -4,8 +4,8 @@ Letterboxd hesabına bağlanan bir **sinefil akışı** ve **yapay zekâ destekl
 önerici**. Kullanıcı yalnızca herkese açık Letterboxd kullanıcı adıyla kaydolur;
 hesap hemen açılır ve izleme geçmişi, Fav 4'ü ve puan farkındalı zevk analizi
 arka planda kalıcı olarak saklanır. Bu düşük sürtünmeli kayıt sahiplik doğrulaması
-yapmaz; aynı kullanıcı adıyla mevcut hesaplara giriş de mümkündür ve yanlış profil
-bildirimleri manuel incelenir.
+yapmaz; yeni hesaplar isterse Ayarlar’dan Movienotes parolası oluşturabilir ve
+yanlış profil bildirimleri manuel incelenir.
 
 Uygulamanın ana ekranı akıştır: üyeler film notu paylaşır, birbirini takip eder,
 Letterboxd güncesindeki yorumlu kayıtlar otomatik olarak akışa düşer. İzleme
@@ -120,8 +120,8 @@ açıyor. Doğrudan da çalıştırılabilir:
 python -m scripts.sandbox --no-browser --port 9000
 ```
 
-Giriş ekranı yalnızca bir Letterboxd adı sorar — parola yok, çünkü ortada hesap
-yok. Yazılan ad gerçek scraper ile taranır, gerçek onboarding oynar, arka plan
+Giriş ekranı yalnızca bir Letterboxd adı sorar — yeni hesapta parola yoktur.
+Yazılan ad gerçek scraper ile taranır, gerçek onboarding oynar, arka plan
 arşiv taraması gerçekten çalışır; tek fark her şeyin bellekte durması.
 Supabase'e hiç bağlanılmaz (`.env`'den yalnızca TMDb/OpenAI anahtarları
 okunur), `DATA_DIR` geçici bir klasöre bakar ve Ctrl-C o klasörü siler. Yani
@@ -415,7 +415,7 @@ kolonlarını `-` olarak yazdırır.
 | Grup | Uç noktalar |
 |------|-------------|
 | Servis | `GET /api/health`, `/api/readiness`, `/api/public/stats`, `/api/share/image` |
-| Auth | `POST /api/auth/register/quick`, `register/start`, `register/verify`, `login`, `refresh`, `logout`, `password-reset/start`, `password-reset/finish`; `GET /api/auth/me`; `DELETE /api/data` |
+| Auth | `POST /api/auth/register/quick`, `register/start`, `register/verify`, `login`, `refresh`, `logout`, `password/create`, `password-reset/start`, `password-reset/finish`; `GET /api/auth/me`; `DELETE /api/data` |
 | Push | `GET /api/push/public-key`, `POST /api/push/subscriptions` |
 | Profil | `GET /api/profile/me`, `social-stats`, `sync-status`, `stats`, `watched`, `recent`, `film-overview`, `directors/{rank}/films`, `top-films`; `PUT /api/profile/top-films`; `POST /api/profile/sync`, `watchlist/check`, `onboarding-complete`, `discovery-settings`, `privacy-settings` |
 | Akış | `GET /api/feed`, `/api/feed/films`, `/api/feed/trending`, `/api/films/{slug}`, `/api/posts/{id}`; `POST /api/posts`, `/api/posts/{id}/replies`, `/like`, `/report`; `DELETE /api/posts/{id}`, `/like` |

@@ -266,7 +266,7 @@ def test_public_registration_count_is_rendered_without_exposing_user_records():
     assert 'directed by:' in html
     assert 'href="https://twitter.com/caddebogasi"' in html
     assert 'id="auth-title"' in html
-    assert "title.textContent = t(login ? 'Movienotes’a giriş yap' : 'Movienotes’da hesap oluştur')" in (FRONTEND / "js" / "auth.js").read_text()
+    assert "title.textContent = t('Letterboxd kullanıcı adınla devam et')" in (FRONTEND / "js" / "auth.js").read_text()
     auth = html.split('id="view-auth"', 1)[1].split('id="view-idle"', 1)[0]
     assert auth.index('data-public-user-count') < auth.index('<main')
     assert "apiJSON('/api/public/stats')" in app_js
@@ -1444,10 +1444,10 @@ def test_shell_asset_content_changes_force_a_version_bump():
     files that no longer existed.
     """
     expected = {
-        "js/app.js": "3e0f6a24492864fadc28e83e6f78f2a4cd5a88d327eeebbe5a094286584aaddc",
+        "js/app.js": "92446c5e1c1ddf93473d397fee2d0244ef448a2bd65216b51b2d52ab007bd8c6",
         "app.css": "5f763f94b8393ca456d31cb0cb9ded070201fe3b8dca83ac33350d958625287a",
         "js/share-cards.js": "8397afa5225b6d5751be0d794a902d49b0857b77901ee6627c3dbd3302cce23f",
-        "js/i18n.js": "146a460675af0184d90fa9cf6847e12cd5bceb43b8ea7f99e8c492eb224e3b0d",
+        "js/i18n.js": "bb92a929b07f8f4c0a9e5ccc50c5287e7d809c9f1119f63d8fd298c2ce6c3411",
         "site.webmanifest": "7a7de349179ed9f226d38632dfde5a8478edd10305972ea52641b0dc6aa7f405",
         "movienotes-mark.png": "850aa9117aa52768952843f8e2c410c0c17868877d81b2058274290373b4ee1e",
         "movienotes-icon-192.png": "3b04c52ffd23799ce424f1acefd0a1d7c386b8c968b09be9bd5c87b623c6ac12",
@@ -1486,15 +1486,15 @@ def test_every_app_shell_asset_has_an_explicit_immutable_version():
     api_version = "v=20260920.23"
     css_version = "v=20260920.22"
     assert f"/static/app.css?{css_version}" in html
-    assert "/static/js/app.js?v=20261003.1" in html
+    assert "/static/js/app.js?v=20261003.2" in html
     assert "./i18n.js?v=20261003.1" in app_js
     assert app_js.count(f"?{dependency_version}") == 2
     assert f"./api.js?{api_version}" in app_js
     assert "./recommendations.js?v=20260923.26" in app_js
     assert "./share-cards.js?v=20260926.1" in app_js
-    assert "./auth.js?v=20260920.23" in app_js
+    assert "./auth.js?v=20261003.2" in app_js
     assert f"./dom.js?{dependency_version}" in auth_js
-    assert "./i18n.js?v=20260920.23" in auth_js
+    assert "./i18n.js?v=20261003.1" in auth_js
     assert f"./dom.js?{dependency_version}" in profile_js
     assert "./i18n.js?v=20260920.23" in profile_js
     assert f"./dom.js?{dependency_version}" in recommendations_js

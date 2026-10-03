@@ -1,5 +1,5 @@
 import { $ } from './dom.js?v=20260902.15';
-import { t, getLocale } from './i18n.js?v=20260920.23';
+import { t, getLocale } from './i18n.js?v=20261003.1';
 
 export function cookieValue(name) {
   const prefix = `${name}=`;
@@ -60,17 +60,20 @@ export function setAuthMode(mode) {
   }
   $('sandbox-form').classList.add('hidden');
   $('sandbox-form').classList.remove('flex');
-  const login = mode === 'login';
+  const login = true;
   const title = $('auth-title');
-  if (title) title.textContent = t(login ? 'Movienotes’a giriş yap' : 'Movienotes’da hesap oluştur');
-  $('login-form').classList.toggle('hidden', !login);
-  $('register-form').classList.toggle('hidden', login);
-  $('register-form').classList.toggle('flex', !login);
+  if (title) title.textContent = t('Letterboxd kullanıcı adınla devam et');
+  $('login-form').classList.remove('hidden');
+  $('login-form').classList.add('flex');
+  $('register-form').classList.add('hidden');
+  $('register-form').classList.remove('flex');
   $('verify-panel').classList.add('hidden');
   $('verify-panel').classList.remove('flex');
   $('reset-panel').classList.add('hidden');
   $('reset-panel').classList.remove('flex');
-  $('auth-tabs').classList.remove('hidden');
+  // Username-only access uses one visible field. Keep the legacy tab nodes in
+  // the DOM for older clients, but never expose the two-step switch in the UI.
+  $('auth-tabs').classList.add('hidden');
   $('auth-tab-login').className = `py-2.5 rounded-lg font-label-md text-label-md uppercase ${login ? 'bg-primary-container text-black' : 'bg-surface-variant text-on-surface-variant border border-outline-variant/30'}`;
   $('auth-tab-register').className = `py-2.5 rounded-lg font-label-md text-label-md uppercase ${!login ? 'bg-primary-container text-black' : 'bg-surface-variant text-on-surface-variant border border-outline-variant/30'}`;
   setAuthMessage(null);

@@ -368,6 +368,31 @@
   </div>
 </dialog>
 
+<dialog id="dialog-password" class="auth-info-dialog">
+  <div class="glass-panel rounded-xl p-6 md:p-8 shadow-2xl">
+    <div class="flex items-start justify-between gap-4">
+      <div>
+        <span class="font-label-sm text-label-sm text-primary-container uppercase tracking-wider">Hesap güvenliği</span>
+        <h2 class="font-headline-md text-headline-md text-on-surface mt-2">Movienotes parolası</h2>
+      </div>
+      <button type="button" data-close-dialog="dialog-password" class="text-on-surface-variant hover:text-primary" aria-label="Kapat"><span class="material-symbols-outlined">close</span></button>
+    </div>
+    <p class="mt-4 font-body-md text-body-md leading-relaxed text-on-surface-variant">Parola oluşturursan bu kullanıcı adıyla girişte parola sorulur. Letterboxd parolanı burada kullanma.</p>
+    <form id="password-create-form" class="mt-5 flex flex-col gap-3">
+      <div class="relative">
+        <input id="password-create" class="auth-input w-full rounded-lg bg-surface border-outline-variant/30 text-on-surface py-3.5 pl-4 pr-12" placeholder="Yeni parola · en az 10 karakter" type="password" autocomplete="new-password" minlength="10" required/>
+        <button type="button" data-password-toggle="password-create" class="absolute inset-y-0 right-0 px-3 text-on-surface-variant hover:text-primary" aria-label="Şifreyi göster" aria-pressed="false"><span class="material-symbols-outlined text-[20px]">visibility_off</span></button>
+      </div>
+      <div class="relative">
+        <input id="password-create-confirm" class="auth-input w-full rounded-lg bg-surface border-outline-variant/30 text-on-surface py-3.5 pl-4 pr-12" placeholder="Yeni parolayı tekrar yaz" type="password" autocomplete="new-password" minlength="10" required/>
+        <button type="button" data-password-toggle="password-create-confirm" class="absolute inset-y-0 right-0 px-3 text-on-surface-variant hover:text-primary" aria-label="Şifreyi göster" aria-pressed="false"><span class="material-symbols-outlined text-[20px]">visibility_off</span></button>
+      </div>
+      <button id="btn-password-create" class="w-full bg-primary-container text-black py-3.5 rounded-lg font-label-md text-label-md uppercase tracking-wider disabled:opacity-40">Parolayı kaydet</button>
+      <p id="password-create-message" class="hidden rounded-lg px-4 py-3 text-sm"></p>
+    </form>
+  </div>
+</dialog>
+
 <!-- ═══════════════════════════  VIEW: AUTH  ═══════════════════════════ -->
 <div id="view-auth" class="hidden flex-grow flex flex-col items-center justify-center relative px-margin-mobile md:px-margin-desktop pt-24 pb-16 overflow-hidden">
   <div class="absolute inset-0 z-[2] pointer-events-none" style="background:radial-gradient(circle at 30% 30%,rgba(0,224,84,.08),transparent 42%),radial-gradient(circle at 80% 75%,rgba(108,205,255,.05),transparent 38%)"></div>
@@ -394,23 +419,19 @@
       <button id="btn-sandbox" class="w-full bg-primary-container text-black py-3.5 rounded-lg font-label-md text-label-md uppercase tracking-wider disabled:opacity-40">Profili tara</button>
     </form>
 
-    <div id="auth-tabs" class="grid grid-cols-2 gap-2 mb-5">
+    <div id="auth-tabs" class="hidden grid grid-cols-2 gap-2 mb-5">
       <button id="auth-tab-login" class="py-2.5 rounded-lg bg-primary-container text-black font-label-md text-label-md uppercase">Giriş</button>
       <button id="auth-tab-register" class="py-2.5 rounded-lg bg-surface-variant text-on-surface-variant border border-outline-variant/30 font-label-md text-label-md uppercase">Hesap oluştur</button>
     </div>
 
     <form id="login-form" class="flex flex-col gap-3">
       <input id="login-username" class="auth-input w-full rounded-lg bg-surface border-outline-variant/30 text-on-surface py-3.5 px-4" placeholder="Letterboxd kullanıcı adı" autocomplete="username" required/>
-      <div class="relative">
-        <input id="login-password" class="auth-input w-full rounded-lg bg-surface border-outline-variant/30 text-on-surface py-3.5 pl-4 pr-12" placeholder="Parola" type="password" autocomplete="current-password" required/>
+      <div id="login-password-wrap" class="relative hidden">
+        <input id="login-password" class="auth-input w-full rounded-lg bg-surface border-outline-variant/30 text-on-surface py-3.5 pl-4 pr-12" placeholder="Movienotes parolası" type="password" autocomplete="current-password"/>
         <button type="button" data-password-toggle="login-password" class="absolute inset-y-0 right-0 px-3 text-on-surface-variant hover:text-primary" aria-label="Şifreyi göster" aria-pressed="false"><span class="material-symbols-outlined text-[20px]">visibility_off</span></button>
       </div>
-      <label class="flex items-center gap-2.5 px-1 py-1 text-sm text-on-surface-variant">
-        <input id="login-remember" type="checkbox" checked class="h-4 w-4 accent-primary-container"/>
-        Beni hatırla
-      </label>
-      <button id="btn-login" class="w-full bg-primary-container text-black py-3.5 rounded-lg font-label-md text-label-md uppercase tracking-wider disabled:opacity-40">Giriş yap</button>
-      <button id="btn-show-reset" type="button" class="text-on-surface-variant hover:text-primary text-sm py-1">Parolamı unuttum</button>
+      <p class="rounded-lg border border-tertiary-container/20 bg-tertiary-container/10 px-3 py-2 text-sm leading-relaxed text-on-surface-variant">Yalnızca kullanıcı adını yaz; hesabınla devam et.</p>
+      <button id="btn-login" class="w-full bg-primary-container text-black py-3.5 rounded-lg font-label-md text-label-md uppercase tracking-wider disabled:opacity-40">Devam et</button>
     </form>
 
     <form id="register-form" class="hidden flex-col gap-3">
@@ -476,6 +497,7 @@
           <button id="profile-theme-toggle" type="button" class="w-full px-4 py-3 flex items-center gap-3 text-left text-on-surface-variant hover:text-primary hover:bg-surface-variant text-sm"><span class="material-symbols-outlined text-[18px]">contrast</span><span id="profile-theme-label">Görünüm: Koyu</span></button>
           <button id="profile-private-toggle" type="button" class="w-full px-4 py-3 flex items-center gap-3 text-left text-on-surface-variant hover:text-primary hover:bg-surface-variant text-sm"><span class="material-symbols-outlined text-[18px]">lock</span><span id="profile-private-label">Kilitli hesap: Kapalı</span></button>
           <button id="profile-letter-toggle" type="button" aria-pressed="false" class="w-full px-4 py-3 flex items-center gap-3 text-left text-on-surface-variant hover:text-[#ffb56f] hover:bg-surface-variant text-sm"><span id="profile-letter-icon" class="material-symbols-outlined text-[18px]">mail_lock</span><span>Mektuplar: <span id="profile-letter-label">Kapalı</span></span></button>
+          <button id="profile-password-settings" type="button" class="w-full px-4 py-3 flex items-center gap-3 text-left text-on-surface-variant hover:text-primary hover:bg-surface-variant text-sm"><span class="material-symbols-outlined text-[18px]">password</span><span id="profile-password-settings-label">Parola oluştur</span></button>
           <button id="profile-browser-notifications" type="button" class="w-full px-4 py-3 flex items-center gap-3 text-left text-on-surface-variant hover:text-primary hover:bg-surface-variant text-sm"><span class="material-symbols-outlined text-[18px]">notifications_active</span>Tarayıcı bildirimleri</button>
           <button id="menu-blocked-users" type="button" class="w-full px-4 py-3 flex items-center gap-3 text-left text-on-surface-variant hover:text-primary hover:bg-surface-variant text-sm"><span class="material-symbols-outlined text-[18px]">block</span>Engellediğin kullanıcılar</button>
           <button id="menu-delete-data" type="button" class="w-full px-4 py-3 flex items-center gap-3 text-left text-error hover:bg-surface-variant text-sm"><span class="material-symbols-outlined text-[18px]">delete_forever</span>Verimi sil</button>
@@ -1434,6 +1456,6 @@
   </div>
 </footer>
 
-<script type="module" src="/static/js/app.js?v=20261003.1"></script>
+<script type="module" src="/static/js/app.js?v=20261003.2"></script>
 </body>
 </html>

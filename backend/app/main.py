@@ -47,6 +47,7 @@ from .auth import (
     BlendServiceError,
     InvalidCredentialsError,
     OwnershipPendingError,
+    PasswordRequiredError,
     TransientStorageError,
     VerificationError,
     validate_password,
@@ -705,6 +706,12 @@ def _raise_auth_http(exc: Exception) -> None:
         ) from exc
     if isinstance(exc, AccountExistsError):
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if isinstance(exc, PasswordRequiredError):
+        raise HTTPException(
+            status_code=409,
+            detail=str(exc),
+            headers={"X-Error-Code": exc.code},
+        ) from exc
     if isinstance(exc, InvalidCredentialsError):
         raise HTTPException(status_code=401, detail="Kullanıcı adı veya parola hatalı.") from exc
     if isinstance(exc, VerificationError):
@@ -1406,6 +1413,11 @@ class PasswordResetFinishRequest(_UsernameRequest):
     new_password_confirm: str
 
 
+class CreatePasswordRequest(BaseModel):
+    new_password: str
+    new_password_confirm: str
+
+
 class CreateBlendRequest(BaseModel):
     recipient_username: str
 
@@ -1932,6 +1944,22 @@ async def login(req: LoginRequest, request: Request, response: Response) -> dict
         _raise_auth_http(exc)
     _set_session_cookies(response, session, remember=req.remember)
     return {"ok": True, "account": session.account.__dict__}
+
+
+@app.post("/api/auth/password/create")
+async def create_password(req: CreatePasswordRequest, request: Request) -> dict:
+    """Let a username-only member opt into password-protected login."""
+    _require_csrf(request)
+    account = await _require_account(request)
+    try:
+        validate_password(req.new_password, req.new_password_confirm)
+        await asyncio.to_thread(_auth_service().set_password, account, req.new_password)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except AuthError as exc:
+        _raise_auth_http(exc)
+    account.password_enabled = True
+    return {"ok": True, "password_enabled": True}
 
 
 if get_settings().dev_login_enabled:  # pragma: no cover - local tooling only

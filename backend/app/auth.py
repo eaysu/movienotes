@@ -107,6 +107,10 @@ class AccountExistsError(AuthError):
     code = "account_exists"
 
 
+class PasswordRequiredError(AuthError):
+    code = "password_required"
+
+
 class InvalidCredentialsError(AuthError):
     code = "invalid_credentials"
 
@@ -157,6 +161,8 @@ class Account:
     discoverable: bool = True
     letter_receiving_enabled: bool = False
     private_account: bool = False
+    # False for the username-only accounts created by the low-friction flow.
+    password_enabled: bool = True
     # `auto` follows the device locale; explicit values travel with the account.
     preferred_locale: str = "auto"
 
@@ -377,6 +383,21 @@ class AuthService:
         never changed by this path.
         """
         return self._digest(username, purpose="username_only_auth")
+
+    @staticmethod
+    def _user_metadata(user_response) -> dict:
+        user = getattr(user_response, "user", None)
+        metadata = getattr(user, "user_metadata", None)
+        return dict(metadata) if isinstance(metadata, dict) else {}
+
+    def _auth_metadata(self, service, auth_user_id: str) -> dict:
+        try:
+            return self._user_metadata(service.auth.admin.get_user_by_id(auth_user_id))
+        except Exception:
+            # Missing metadata means this is an older password account. Never
+            # downgrade it to username-only merely because the metadata read
+            # was unavailable.
+            return {}
 
     @staticmethod
     def _account(row: dict) -> Account:
@@ -608,8 +629,10 @@ class AuthService:
                     "Oturum bağlantısı kısa süreli yanıt vermedi."
                 ) from exc
             raise InvalidCredentialsError("Kullanıcı adı veya parola hatalı.") from exc
+        account = self._account(row)
+        account.password_enabled = False
         return AuthSession(
-            account=self._account(row),
+            account=account,
             access_token=response.session.access_token,
             refresh_token=response.session.refresh_token,
             expires_in=int(response.session.expires_in or 3600),
@@ -622,14 +645,24 @@ class AuthService:
 
         This is intentionally separate from the legacy password + bio
         ownership flow.  The product has explicitly chosen low friction over
-        ownership proof here: submitting any valid Letterboxd name opens that
-        name's account, including an existing password account. The boolean
-        says whether a new account row was made.
+        ownership proof here: submitting a new valid Letterboxd name opens a
+        username-only account. Existing password accounts stay protected and
+        ask for their password. The boolean says whether a new account row was
+        made.
         """
         service = self._service_client()
         existing = self._account_row_by_username(service, username)
         if existing and existing.get("account_status") == "disabled":
             raise AuthError("Bu hesap devre dışı.")
+        if existing and existing.get("auth_user_id"):
+            metadata = self._auth_metadata(service, str(existing["auth_user_id"]))
+            if not metadata.get("username_only"):
+                raise PasswordRequiredError(
+                    "Bu hesap parola kullanıyor. Parolanı girerek devam et."
+                )
+            session = self._username_only_session(username, existing)
+            self._audit(service, int(existing["id"]), "username_only_login", ip_hash)
+            return session, False
         auth_user_id = ""
         created_new_auth_user = False
         password = self.username_only_password(username)
@@ -890,6 +923,22 @@ class AuthService:
             expires_in=int(response.session.expires_in or 3600),
         )
 
+    def set_password(self, account: Account, password: str) -> None:
+        """Opt a username-only account into password-protected login."""
+        validate_password(password)
+        service = self._service_client()
+        service.auth.admin.update_user_by_id(
+            account.auth_user_id,
+            {
+                "password": password,
+                "user_metadata": {
+                    "letterboxd_username": account.username,
+                    "username_only": False,
+                },
+            },
+        )
+        self._audit(service, account.id, "password_created", "")
+
     def current_account(self, access_token: str) -> Account:
         def resolve() -> Account:
             response = self._auth_client().auth.get_user(access_token)
@@ -906,6 +955,8 @@ class AuthService:
             if row is None:
                 raise InvalidCredentialsError("Oturum geçersiz.")
             account = self._account(row)
+            metadata = self._auth_metadata(service, auth_user_id)
+            account.password_enabled = not bool(metadata.get("username_only"))
             # Keep the new preference optional during the schema rollout.
             try:
                 locale_row = self._first(

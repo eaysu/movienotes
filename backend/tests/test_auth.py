@@ -8,7 +8,14 @@ from fastapi.testclient import TestClient
 from starlette.requests import Request
 
 from app import main
-from app.auth import Account, AuthService, AuthSession, TransientStorageError, validate_password
+from app.auth import (
+    Account,
+    AuthService,
+    AuthSession,
+    PasswordRequiredError,
+    TransientStorageError,
+    validate_password,
+)
 from app.scraper import AccessBlockedError
 
 
@@ -552,6 +559,54 @@ def test_username_only_registration_opens_a_session_immediately():
     cookies = response.headers.get_list("set-cookie")
     assert any(cookie.startswith("mb_access=quick-access-token") for cookie in cookies)
     assert any(cookie.startswith("mb_refresh=quick-refresh-token") for cookie in cookies)
+
+
+def test_username_only_account_can_opt_into_a_password_from_settings():
+    account = _account("new_member")
+    account.password_enabled = False
+    changed = []
+    fake_service = SimpleNamespace(
+        set_password=lambda value, password: changed.append((value, password)),
+    )
+    with (
+        patch("app.main.get_settings", return_value=_settings()),
+        patch("app.main._auth_service", return_value=fake_service),
+        patch("app.main._require_account", new=AsyncMock(return_value=account)),
+        TestClient(main.app, base_url="https://testserver") as client,
+    ):
+        response = client.post(
+            "/api/auth/password/create",
+            json={
+                "new_password": "long-enough-password",
+                "new_password_confirm": "long-enough-password",
+            },
+            headers={"Cookie": "mb_csrf=csrf-token", "X-CSRF-Token": "csrf-token"},
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {"ok": True, "password_enabled": True}
+    assert changed == [(account, "long-enough-password")]
+
+
+def test_username_only_login_reports_that_a_password_is_required():
+    fake_service = SimpleNamespace(
+        register_username_only=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            PasswordRequiredError("Bu hesap parola kullanıyor. Parolanı girerek devam et.")
+        ),
+    )
+    with (
+        patch("app.main.get_settings", return_value=_settings()),
+        patch("app.main._auth_service", return_value=fake_service),
+        patch("app.main._enforce_auth_rate_limit", new=AsyncMock()),
+        TestClient(main.app, base_url="https://testserver") as client,
+    ):
+        response = client.post(
+            "/api/auth/register/quick",
+            json={"username": "password_user"},
+        )
+
+    assert response.status_code == 409
+    assert response.headers["X-Error-Code"] == "password_required"
 
 
 def test_register_password_mismatch_stops_before_scraping():
@@ -1241,8 +1296,8 @@ def test_remember_me_keeps_the_session_until_logout_and_one_day_without_it():
 
     app_js = (Path(__file__).resolve().parents[2] / "frontend" / "js" / "app.js").read_text()
     html = (Path(__file__).resolve().parents[2] / "frontend" / "index.html").read_text()
-    assert 'id="login-remember"' in html
-    assert "remember: $('login-remember').checked" in app_js
+    assert 'id="login-password-wrap"' in html
+    assert "'/api/auth/register/quick'" in app_js
 
 
 def test_every_screen_shares_one_top_bar():

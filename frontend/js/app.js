@@ -15,7 +15,7 @@ import {
   setAuthMessage,
   setAuthMode,
   setPasswordVisibility,
-} from './auth.js?v=20260920.23';
+} from './auth.js?v=20261003.2';
 import { directorAvatar, directorFilmGrid, directorFilmTile } from './profile.js?v=20260920.23';
 import { animateScore, getScoreInfo } from './blend.js?v=20260902.15';
 import { createRecommendationCards } from './recommendations.js?v=20260923.26';
@@ -1431,6 +1431,7 @@ let _feedNotificationPollTimer = null;
 let _verification = null;
 let _deferredVerificationTimer = null;
 let _resetChallenge = null;
+let _loginPasswordRequired = false;
 // Legacy password state: the current signup flow never puts a password in the
 // browser, but an older tab may still finish its bio-verification challenge.
 let _pendingRegPassword = null;
@@ -1506,7 +1507,60 @@ function applyAccount(account) {
   $('btn-mode-blend').title = t('Kayıtlı bir kullanıcıya onay isteği gönder.');
   renderProfileLetterSettings(Boolean(account.letter_receiving_enabled));
   renderPrivateAccount(Boolean(account.private_account));
+  renderPasswordSettings(Boolean(account.password_enabled));
   loadProfileSocialStats();
+}
+
+function renderPasswordSettings(enabled) {
+  const label = $('profile-password-settings-label');
+  if (label) label.textContent = enabled ? t('Parolayı değiştir') : t('Parola oluştur');
+}
+
+function setPasswordCreateMessage(message, error = false) {
+  const el = $('password-create-message');
+  if (!el) return;
+  if (!message) {
+    el.className = 'hidden rounded-lg px-4 py-3 text-sm';
+    el.textContent = '';
+    return;
+  }
+  el.className = `rounded-lg px-4 py-3 text-sm ${error ? 'bg-error-container/30 text-error' : 'bg-primary-container/10 text-primary-container'}`;
+  el.textContent = message;
+}
+
+function openPasswordSettings() {
+  toggleProfileMenu(false);
+  setPasswordCreateMessage(null);
+  $('password-create-form').reset();
+  const dialog = $('dialog-password');
+  if (dialog && !dialog.open) dialog.showModal();
+}
+
+async function createPassword(event) {
+  event.preventDefault();
+  const button = $('btn-password-create');
+  const password = $('password-create').value;
+  const confirmation = $('password-create-confirm').value;
+  if (password !== confirmation) {
+    setPasswordCreateMessage(t('Parolalar eşleşmiyor.'), true);
+    return;
+  }
+  button.disabled = true;
+  setPasswordCreateMessage(null);
+  try {
+    await apiJSON('/api/auth/password/create', {
+      method: 'POST',
+      headers: csrfHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ new_password: password, new_password_confirm: confirmation }),
+    });
+    if (_account) _account.password_enabled = true;
+    renderPasswordSettings(true);
+    setPasswordCreateMessage(t('Parolan kaydedildi. Bundan sonra girişte parola sorulacak.'));
+  } catch (error) {
+    setPasswordCreateMessage(error.message || t('Parola kaydedilemedi.'), true);
+  } finally {
+    button.disabled = false;
+  }
 }
 
 function renderProfileSocialStats(stats = {}) {
@@ -5546,21 +5600,44 @@ async function loginAccount(event) {
   button.disabled = true;
   setAuthMessage(null);
   try {
-    const data = await apiJSON('/api/auth/login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        username: $('login-username').value.trim(),
-        password: $('login-password').value,
-        // İşaretliyse oturum çıkış yapılana kadar sürer, değilse bir gün.
-        remember: $('login-remember').checked,
-      }),
-    });
-    $('login-password').value = '';
+    const password = $('login-password')?.value || '';
+    const data = await apiJSON(
+      _loginPasswordRequired ? '/api/auth/login' : '/api/auth/register/quick',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          username: $('login-username').value.trim(),
+          ...(_loginPasswordRequired ? { password, remember: true } : {}),
+        }),
+      },
+    );
     enterApp(data.account);
+    _loginPasswordRequired = false;
+    if ($('login-password')) $('login-password').value = '';
   } catch (error) {
+    if (error.code === 'password_required') {
+      _loginPasswordRequired = true;
+      $('login-password-wrap').classList.remove('hidden');
+      $('login-password').required = true;
+      $('btn-login').textContent = t('Giriş yap');
+      setAuthMessage(t('Bu hesap parola kullanıyor. Parolanı girerek devam et.'));
+      $('login-password').focus();
+      return;
+    }
     setAuthMessage(error.message || 'Giriş yapılamadı.', true);
   } finally { button.disabled = false; }
+}
+
+function resetLoginPrompt() {
+  _loginPasswordRequired = false;
+  const password = $('login-password');
+  if (password) {
+    password.value = '';
+    password.required = false;
+  }
+  $('login-password-wrap')?.classList.add('hidden');
+  if ($('btn-login')) $('btn-login').textContent = t('Devam et');
 }
 
 // Letterboxd taraması Render'ın barındırma IP'sinden Cloudflare'e sık takılıyor;
@@ -5774,6 +5851,7 @@ async function logoutAccount() {
   _statsLoaded = false;
   _obToken += 1;
   _obClearTimers();
+  resetLoginPrompt();
   $('ob-skip').classList.add('hidden');
   $('primary-username-field').classList.remove('hidden');
   $('username-input').value = '';
@@ -5824,14 +5902,6 @@ $('btn-verify').addEventListener('click', verifyRegistration);
 $('btn-verify-back').addEventListener('click', () => { _pendingRegPassword = null; setAuthMode('register'); });
 $('verification-code').addEventListener('click', () => copyCode($('verification-code')));
 $('reset-code-display').addEventListener('click', () => copyCode($('reset-code-display')));
-$('btn-show-reset').addEventListener('click', () => {
-  $('login-form').classList.add('hidden');
-  $('auth-tabs').classList.add('hidden');
-  $('reset-panel').classList.remove('hidden');
-  $('reset-panel').classList.add('flex');
-  $('reset-username').value = $('login-username').value;
-  setAuthMessage(null);
-});
 $('btn-reset-back').addEventListener('click', () => setAuthMode('login'));
 $('btn-reset-start').addEventListener('click', startPasswordReset);
 $('btn-reset-finish').addEventListener('click', finishPasswordReset);
@@ -6277,6 +6347,8 @@ $('profile-settings-btn').addEventListener('click', event => {
   toggleProfileMenu();
 });
 $('profile-settings-menu').addEventListener('click', event => event.stopPropagation());
+$('profile-password-settings').addEventListener('click', openPasswordSettings);
+$('password-create-form').addEventListener('submit', createPassword);
 $('profile-language-select').addEventListener('change', changeProfileLanguage);
 $('profile-theme-toggle').addEventListener('click', () => {
   toggleProfileMenu(false);
