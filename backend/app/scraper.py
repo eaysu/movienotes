@@ -148,6 +148,11 @@ class _LetterboxdRequestBudget:
 _letterboxd_budget = _LetterboxdRequestBudget()
 
 
+def letterboxd_retry_after() -> float:
+    """Seconds until this process can contact Letterboxd again."""
+    return max(0.0, _letterboxd_budget._blocked_until - time.monotonic())
+
+
 async def _budgeted_get(session, url: str, **kwargs):
     return await _letterboxd_budget.request(lambda: session.get(url, **kwargs))
 
@@ -894,7 +899,7 @@ async def _scrape_list(
     Strateji (ücretsiz ve doğrudan):
       1. İlk film sayfasına doğrudan git; normal akışta gereksiz warm-up yapma.
       2. Her sayfayı curl-cffi ile getir; humanize edilmiş jitter'lı gecikmeler.
-      3. 403/429 gelirse kısa backoff + parmak izi rotasyonu ile tekrar dene.
+      3. 403/429 gelirse ilerlemeyi koru ve ortak bekleme süresine uy.
 
     start_page: bu sayfadan başlar (resume edilebilir pencereli crawl için);
     en fazla `max_pages` sayfa daha çeker.

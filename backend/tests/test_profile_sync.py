@@ -2,6 +2,7 @@ import asyncio
 import unittest
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from app import profile_sync
 from app.scraper import AccessBlockedError
@@ -494,6 +495,16 @@ class RunnerTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("blocked", service.job["last_error"])
         self.assertTrue(service.job["backoff_until"])
         self.assertFalse(profile_sync.is_running(7))
+
+    async def test_shared_cooldown_does_not_consume_another_members_attempt(self):
+        service = FakeService()
+        service.job = {"user_id": 7, "state": "queued", "attempts": 0, "cursor_page": 2}
+        pipeline = FakePipeline(service, {})
+        original = dict(service.job)
+        with patch("app.profile_sync.letterboxd_retry_after", return_value=90):
+            await profile_sync.run_job(pipeline, service, _account())
+        self.assertEqual(service.job, original)
+        self.assertEqual(pipeline.window_calls, [])
 
     async def test_upstream_access_block_uses_the_initial_sparse_retry_backoff(self):
         service = FakeService()

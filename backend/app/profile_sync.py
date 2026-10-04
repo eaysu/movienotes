@@ -19,7 +19,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
-from .scraper import AccessBlockedError
+from .scraper import AccessBlockedError, letterboxd_retry_after
 
 log = logging.getLogger("uvicorn.error")
 
@@ -260,6 +260,10 @@ async def run_job(pipeline, service, account) -> None:
     # lease while it merely waited behind another user. That obscured real
     # progress and could starve the next checkpoint after a rate-limit block.
     async with _job_sem:
+        # A shared cooldown is not a failed attempt by the next member. Leave
+        # the durable job untouched; the retry scan will pick it up later.
+        if letterboxd_retry_after() > 0:
+            return
         claimed = await asyncio.to_thread(
             service.claim_sync_job, uid, lease_token, LEASE_SECONDS
         )

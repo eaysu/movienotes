@@ -410,6 +410,32 @@ def test_background_retry_loop_resumes_a_queued_profile_import():
     starter.assert_awaited_once()
 
 
+def test_retry_query_filters_cooldowns_and_leases_before_limiting_candidates():
+    import httpx
+    from postgrest import SyncPostgrestClient
+
+    requests = []
+
+    def respond(request):
+        requests.append(request)
+        return httpx.Response(200, json=[])
+
+    with httpx.Client(transport=httpx.MockTransport(respond)) as http:
+        client = SyncPostgrestClient("https://test.invalid/rest/v1", http_client=http)
+        service = AuthService(_settings(), client_factory=lambda *_args: client)
+        assert service.resumable_sync_accounts(3) == []
+
+    # Test the actual encoded request: chaining ORs must preserve all three
+    # predicates, otherwise cooling/leased rows consume the bounded batch.
+    params = requests[0].url.params
+    clauses = params.get_list("or")
+    assert len(clauses) == 3
+    assert any("backoff_until.is.null,backoff_until.lte." in c for c in clauses)
+    assert any("lease_expires_at.is.null,lease_expires_at.lte." in c for c in clauses)
+    assert any("state.neq.running,heartbeat_at.is.null,heartbeat_at.lt." in c for c in clauses)
+    assert params["limit"] == "3"
+
+
 def test_blocked_bootstrap_still_queues_the_full_import():
     account = _account()
     service = SimpleNamespace(

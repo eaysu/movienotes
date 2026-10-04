@@ -1798,10 +1798,17 @@ class AuthService:
         service = self._service_client()
 
         def read_jobs():
+            now = datetime.now(timezone.utc)
+            stale = (now - timedelta(seconds=180)).isoformat()
             return (
                 service.table("profile_sync_jobs")
                 .select("user_id,state,phase,scope,heartbeat_at,backoff_until,lease_expires_at")
                 .in_("state", ["queued", "running", "failed"])
+                # Filter BEFORE LIMIT: old jobs in a six-hour cooldown used
+                # to occupy every slot and starve newer, already-due imports.
+                .or_(f"backoff_until.is.null,backoff_until.lte.{now.isoformat()}")
+                .or_(f"lease_expires_at.is.null,lease_expires_at.lte.{now.isoformat()}")
+                .or_(f"state.neq.running,heartbeat_at.is.null,heartbeat_at.lt.{stale}")
                 .order("updated_at")
                 .limit(max(1, min(int(limit), 10)))
                 .execute()

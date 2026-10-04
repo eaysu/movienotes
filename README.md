@@ -487,6 +487,24 @@ göre çözüldüğü için yerinde bulunuyor. `render.yaml` aynı yapılandırm
 taşıyor ama elle oluşturulmuş (blueprint olmayan) bir servis bu dosyayı
 okumaz — panel ayarı yine de yapılmalı.
 
+### Render üzerinde scraping kontrolü
+
+`/api/health` ve `/api/readiness` Letterboxd erişimini test etmez. Render Shell
+içinde hem ilk sayfayı hem izlenen film sayfalamasını düşük sıklıkla kontrol et:
+
+```sh
+python -m scripts.check_scraper enesaysu
+python -m scripts.check_scraper enesaysu --list films --pages 2
+```
+
+`complete: false, next_page: 2` ilk sayfa okunmuş olsa da ikinci sayfanın
+alınamadığını gösterir. `HTTP 403` ve Cloudflare challenge, ayrıştırıcıdan önce
+oluşan bir erişim engelidir; tekrar denemeyi artırmak bunu çözmez. GitHub
+canary sonucu yalnızca GitHub bağlantısını ölçer; Render sonucunun yerine geçmez.
+Kuyruk, bekleme süresi/kirası dolmuş işleri limit uygulamadan önce seçer ve ortak
+erişim beklemesinde sıradaki kullanıcının deneme sayısını artırmaz. Tam geçmiş
+alınmadan bir işi elle `done` yapma veya checkpoint'ini sıfırlama.
+
 ## Hesap yayına alma
 
 1. `backend/supabase/schema.sql` dosyasını Supabase SQL Editor'da çalıştır.

@@ -26,3 +26,5 @@ jobs:
         run: pip install curl-cffi beautifulsoup4 lxml brotli
       - name: Check one public watchlist page
         run: PYTHONPATH=backend python -m scripts.check_scraper enesaysu
+      - name: Check watched-history pagination
+        run: PYTHONPATH=backend python -m scripts.check_scraper enesaysu --list films --pages 2
