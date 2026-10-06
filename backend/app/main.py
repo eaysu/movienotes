@@ -74,6 +74,7 @@ from .scraper import (
     scrape_recent_watched,
     scrape_official_list,
     resolve_missing_posters,
+    check_public_profile_exists,
     scrape_watchlist,
     scrape_watched,
 )
@@ -1750,9 +1751,30 @@ async def register_quick(
     username-only session credential.
     """
     await _enforce_auth_rate_limit(request)
+    service = _auth_service()
+    try:
+        needs_check = await asyncio.to_thread(
+            service.username_requires_existence_check, req.username
+        )
+    except AuthError as exc:
+        _raise_auth_http(exc)
+    if needs_check:
+        exists = await check_public_profile_exists(req.username)
+        if exists is False:
+            raise HTTPException(
+                status_code=404,
+                detail="Letterboxd kullanıcısı bulunamadı. Kullanıcı adını kontrol edip tekrar dene.",
+                headers={"X-Error-Code": "profile_not_found"},
+            )
+        if exists is None:
+            raise HTTPException(
+                status_code=503,
+                detail="Letterboxd erişimi geçici olarak engelledi. Birkaç dakika sonra tekrar dene.",
+                headers={"Retry-After": "60", "X-Error-Code": "profile_unverified"},
+            )
     try:
         session, created = await asyncio.to_thread(
-            _auth_service().register_username_only,
+            service.register_username_only,
             req.username,
             ip_hash=_ip_hash(request),
         )
@@ -2145,7 +2167,7 @@ async def _profile_sync_status(account: Account, service) -> dict | None:
     """
     job = await asyncio.to_thread(service.get_sync_job, account.id)
     if not profile_sync.is_running(account.id):
-        if job and job.get("scope") in {"full", "import"} and profile_sync.job_is_resumable(job):
+        if job and job.get("scope") == "full" and profile_sync.job_is_resumable(job):
             # Resume-on-visit: a job whose lease/heartbeat went stale after a
             # process restart is picked up without losing onboarding progress.
             profile_sync.start(_SyncPipeline(get_settings()), service, account)
@@ -4724,7 +4746,8 @@ async def import_letterboxd_export(request: Request) -> dict:
     queued = await asyncio.to_thread(
         service.upsert_sync_job,
         account.id,
-        state="queued", phase="enrich", scope="import", cursor_page=1,
+        state="queued", phase="enrich", scope="full",
+        cursor_page=profile_sync.IMPORT_CURSOR_MARKER,
         films_processed=0, films_total=len(exported.watched), attempts=0,
         last_error="", backoff_until=None, sync_run_id=None,
         lease_token=None, lease_expires_at=None,

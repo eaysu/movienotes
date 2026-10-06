@@ -566,11 +566,13 @@ def test_username_only_registration_opens_a_session_immediately():
         expires_in=3600,
     )
     fake_service = SimpleNamespace(
+        username_requires_existence_check=lambda _username: True,
         register_username_only=lambda *_args, **_kwargs: (session, True),
     )
     with (
         patch("app.main.get_settings", return_value=_settings()),
         patch("app.main._auth_service", return_value=fake_service),
+        patch("app.main.check_public_profile_exists", new=AsyncMock(return_value=True)),
         patch("app.main._enforce_auth_rate_limit", new=AsyncMock()),
         TestClient(main.app, base_url="https://testserver") as client,
     ):
@@ -585,6 +587,20 @@ def test_username_only_registration_opens_a_session_immediately():
     cookies = response.headers.get_list("set-cookie")
     assert any(cookie.startswith("mb_access=quick-access-token") for cookie in cookies)
     assert any(cookie.startswith("mb_refresh=quick-refresh-token") for cookie in cookies)
+
+
+def test_existing_accounts_do_not_need_a_live_letterboxd_check():
+    service = AuthService(_settings(), client_factory=lambda *_args: None)
+    with patch.object(service, "_account_row_by_username", return_value=None):
+        assert service.username_requires_existence_check("new_member")
+    with patch.object(service, "_account_row_by_username", return_value={
+        "auth_user_id": "auth-id", "account_status": "active"
+    }):
+        assert not service.username_requires_existence_check("return_member")
+    with patch.object(service, "_account_row_by_username", return_value={
+        "auth_user_id": "auth-id", "account_status": "pending_verification"
+    }):
+        assert service.username_requires_existence_check("pending_user")
 
 
 def test_username_only_account_can_opt_into_a_password_from_settings():
@@ -616,6 +632,7 @@ def test_username_only_account_can_opt_into_a_password_from_settings():
 
 def test_username_only_login_reports_that_a_password_is_required():
     fake_service = SimpleNamespace(
+        username_requires_existence_check=lambda _username: False,
         register_username_only=lambda *_args, **_kwargs: (_ for _ in ()).throw(
             PasswordRequiredError("Bu hesap parola kullanıyor. Parolanı girerek devam et.")
         ),
@@ -633,6 +650,50 @@ def test_username_only_login_reports_that_a_password_is_required():
 
     assert response.status_code == 409
     assert response.headers["X-Error-Code"] == "password_required"
+
+
+@pytest.mark.parametrize(
+    ("verdict", "status", "code"),
+    [(False, 404, "profile_not_found"), (None, 503, "profile_unverified")],
+)
+def test_quick_registration_never_creates_unverified_account(verdict, status, code):
+    register = AsyncMock()
+    fake_service = SimpleNamespace(
+        username_requires_existence_check=lambda _username: True,
+        register_username_only=register,
+    )
+    with (
+        patch("app.main.get_settings", return_value=_settings()),
+        patch("app.main._auth_service", return_value=fake_service),
+        patch("app.main.check_public_profile_exists", new=AsyncMock(return_value=verdict)),
+        patch("app.main._enforce_auth_rate_limit", new=AsyncMock()),
+        TestClient(main.app, base_url="https://testserver") as client,
+    ):
+        response = client.post("/api/auth/register/quick", json={"username": "not_real"})
+    assert response.status_code == status
+    assert response.headers["X-Error-Code"] == code
+    assert not response.headers.get_list("set-cookie")
+    register.assert_not_called()
+
+
+def test_existing_quick_account_skips_letterboxd_probe():
+    account = _account("return_member")
+    session = AuthSession(account, "access", "refresh", 3600)
+    fake_service = SimpleNamespace(
+        username_requires_existence_check=lambda _username: False,
+        register_username_only=lambda *_args, **_kwargs: (session, False),
+    )
+    with (
+        patch("app.main.get_settings", return_value=_settings()),
+        patch("app.main._auth_service", return_value=fake_service),
+        patch("app.main.check_public_profile_exists", new=AsyncMock()) as probe,
+        patch("app.main._enforce_auth_rate_limit", new=AsyncMock()),
+        TestClient(main.app, base_url="https://testserver") as client,
+    ):
+        response = client.post("/api/auth/register/quick", json={"username": "return_member"})
+    assert response.status_code == 200
+    assert response.json()["created"] is False
+    probe.assert_not_awaited()
 
 
 def test_register_password_mismatch_stops_before_scraping():

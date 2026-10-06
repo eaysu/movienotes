@@ -5,7 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from app import profile_sync
-from app.scraper import AccessBlockedError
+from app.scraper import AccessBlockedError, ProfileNotFoundError
 
 
 def _iso(dt):
@@ -146,6 +146,9 @@ class FakeService:
         self.touch_sync_job(uid, lease_token=lease_token)
         return True
 
+    def mark_sync_status(self, uid, status):
+        self.sync_status = status
+
     def finalize_sync_run(self, uid, sync_run_id):
         for row in self.films.values():
             row["is_active"] = row.get("last_seen_run_id") == sync_run_id
@@ -244,7 +247,7 @@ class RunnerTests(unittest.IsolatedAsyncioTestCase):
         service = FakeService()
         service.job = {
             "user_id": 7, "state": "queued", "phase": "enrich",
-            "scope": "import", "cursor_page": 1,
+            "scope": "full", "cursor_page": profile_sync.IMPORT_CURSOR_MARKER,
             "sync_run_id": "11111111-1111-4111-8111-111111111111",
         }
         service.films = {
@@ -259,6 +262,25 @@ class RunnerTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(pipeline.use_stored_profile)
         self.assertTrue(service.films["older"]["is_active"])
         self.assertEqual(service.job["state"], "done")
+
+    async def test_missing_profile_is_terminal_and_does_not_retry_forever(self):
+        service = FakeService()
+        service.job = {
+            "user_id": 7, "state": "queued", "phase": "diary",
+            "scope": "full", "cursor_page": 1,
+        }
+        pipeline = FakePipeline(service, {})
+
+        async def missing(_username, _page):
+            raise ProfileNotFoundError("Letterboxd kullanıcısı bulunamadı.", status=404)
+
+        pipeline.scrape_watched_window = missing
+        with patch.object(profile_sync, "letterboxd_retry_after", return_value=0):
+            await profile_sync.run_job(pipeline, service, _account())
+        self.assertEqual(service.job["state"], "failed")
+        self.assertEqual(service.job["phase"], "done")
+        self.assertFalse(profile_sync.job_is_resumable(service.job))
+        self.assertEqual(service.sync_status, "failed")
 
     async def test_full_sweep_walks_windows_then_enriches_and_aggregates(self):
         service = FakeService()

@@ -5630,7 +5630,7 @@ async function loginAccount(event) {
   event.preventDefault();
   const button = $('btn-login');
   button.disabled = true;
-  setAuthMessage(null);
+  const clearReassurance = _loginPasswordRequired ? () => {} : _registerWaitReassurance();
   try {
     const password = $('login-password')?.value || '';
     const data = await apiJSON(
@@ -5658,7 +5658,10 @@ async function loginAccount(event) {
       return;
     }
     setAuthMessage(error.message || 'Giriş yapılamadı.', true);
-  } finally { button.disabled = false; }
+  } finally {
+    clearReassurance();
+    button.disabled = false;
+  }
 }
 
 function resetLoginPrompt() {

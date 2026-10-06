@@ -12,6 +12,7 @@ from app.scraper import (
     _empty_page_error,
     _fetch_with_retry,
     _fetch_profile_with_fresh_sessions,
+    check_public_profile_exists,
     _parse_film_rating,
     _parse_page,
     _parse_profile_page,
@@ -146,6 +147,36 @@ class ProfileParserTests(unittest.TestCase):
 
 
 class ProfileRetryTests(unittest.IsolatedAsyncioTestCase):
+    async def test_signup_existence_probe_distinguishes_missing_from_blocked(self):
+        class FakeSession:
+            def __init__(self, **_kwargs):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_args):
+                return None
+
+        response = SimpleNamespace(headers={}, text="<title>Films</title>")
+        cases = (
+            ([(response, 200)], True, 1),
+            ([(response, 404), (response, 404)], False, 2),
+            ([(response, 404), (response, 200)], True, 2),
+            ([(response, 403)], None, 1),
+            ([(None, -1)], None, 1),
+        )
+        for replies, expected, calls in cases:
+            with self.subTest(replies=[status for _response, status in replies]):
+                fetch = AsyncMock(side_effect=replies)
+                with (
+                    patch("app.scraper.AsyncSession", FakeSession),
+                    patch("app.scraper._fetch_with_retry", new=fetch),
+                ):
+                    result = await check_public_profile_exists("sample_user")
+                self.assertIs(result, expected)
+                self.assertEqual(fetch.await_count, calls)
+
     async def test_default_budget_is_single_file_and_low_rate(self):
         with patch.dict("os.environ", {"LETTERBOXD_MIN_INTERVAL_SECONDS": "4"}):
             budget = _LetterboxdRequestBudget()

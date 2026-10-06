@@ -83,6 +83,7 @@ class ImportEndpointTests(unittest.TestCase):
                 self.rows.extend(rows)
 
             def upsert_sync_job(self, _uid, **fields):
+                self.job = fields
                 return fields
 
         class Cache:
@@ -114,6 +115,8 @@ class ImportEndpointTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["watched_count"], 1)
         self.assertEqual(response.json()["watchlist_count"], 1)
+        self.assertEqual(service.job["scope"], "full")
+        self.assertEqual(service.job["cursor_page"], 0)
         self.assertEqual(service.rows[0]["user_rating"] if "user_rating" in service.rows[0] else None, None)
         self.assertIn(("films_watchlist", "example"), cache.values)
         start.assert_called_once()

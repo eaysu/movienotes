@@ -2,7 +2,7 @@
 
 Letterboxd hesabına bağlanan bir **sinefil akışı** ve **yapay zekâ destekli film
 önerici**. Kullanıcı yalnızca herkese açık Letterboxd kullanıcı adıyla kaydolur;
-hesap hemen açılır ve izleme geçmişi, Fav 4'ü ve puan farkındalı zevk analizi
+adın varlığı kontrol edildikten sonra hesap açılır. İzleme geçmişi, Fav 4'ü ve puan farkındalı zevk analizi
 arka planda kalıcı olarak saklanır. Bu düşük sürtünmeli kayıt sahiplik doğrulaması
 yapmaz; yeni hesaplar isterse Ayarlar’dan Movienotes parolası oluşturabilir ve
 yanlış profil bildirimleri manuel incelenir.
@@ -447,6 +447,10 @@ double-submit CSRF token'ı istiyor. Auth ve ağır rotaların ayrı IP bütçel
   scraping servisi kullanılmıyor. Ölçek büyütmeden önce Letterboxd'un kullanım
   şartlarını kontrol edin. Günlük bir canary (`scripts.check_scraper`, GitHub
   Actions) ayrıştırıcının sağlığını izliyor.
+- Yeni kullanıcı adı açılmadan önce `/films/` ve gerekirse `/rss/` ile varlık
+  kontrolü yapılır. İki sayfa da 404 ise kayıt reddedilir; erişim engeli veya
+  ağ hatası doğrulama sayılmaz ve hesap oluşturulmaz. Mevcut hesapların girişi
+  bu kontrole bağlı değildir. Bu kontrol profil sahipliğini kanıtlamaz.
 - Tam geçmiş için üye profil ayarlarından Letterboxd'un indirdiği ZIP arşivini
   yükleyebilir. `watched.csv`, `ratings.csv` ve `diary.csv` tekilleştirilerek
   mevcut filmlere eklenir; `watchlist.csv` varsa aday havuzuna alınır. Bu yol
@@ -524,8 +528,8 @@ import işlemi bu soğuma süresinden etkilenmez.
 3. Dağıt. `/api/health` `auth_enabled: true` bildirmeli.
 4. `/api/readiness` `status: ready` dönmeli; 503 ya şemanın uygulanmadığını ya
    da Supabase'in erişilemez olduğunu söylüyor.
-5. Test kullanıcısı için yalnızca Letterboxd kullanıcı adını gönder; hesap aynı
-   istekte açılır. Çok sayfalı tarama engellenirse profil ayarlarındaki
+5. Test kullanıcısı için yalnızca Letterboxd kullanıcı adını gönder; profil
+   erişilebilir olduğu doğrulanınca hesap aynı istekte açılır. Çok sayfalı tarama engellenirse profil ayarlarındaki
    “Letterboxd arşivini yükle” ile ZIP dışa aktarımını yükle.
 
 ## Açık işler

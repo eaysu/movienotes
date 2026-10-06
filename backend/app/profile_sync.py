@@ -19,7 +19,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
-from .scraper import AccessBlockedError, letterboxd_retry_after
+from .scraper import AccessBlockedError, ProfileNotFoundError, letterboxd_retry_after
 
 log = logging.getLogger("uvicorn.error")
 
@@ -30,6 +30,10 @@ WATCHED_WINDOW_PAGES = 4
 FULL_MAX_FILMS = 50_000
 # Director/keyword detail calls per checkpointed batch.
 ENRICH_BATCH = 150
+# A full job starting directly at enrichment came from a member export.  The
+# existing DB CHECK permits only full/incremental scopes, so cursor 0 is the
+# durable source marker rather than adding a new, undeployed scope value.
+IMPORT_CURSOR_MARKER = 0
 # A running job whose heartbeat is older than this is treated as abandoned.
 HEARTBEAT_STALE_SECONDS = 180
 # Process-wide cap on concurrent full crawls (the free tier is a single, small box).
@@ -127,6 +131,8 @@ def job_is_resumable(job: dict | None, *, now: datetime | None = None) -> bool:
     state = job.get("state")
     if state not in ("queued", "running", "failed"):
         return False
+    if state == "failed" and job.get("phase") == "done":
+        return False  # a missing public profile is not a transient failure
     now = now or _now()
     backoff = _parse_ts(job.get("backoff_until"))
     if backoff and backoff > now:
@@ -179,6 +185,15 @@ def progress_of(job: dict | None) -> dict | None:
         "onboarding_ready": onboarding_ready,
         "error": job.get("last_error") or "",
     }
+
+
+def is_import_job(job: dict | None) -> bool:
+    """Identify the export path across worker restarts without a schema change."""
+    return bool(
+        job and job.get("scope") == "full"
+        and int(job.get("cursor_page") if job.get("cursor_page") is not None else 1)
+        == IMPORT_CURSOR_MARKER
+    )
 
 
 async def ensure_started(
@@ -263,7 +278,7 @@ async def run_job(pipeline, service, account) -> None:
         # A shared cooldown is not a failed attempt by the next member. Leave
         # the durable job untouched; the retry scan will pick it up later.
         pending_job = await asyncio.to_thread(service.get_sync_job, uid) or {}
-        if pending_job.get("scope") != "import" and letterboxd_retry_after() > 0:
+        if not is_import_job(pending_job) and letterboxd_retry_after() > 0:
             return
         claimed = await asyncio.to_thread(
             service.claim_sync_job, uid, lease_token, LEASE_SECONDS
@@ -302,6 +317,22 @@ async def run_job(pipeline, service, account) -> None:
                 "profile_sync_failed",
                 {"error": type(exc).__name__},
             )
+            if isinstance(exc, ProfileNotFoundError):
+                with contextlib.suppress(Exception):
+                    await asyncio.to_thread(
+                        service.touch_sync_job,
+                        uid,
+                        owned_by=lease_token,
+                        state="failed",
+                        phase="done",
+                        last_error=str(exc)[:400],
+                        backoff_until=None,
+                        lease_token=None,
+                        lease_expires_at=None,
+                    )
+                with contextlib.suppress(Exception):
+                    await asyncio.to_thread(service.mark_sync_status, uid, "failed")
+                return
             with contextlib.suppress(Exception):
                 backoff = (
                     scrape_retry_backoff(int(job.get("attempts") or 0) + 1)
@@ -356,7 +387,8 @@ async def _crawl(pipeline, service, account, *, lease_token: str | None = None) 
     if job.get("scope") == "incremental":
         await _incremental(pipeline, service, account, lease_token=lease_token)
         return
-    if job.get("scope") == "import":
+    imported = is_import_job(job)
+    if imported:
         # A CSV/ZIP import never needs to request the blocked Letterboxd grid
         # or profile page, including when it resumes on a different worker.
         pipeline.use_stored_profile = True
@@ -371,7 +403,7 @@ async def _crawl(pipeline, service, account, *, lease_token: str | None = None) 
         cursor = 1
         processed = 0
     sync_run_id = existing_run_id or str(uuid.uuid4())
-    authoritative_run = job.get("scope") != "import" and bool(
+    authoritative_run = not imported and bool(
         existing_run_id or (phase == "diary" and cursor == 1)
     )
     await _touch(
@@ -518,7 +550,7 @@ async def _crawl(pipeline, service, account, *, lease_token: str | None = None) 
 
     # ── Phase 3 · aggregate the full history into the snapshot ────────────
     await _touch(service, uid, lease_token, phase="aggregate")
-    if job.get("scope") == "import":
+    if imported:
         enrich_watchlist = getattr(pipeline, "enrich_import_watchlist", None)
         if enrich_watchlist is not None:
             try:

@@ -884,6 +884,40 @@ async def scrape_profile(
     )
 
 
+async def check_public_profile_exists(username: str) -> bool | None:
+    """One bounded signup probe: True exists, False missing, None uncertain.
+
+    The profile homepage is often challenged even for real members. The first
+    /films/ page is cheaper and more reliable; a 404 there is cross-checked
+    against RSS before declaring the username absent. Neither a block nor a
+    network error is ever interpreted as "not found".
+    """
+    normalized = username.strip().lstrip("@").lower()
+    if not normalized:
+        return False
+    async with AsyncSession(impersonate=_DEFAULT_IMPERSONATE) as session:
+        films_url = f"{BASE_URL}/{normalized}/films/"
+        response, status = await _fetch_with_retry(
+            session, films_url, f"{BASE_URL}/{normalized}/",
+            max_retries=1, timeout=8.0,
+        )
+        if status == 200 and response is not None:
+            if response.headers.get("cf-mitigated") == "challenge":
+                return None
+            if "<title>just a moment" in response.text[:1000].lower():
+                return None
+            return True
+        if status != 404:
+            return None
+        response, status = await _fetch_with_retry(
+            session, f"{BASE_URL}/{normalized}/rss/", films_url,
+            max_retries=1, timeout=8.0,
+        )
+        if status == 200 and response is not None:
+            return True
+        return False if status == 404 else None
+
+
 async def _scrape_list(
     username: str,
     list_path: str,

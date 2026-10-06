@@ -638,6 +638,18 @@ class AuthService:
             expires_in=int(response.session.expires_in or 3600),
         )
 
+    def username_requires_existence_check(self, username: str) -> bool:
+        """Existing accounts can sign in during an upstream Letterboxd block."""
+        row = self._account_row_by_username(self._service_client(), username)
+        if not row:
+            return True
+        if row.get("account_status") == "disabled":
+            return False  # registration itself reports the disabled account
+        return not bool(
+            row.get("auth_user_id")
+            and row.get("account_status") in {"active", "verification_deferred"}
+        )
+
     def register_username_only(
         self, username: str, *, ip_hash: str = ""
     ) -> tuple[AuthSession, bool]:
@@ -1804,6 +1816,7 @@ class AuthService:
                 service.table("profile_sync_jobs")
                 .select("user_id,state,phase,scope,heartbeat_at,backoff_until,lease_expires_at")
                 .in_("state", ["queued", "running", "failed"])
+                .neq("phase", "done")  # terminal missing-profile failures never occupy retry slots
                 # Filter BEFORE LIMIT: old jobs in a six-hour cooldown used
                 # to occupy every slot and starve newer, already-due imports.
                 .or_(f"backoff_until.is.null,backoff_until.lte.{now.isoformat()}")
