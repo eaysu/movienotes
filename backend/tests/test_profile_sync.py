@@ -240,6 +240,26 @@ class RunnerTests(unittest.IsolatedAsyncioTestCase):
         if task and not task.done():
             task.cancel()
 
+    async def test_import_enriches_without_scraping_or_retiring_existing_rows(self):
+        service = FakeService()
+        service.job = {
+            "user_id": 7, "state": "queued", "phase": "enrich",
+            "scope": "import", "cursor_page": 1,
+            "sync_run_id": "11111111-1111-4111-8111-111111111111",
+        }
+        service.films = {
+            "boxd-416232": {"film_slug": "boxd-416232", "title": "One", "details_loaded": False, "is_active": True},
+            "older": {"film_slug": "older", "title": "Older", "details_loaded": True, "is_active": True},
+        }
+        pipeline = FakePipeline(service, {})
+        pipeline.use_stored_profile = False
+        with patch.object(profile_sync, "letterboxd_retry_after", return_value=300):
+            await profile_sync.run_job(pipeline, service, _account())
+        self.assertEqual(pipeline.window_calls, [])
+        self.assertTrue(pipeline.use_stored_profile)
+        self.assertTrue(service.films["older"]["is_active"])
+        self.assertEqual(service.job["state"], "done")
+
     async def test_full_sweep_walks_windows_then_enriches_and_aggregates(self):
         service = FakeService()
         service.job = {

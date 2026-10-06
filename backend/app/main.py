@@ -86,6 +86,11 @@ from .taste_profile import (
     taste_source_fingerprint,
 )
 from . import profile_sync
+from .letterboxd_import import (
+    MAX_UPLOAD_BYTES,
+    InvalidLetterboxdExport,
+    parse_letterboxd_export,
+)
 
 
 # Every handler reaches Supabase through ``asyncio.to_thread``, and the default
@@ -952,6 +957,7 @@ def _delete_cached_user_data(cache, username: str) -> bool:
     operations = [
         cache.delete("films_watched", username),
         cache.delete("films_watchlist", username),
+        cache.delete("films_watchlist_import_raw", username),
         cache.delete("films_full_refresh", f"watched:{username}"),
         cache.delete("films_full_refresh", f"watchlist:{username}"),
         cache.delete("watchlist_head_check", username),
@@ -2139,7 +2145,7 @@ async def _profile_sync_status(account: Account, service) -> dict | None:
     """
     job = await asyncio.to_thread(service.get_sync_job, account.id)
     if not profile_sync.is_running(account.id):
-        if job and job.get("scope") == "full" and profile_sync.job_is_resumable(job):
+        if job and job.get("scope") in {"full", "import"} and profile_sync.job_is_resumable(job):
             # Resume-on-visit: a job whose lease/heartbeat went stale after a
             # process restart is picked up without losing onboarding progress.
             profile_sync.start(_SyncPipeline(get_settings()), service, account)
@@ -3642,7 +3648,6 @@ async def _sync_recent_history_on_entry(account: Account, settings, service) -> 
     the installed app should check new watches and rating edits, not begin a
     multi-thousand-film metadata job.
     """
-    known = await asyncio.to_thread(service.get_watched_slugs, account.id)
     existing = {
         row.get("film_slug"): row
         for row in await asyncio.to_thread(service.get_watched_films, account.id)
@@ -3650,16 +3655,28 @@ async def _sync_recent_history_on_entry(account: Account, settings, service) -> 
     recent = await scrape_recent_watched(
         account.username, max_retries=settings.scrape_max_retries
     )
-    new_rows = [film for film in recent if film.slug and film.slug not in known]
+    imported_by_title: dict[tuple[str, int | None], set[str]] = {}
+    for slug, row in existing.items():
+        if slug and slug.startswith("boxd-"):
+            key = ((row.get("title") or "").casefold(), row.get("release_year"))
+            imported_by_title.setdefault(key, set()).add(slug)
+
+    def known_slug(film) -> str | None:
+        if film.slug in existing:
+            return film.slug
+        matches = imported_by_title.get(((film.title or "").casefold(), film.year), set())
+        return next(iter(matches)) if len(matches) == 1 else None
+
+    new_rows = [film for film in recent if film.slug and not known_slug(film)]
     rating_updates = [
         {
-            "slug": film.slug,
+            "slug": known_slug(film),
             "user_rating": film.user_rating,
             "rating_observed": True,
         }
         for film in recent
-        if film.slug in existing
-        and existing[film.slug].get("user_rating") != film.user_rating
+        if known_slug(film)
+        and existing[known_slug(film)].get("user_rating") != film.user_rating
     ]
     if not new_rows and not rating_updates:
         return {"new_films": 0, "rating_updates": 0}
@@ -3963,6 +3980,22 @@ class _SyncPipeline:
                     asset_store=_auth_service(),
                 )
         return self._enricher_obj
+
+    async def enrich_import_watchlist(self, username: str) -> None:
+        """Replace the usable raw export cache with TMDb-enriched candidates."""
+        enricher = self._enricher()
+        if enricher is None:
+            return
+        client, _cache = _make_cache(self.settings)
+        pcache = _make_persistent_cache(self.settings, client)
+        raw = await asyncio.to_thread(pcache.get, "films_watchlist_import_raw", username)
+        if not raw:
+            return
+        enriched = []
+        for offset in range(0, len(raw), 100):
+            chunk = await enricher.enrich(raw[offset : offset + 100], include_details=True)
+            enriched.extend(film.to_dict() for film in chunk)
+        await asyncio.to_thread(pcache.set, "films_watchlist", username, enriched)
 
     async def scrape_watched_window(
         self, username: str, start_page: int
@@ -4628,6 +4661,82 @@ async def sync_profile_on_entry(request: Request) -> dict:
     return {"status": status}
 
 
+@app.post("/api/profile/import-letterboxd")
+async def import_letterboxd_export(request: Request) -> dict:
+    """Import the owner's export; film enrichment continues in the durable job."""
+    _require_csrf(request)
+    account = await _require_account(request)
+    service = _auth_service()
+    if profile_sync.is_running(account.id):
+        raise HTTPException(status_code=409, detail="Profil taraması sürüyor. Tamamlanınca yeniden dene.")
+    job = await asyncio.to_thread(service.get_sync_job, account.id)
+    if job and job.get("state") == "running" and not profile_sync.job_is_resumable(job):
+        raise HTTPException(status_code=409, detail="Profil taraması sürüyor. Tamamlanınca yeniden dene.")
+    body = bytearray()
+    async for chunk in request.stream():
+        body.extend(chunk)
+        if len(body) > MAX_UPLOAD_BYTES:
+            raise HTTPException(status_code=413, detail="ZIP dosyası 16 MB sınırını aşıyor.")
+    try:
+        exported = await asyncio.to_thread(parse_letterboxd_export, bytes(body))
+    except InvalidLetterboxdExport as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if exported.username and exported.username != account.username.lower():
+        raise HTTPException(status_code=400, detail="ZIP dosyası bu Letterboxd kullanıcı adına ait değil.")
+    try:
+        await asyncio.to_thread(service.check_sync_schema)
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Film arşivi şu anda kullanılamıyor.") from exc
+
+    # Reuse the canonical catalog slug when the film is already in this
+    # account's archive. Export short links otherwise have a reversible slug.
+    existing = await asyncio.to_thread(service.get_watched_films, account.id)
+    matches: dict[tuple[str, int | None], set[str]] = {}
+    for row in existing:
+        if not row.get("film_slug"):
+            continue
+        key = ((row.get("title") or "").casefold(), row.get("release_year"))
+        matches.setdefault(key, set()).add(row["film_slug"])
+    seen_slugs: set[str] = set()
+    for row in exported.watched:
+        key = (row["title"].casefold(), row.get("release_year"))
+        candidates = matches.get(key, set())
+        if len(candidates) == 1 and next(iter(candidates)) not in seen_slugs:
+            row["slug"] = next(iter(candidates))
+        seen_slugs.add(row["slug"])
+
+    # An export is a merge, not a deletion: a newly watched film after the
+    # export date must survive. Supplying a run id reactivates older rows.
+    import_run_id = str(uuid.uuid4())
+    for offset in range(0, len(exported.watched), 200):
+        batch = exported.watched[offset : offset + 200]
+        for row in batch:
+            row["last_seen_run_id"] = import_run_id
+            row["is_active"] = True
+        await asyncio.to_thread(service.save_watched_films, account.id, batch)
+
+    if exported.watchlist_present:
+        client, _cache = _make_cache(get_settings())
+        pcache = _make_persistent_cache(get_settings(), client)
+        await asyncio.to_thread(pcache.set, "films_watchlist", account.username, exported.watchlist)
+        await asyncio.to_thread(pcache.set, "films_watchlist_import_raw", account.username, exported.watchlist)
+
+    queued = await asyncio.to_thread(
+        service.upsert_sync_job,
+        account.id,
+        state="queued", phase="enrich", scope="import", cursor_page=1,
+        films_processed=0, films_total=len(exported.watched), attempts=0,
+        last_error="", backoff_until=None, sync_run_id=None,
+        lease_token=None, lease_expires_at=None,
+    )
+    profile_sync.start(_SyncPipeline(get_settings(), use_stored_profile=True), service, account)
+    return {
+        "watched_count": len(exported.watched),
+        "watchlist_count": len(exported.watchlist),
+        "sync_job": profile_sync.progress_of(queued),
+    }
+
+
 @app.post("/api/profile/sync")
 async def sync_my_profile(
     request: Request,
@@ -4669,10 +4778,18 @@ async def sync_my_profile(
         if stored_count:
             # A completed diary crawl must not freeze Fav 4 forever. This is
             # only one profile-page request, not another history scrape.
-            refreshed = await _refresh_profile_favorites(
-                account, settings, service, locale=locale
-            )
-            stored = refreshed["profile"]
+            try:
+                refreshed = await _refresh_profile_favorites(
+                    account, settings, service, locale=locale
+                )
+                stored = refreshed["profile"]
+            except ScrapeError:
+                # A blocked profile page must not hide the safely imported
+                # archive or make the refresh button look like data loss.
+                stored = await asyncio.to_thread(service.get_profile, account)
+                stored["account"] = account.__dict__
+                stored["letterboxd_unavailable"] = True
+            stored = _apply_taste_locale(stored, locale)
             # A snapshot written by an older algorithm is stale prose, however
             # unchanged the archive behind it is. Rebuild it asynchronously:
             # opening a profile must remain instant and never trigger a crawl.

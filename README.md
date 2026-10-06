@@ -51,6 +51,7 @@ movie-box/
 │   │   ├── recommender.py   katman 3 — puan farkındalı benzerlik sıralaması
 │   │   ├── taste_profile.py kalıcı zevk özeti ve güven skoru
 │   │   ├── profile_sync.py  kontrol noktalı tam/artımlı geçmiş taraması
+│   │   ├── letterboxd_import.py  Letterboxd ZIP içindeki CSV'leri ayrıştırma
 │   │   ├── semantic.py      gömme tabanlı benzerlik
 │   │   ├── screenings.py    mekân programı ayrıştırma ve bülten
 │   │   └── llm.py           katman 4 — LLM yeniden sıralama ve zevk metni
@@ -417,7 +418,7 @@ kolonlarını `-` olarak yazdırır.
 | Servis | `GET /api/health`, `/api/readiness`, `/api/public/stats`, `/api/share/image` |
 | Auth | `POST /api/auth/register/quick`, `register/start`, `register/verify`, `login`, `refresh`, `logout`, `password/create`, `password-reset/start`, `password-reset/finish`; `GET /api/auth/me`; `DELETE /api/data` |
 | Push | `GET /api/push/public-key`, `POST /api/push/subscriptions` |
-| Profil | `GET /api/profile/me`, `social-stats`, `sync-status`, `stats`, `watched`, `recent`, `film-overview`, `directors/{rank}/films`, `top-films`; `PUT /api/profile/top-films`; `POST /api/profile/sync`, `watchlist/check`, `onboarding-complete`, `discovery-settings`, `privacy-settings` |
+| Profil | `GET /api/profile/me`, `social-stats`, `sync-status`, `stats`, `watched`, `recent`, `film-overview`, `directors/{rank}/films`, `top-films`; `PUT /api/profile/top-films`; `POST /api/profile/sync`, `import-letterboxd`, `watchlist/check`, `onboarding-complete`, `discovery-settings`, `privacy-settings` |
 | Akış | `GET /api/feed`, `/api/feed/films`, `/api/feed/trending`, `/api/films/{slug}`, `/api/posts/{id}`; `POST /api/posts`, `/api/posts/{id}/replies`, `/like`, `/report`; `DELETE /api/posts/{id}`, `/like` |
 | Sosyal | `GET /api/users/search`, `/api/users/{username}`, `/followers`, `/following`, `/api/notifications`, `/api/notifications/unread-count`; `POST /api/users/{username}/follow`, `follow-request`, `block`, `report`; `DELETE .../follow`, `.../block` |
 | Öneri | `POST /api/recommend`, `POST /api/random`, `GET /api/bulletin?city=` |
@@ -446,6 +447,13 @@ double-submit CSRF token'ı istiyor. Auth ve ağır rotaların ayrı IP bütçel
   scraping servisi kullanılmıyor. Ölçek büyütmeden önce Letterboxd'un kullanım
   şartlarını kontrol edin. Günlük bir canary (`scripts.check_scraper`, GitHub
   Actions) ayrıştırıcının sağlığını izliyor.
+- Tam geçmiş için üye profil ayarlarından Letterboxd'un indirdiği ZIP arşivini
+  yükleyebilir. `watched.csv`, `ratings.csv` ve `diary.csv` tekilleştirilerek
+  mevcut filmlere eklenir; `watchlist.csv` varsa aday havuzuna alınır. Bu yol
+  Letterboxd sayfalarını taramaz. TMDb zenginleştirmesi kalıcı arka plan işinde
+  sürer. ZIP yüklemek mevcut geçmişteki, dışa aktarımdan sonra eklenmiş filmleri
+  silmez. Yeni izlemeler için otomatik kısa tarama denenir; erişim engellenirse
+  kullanıcı güncel ZIP'i yeniden yükleyebilir.
 - Profiller stale-while-revalidate önbellekle çalışıyor. İlk sayfa parmak izi
   değişmediyse tam tarama atlanıyor; tam tarama en az haftalık yine koşuyor.
 - Aynı anda gelen özdeş scrape'ler birleştiriliyor, TMDb paylaşılan sınırlı bir
@@ -504,6 +512,9 @@ canary sonucu yalnızca GitHub bağlantısını ölçer; Render sonucunun yerine
 Kuyruk, bekleme süresi/kirası dolmuş işleri limit uygulamadan önce seçer ve ortak
 erişim beklemesinde sıradaki kullanıcının deneme sayısını artırmaz. Tam geçmiş
 alınmadan bir işi elle `done` yapma veya checkpoint'ini sıfırlama.
+Cloudflare engeli sürüyorsa daha sık deneme veya başka sunucuya geçiş başarı
+garantisi vermez. Üye kendi Letterboxd ZIP arşivini profil ayarlarından yükler;
+import işlemi bu soğuma süresinden etkilenmez.
 
 ## Hesap yayına alma
 
@@ -514,13 +525,14 @@ alınmadan bir işi elle `done` yapma veya checkpoint'ini sıfırlama.
 4. `/api/readiness` `status: ready` dönmeli; 503 ya şemanın uygulanmadığını ya
    da Supabase'in erişilemez olduğunu söylüyor.
 5. Test kullanıcısı için yalnızca Letterboxd kullanıcı adını gönder; hesap aynı
-   istekte açılır, ardından ilk profil senkronunu bekle.
+   istekte açılır. Çok sayfalı tarama engellenirse profil ayarlarındaki
+   “Letterboxd arşivini yükle” ile ZIP dışa aktarımını yükle.
 
 ## Açık işler
 
-- `watched_rank` öneri hattı ve Blend tarafında *tazelik* gibi kullanılıyor;
-  aslında Letterboxd'un liste sırası. Gerçek izleme tarihi günce kayıtlarında
-  var, sıralama oraya bağlanmalı.
+- Scraper ile gelen `watched_rank`, Letterboxd'un liste sırasıdır; ZIP içe
+  aktarımı güncedeki izleme tarihini kullanır. İki kaynağın sıralamasını aynı
+  zaman çizelgesine dönüştürmek için ayrı tarih alanı gerekir.
 - Supabase RLS politikaları yalnızca gereken role/operasyona indirilmeli.
 - Google fontları self-host/subset edilip kritik olanlar preload edilmeli.
 - `criterion-closet-bg.jpg` için AVIF/WebP varyantı üretilmeli

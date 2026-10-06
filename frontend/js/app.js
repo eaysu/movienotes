@@ -1,4 +1,4 @@
-import { $, escapeHTML, safeImageURL, letterboxdFilmURL } from './dom.js?v=20260902.15';
+import { $, escapeHTML, safeImageURL, letterboxdFilmURL } from './dom.js?v=20261006.1';
 import {
   API_BASE,
   apiJSON,
@@ -8,24 +8,24 @@ import {
   finishApiRequest,
   scrapeErrorMessage,
   streamErrorMessage,
-} from './api.js?v=20260920.23';
+} from './api.js?v=20261006.1';
 import {
   cookieValue,
   csrfHeaders,
   setAuthMessage,
   setAuthMode,
   setPasswordVisibility,
-} from './auth.js?v=20261003.2';
-import { directorAvatar, directorFilmGrid, directorFilmTile } from './profile.js?v=20260920.23';
+} from './auth.js?v=20261006.1';
+import { directorAvatar, directorFilmGrid, directorFilmTile } from './profile.js?v=20261006.1';
 import { animateScore, getScoreInfo } from './blend.js?v=20260902.15';
-import { createRecommendationCards } from './recommendations.js?v=20260923.26';
+import { createRecommendationCards } from './recommendations.js?v=20261006.1';
 import {
   getLocale,
   initI18n,
   localePreference,
   setLocalePreference,
   t,
-} from './i18n.js?v=20261003.1';
+} from './i18n.js?v=20261006.1';
 
 initI18n();
 
@@ -34,7 +34,7 @@ const uiLocale = () => (getLocale() === 'en' ? 'en-US' : 'tr-TR');
 let _shareCardsModule;
 function loadShareCardsModule() {
   if (!_shareCardsModule) {
-    _shareCardsModule = import('./share-cards.js?v=20260926.1');
+    _shareCardsModule = import('./share-cards.js?v=20261006.1');
   }
   return _shareCardsModule;
 }
@@ -4211,6 +4211,9 @@ async function syncProfile(force = false, refreshWatchlist = false) {
     });
     if (data.taste && !data.taste.updated_at) data.taste.updated_at = new Date().toISOString();
     renderPersistedProfile(data);
+    if (data.letterboxd_unavailable) {
+      $('profile-account-summary').textContent = t('Letterboxd şu anda taramayı engelliyor. Ayarlardan arşiv ZIP dosyanı yükleyebilirsin.');
+    }
     if ($('view-onboarding').classList.contains('hidden')) {
       _recentLoaded = false; loadRecentFilms(true);
       _statsLoaded = false; loadProfileStats();
@@ -4225,6 +4228,35 @@ async function syncProfile(force = false, refreshWatchlist = false) {
   } finally {
     button.disabled = false;
     button.querySelector('span').classList.remove('animate-spin');
+  }
+}
+
+async function importLetterboxdExport(file) {
+  if (!file || !_account) return;
+  const button = $('profile-import-letterboxd');
+  const errorBox = $('profile-sync-error');
+  button.disabled = true;
+  toggleProfileMenu(false);
+  errorBox.classList.add('hidden');
+  $('profile-account-summary').textContent = t('Letterboxd arşivin yükleniyor…');
+  try {
+    const data = await apiJSON('/api/profile/import-letterboxd', {
+      method: 'POST',
+      headers: csrfHeaders({ 'Content-Type': 'application/zip' }),
+      body: file,
+    });
+    $('profile-account-summary').textContent = t('{count} film aktarıldı. Film bilgileri arka planda tamamlanıyor.', { count: data.watched_count });
+    _recentLoaded = false;
+    _statsLoaded = false;
+    await Promise.allSettled([loadRecentFilms(true), loadProfileStats()]);
+    setTimeout(() => loadProfile(), 2000);
+  } catch (error) {
+    errorBox.textContent = error.message || t('Arşiv yüklenemedi.');
+    errorBox.classList.remove('hidden');
+    $('profile-account-summary').textContent = t('Arşiv yüklenemedi.');
+  } finally {
+    button.disabled = false;
+    $('profile-import-file').value = '';
   }
 }
 
@@ -4293,8 +4325,8 @@ async function checkWatchlistFreshness() {
       headers: csrfHeaders({ 'Content-Type': 'application/json' }),
     });
   } catch (_) {
-    // The last known-good watchlist remains usable when Letterboxd is unavailable.
-    sessionStorage.removeItem(key);
+    // Keep the five-minute check interval even when Letterboxd blocks us;
+    // immediately retrying on every profile visit makes a 403 storm worse.
   }
 }
 
@@ -6362,6 +6394,8 @@ document.addEventListener('click', event => {
   toggleProfileMenu(false);
 });
 $('btn-profile-sync').addEventListener('click', () => syncProfile(false, true));
+$('profile-import-letterboxd').addEventListener('click', () => $('profile-import-file').click());
+$('profile-import-file').addEventListener('change', event => importLetterboxdExport(event.target.files?.[0]));
 $('btn-profile-back').addEventListener('click', () => showView(homeView()));
 $('btn-mobile-profile-list-back').addEventListener('click', () => showView('profile'));
 $('mobile-profile').addEventListener('click', event => {

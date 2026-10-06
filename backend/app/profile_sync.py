@@ -262,7 +262,8 @@ async def run_job(pipeline, service, account) -> None:
     async with _job_sem:
         # A shared cooldown is not a failed attempt by the next member. Leave
         # the durable job untouched; the retry scan will pick it up later.
-        if letterboxd_retry_after() > 0:
+        pending_job = await asyncio.to_thread(service.get_sync_job, uid) or {}
+        if pending_job.get("scope") != "import" and letterboxd_retry_after() > 0:
             return
         claimed = await asyncio.to_thread(
             service.claim_sync_job, uid, lease_token, LEASE_SECONDS
@@ -355,6 +356,10 @@ async def _crawl(pipeline, service, account, *, lease_token: str | None = None) 
     if job.get("scope") == "incremental":
         await _incremental(pipeline, service, account, lease_token=lease_token)
         return
+    if job.get("scope") == "import":
+        # A CSV/ZIP import never needs to request the blocked Letterboxd grid
+        # or profile page, including when it resumes on a different worker.
+        pipeline.use_stored_profile = True
     phase = job.get("phase") or "diary"
     cursor = int(job.get("cursor_page") or 1)
     processed = int(job.get("films_processed") or 0)
@@ -366,7 +371,9 @@ async def _crawl(pipeline, service, account, *, lease_token: str | None = None) 
         cursor = 1
         processed = 0
     sync_run_id = existing_run_id or str(uuid.uuid4())
-    authoritative_run = bool(existing_run_id or (phase == "diary" and cursor == 1))
+    authoritative_run = job.get("scope") != "import" and bool(
+        existing_run_id or (phase == "diary" and cursor == 1)
+    )
     await _touch(
         service,
         uid,
@@ -511,6 +518,14 @@ async def _crawl(pipeline, service, account, *, lease_token: str | None = None) 
 
     # ── Phase 3 · aggregate the full history into the snapshot ────────────
     await _touch(service, uid, lease_token, phase="aggregate")
+    if job.get("scope") == "import":
+        enrich_watchlist = getattr(pipeline, "enrich_import_watchlist", None)
+        if enrich_watchlist is not None:
+            try:
+                await enrich_watchlist(account.username)
+            except Exception:
+                # The raw watchlist stays usable even if TMDb is unavailable.
+                log.warning("watchlist import enrich FAILED user=%s", uid, exc_info=True)
     if natural_end and authoritative_run:
         await asyncio.to_thread(service.finalize_sync_run, uid, sync_run_id)
     total = await pipeline.rebuild_snapshot(account)
@@ -543,23 +558,37 @@ async def _incremental(
     await _touch(
         service, uid, lease_token, state="running", phase="diary", last_error=""
     )
-    known: set[str] = set(await asyncio.to_thread(service.get_watched_slugs, uid))
     existing = {
         row.get("film_slug"): row
         for row in await asyncio.to_thread(service.get_watched_films, uid)
     }
     recent = await pipeline.scrape_recent(account.username)
 
-    new_films = [f for f in recent if f.get("slug") and f["slug"] not in known]
+    imported_by_title: dict[tuple[str, int | None], set[str]] = {}
+    for slug, row in existing.items():
+        if slug and slug.startswith("boxd-"):
+            key = ((row.get("title") or "").casefold(), row.get("release_year"))
+            imported_by_title.setdefault(key, set()).add(slug)
+
+    def known_slug(film: dict) -> str | None:
+        slug = film.get("slug")
+        if slug in existing:
+            return slug
+        matches = imported_by_title.get(
+            ((film.get("title") or "").casefold(), film.get("year")), set()
+        )
+        return next(iter(matches)) if len(matches) == 1 else None
+
+    new_films = [f for f in recent if f.get("slug") and not known_slug(f)]
     rating_updates = [
         {
-            "slug": f["slug"],
+            "slug": known_slug(f),
             "user_rating": f.get("user_rating"),
             "rating_observed": True,
         }
         for f in recent
-        if f.get("slug") in existing
-        and existing[f["slug"]].get("user_rating") != f["user_rating"]
+        if known_slug(f)
+        and existing[known_slug(f)].get("user_rating") != f["user_rating"]
     ]
 
     if new_films:
