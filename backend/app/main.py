@@ -3837,6 +3837,8 @@ async def _schedule_entry_sync(account: Account, settings, service) -> str:
     if account.id in _entry_sync_tasks:
         return "running"
 
+    # Export-backed accounts should not silently revert to scraping on the
+    # next login. Their durable import job remains identifiable after restart.
     # A member who entered through the temporary bio-verification fallback
     # has no bootstrap snapshot yet.  Do not let the lightweight entry pass
     # (which also needs Letterboxd) be their only chance to start importing:
@@ -3845,6 +3847,13 @@ async def _schedule_entry_sync(account: Account, settings, service) -> str:
     # best-effort and may be abandoned with the HTTP request.
     try:
         existing_job = await asyncio.to_thread(service.get_sync_job, account.id)
+        if profile_sync.is_import_job(existing_job):
+            if profile_sync.job_is_resumable(existing_job):
+                await profile_sync.ensure_started(
+                    _SyncPipeline(settings, use_stored_profile=True),
+                    service, account, scope="full",
+                )
+            return "deferred"
         if profile_sync.job_needs_full_sweep(existing_job):
             job = await profile_sync.ensure_started(
                 _SyncPipeline(settings), service, account, scope="full"
@@ -3853,6 +3862,7 @@ async def _schedule_entry_sync(account: Account, settings, service) -> str:
                 return "full_sync_queued"
     except Exception:  # noqa: BLE001 - app entry must remain available
         log.warning("entry full sync queue failed account=%s", account.id, exc_info=True)
+        return "deferred"
 
     client, _cache = _make_cache(settings)
     pcache = _make_persistent_cache(settings, client)
@@ -4643,6 +4653,8 @@ async def check_my_watchlist(request: Request) -> dict:
     _require_csrf(request)
     account = await _require_account(request)
     service = _auth_service()
+    if profile_sync.is_import_job(await asyncio.to_thread(service.get_sync_job, account.id)):
+        return {"status": "export", "changed": False}
     try:
         result = await _check_profile_watchlist_freshness(
             account, get_settings(), service, request=request
@@ -4664,6 +4676,8 @@ async def check_my_profile_favorites(request: Request) -> dict:
     _require_csrf(request)
     account = await _require_account(request)
     service = _auth_service()
+    if profile_sync.is_import_job(await asyncio.to_thread(service.get_sync_job, account.id)):
+        return {"changed": False}
     try:
         result = await _refresh_profile_favorites(account, get_settings(), service)
         await _record_activity_event(
@@ -4752,6 +4766,7 @@ async def import_letterboxd_export(request: Request) -> dict:
         last_error="", backoff_until=None, sync_run_id=None,
         lease_token=None, lease_expires_at=None,
     )
+    await asyncio.to_thread(service.mark_sync_status, account.id, "syncing")
     profile_sync.start(_SyncPipeline(get_settings(), use_stored_profile=True), service, account)
     return {
         "watched_count": len(exported.watched),

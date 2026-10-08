@@ -389,6 +389,16 @@ def test_entry_sync_queues_a_durable_full_import_when_no_archive_exists():
     lightweight.assert_not_awaited()
 
 
+def test_export_backed_account_does_not_scrape_on_entry():
+    account = _account()
+    job = {"state": "done", "scope": "full", "cursor_page": 0}
+    service = SimpleNamespace(get_sync_job=lambda _uid: job)
+    with patch("app.main._run_entry_sync", new_callable=AsyncMock) as lightweight:
+        status = asyncio.run(main._schedule_entry_sync(account, _settings(), service))
+    assert status == "deferred"
+    lightweight.assert_not_awaited()
+
+
 def test_background_retry_loop_resumes_a_queued_profile_import():
     account = _account()
     job = {"state": "queued", "scope": "full", "backoff_until": None}
@@ -1106,6 +1116,7 @@ def test_sync_status_returns_progress_without_loading_profile_snapshot():
     assert response.status_code == 200
     assert response.json()["sync_job"] == {
         "state": "running",
+        "imported": False,
         "phase": "enrich",
         "scope": "full",
         "processed": 125,

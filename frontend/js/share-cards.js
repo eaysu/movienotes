@@ -1,5 +1,5 @@
-import { API_BASE } from './api.js?v=20261006.1';
-import { t } from './i18n.js?v=20261006.1';
+import { API_BASE } from './api.js?v=20261008.1';
+import { t } from './i18n.js?v=20261008.1';
 
 const WIDTH = 1080;
 const HEIGHT = 1350;

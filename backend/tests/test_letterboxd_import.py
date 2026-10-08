@@ -86,6 +86,9 @@ class ImportEndpointTests(unittest.TestCase):
                 self.job = fields
                 return fields
 
+            def mark_sync_status(self, _uid, status):
+                self.status = status
+
         class Cache:
             def __init__(self):
                 self.values = {}
@@ -117,6 +120,7 @@ class ImportEndpointTests(unittest.TestCase):
         self.assertEqual(response.json()["watchlist_count"], 1)
         self.assertEqual(service.job["scope"], "full")
         self.assertEqual(service.job["cursor_page"], 0)
+        self.assertEqual(service.status, "syncing")
         self.assertEqual(service.rows[0]["user_rating"] if "user_rating" in service.rows[0] else None, None)
         self.assertIn(("films_watchlist", "example"), cache.values)
         start.assert_called_once()

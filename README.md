@@ -104,8 +104,7 @@ http://localhost:8000
 
 ### Deneme oturumu (sandbox)
 
-Onboarding'i herhangi bir Letterboxd profili üzerinde, hiçbir şey saklamadan
-izlemek için:
+Onboarding'i geçici bir oturumda, hiçbir şey saklamadan denemek için:
 
 ```bash
 ./run-test.sh                 # sunucuyu açar, hazır olunca Chrome'u getirir
@@ -122,8 +121,10 @@ python -m scripts.sandbox --no-browser --port 9000
 ```
 
 Giriş ekranı yalnızca bir Letterboxd adı sorar — yeni hesapta parola yoktur.
-Yazılan ad gerçek scraper ile taranır, gerçek onboarding oynar, arka plan
-arşiv taraması gerçekten çalışır; tek fark her şeyin bellekte durması.
+Kayıt, herkese açık profilin varlığını kontrol eder. Yeni onboarding önce
+kullanıcının kendi Letterboxd ZIP dışa aktarımını ister;
+istersen herkese açık profil taramasını ayrıca seçebilirsin. İçe aktarma ve
+isteğe bağlı tarama gerçektir; tek fark her şeyin bellekte durması.
 Supabase'e hiç bağlanılmaz (`.env`'den yalnızca TMDb/OpenAI anahtarları
 okunur), `DATA_DIR` geçici bir klasöre bakar ve Ctrl-C o klasörü siler. Yani
 depodaki `data/cache.sqlite3` bu oturumdan hiç etkilenmez.

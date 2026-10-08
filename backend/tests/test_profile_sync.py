@@ -262,6 +262,8 @@ class RunnerTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(pipeline.use_stored_profile)
         self.assertTrue(service.films["older"]["is_active"])
         self.assertEqual(service.job["state"], "done")
+        self.assertEqual(service.sync_status, "ready")
+        self.assertTrue(profile_sync.progress_of(service.job)["imported"])
 
     async def test_missing_profile_is_terminal_and_does_not_retry_forever(self):
         service = FakeService()

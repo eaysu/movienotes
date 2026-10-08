@@ -8,24 +8,24 @@ import {
   finishApiRequest,
   scrapeErrorMessage,
   streamErrorMessage,
-} from './api.js?v=20261006.1';
+} from './api.js?v=20261008.1';
 import {
   cookieValue,
   csrfHeaders,
   setAuthMessage,
   setAuthMode,
   setPasswordVisibility,
-} from './auth.js?v=20261006.1';
-import { directorAvatar, directorFilmGrid, directorFilmTile } from './profile.js?v=20261006.1';
+} from './auth.js?v=20261008.1';
+import { directorAvatar, directorFilmGrid, directorFilmTile } from './profile.js?v=20261008.1';
 import { animateScore, getScoreInfo } from './blend.js?v=20260902.15';
-import { createRecommendationCards } from './recommendations.js?v=20261006.1';
+import { createRecommendationCards } from './recommendations.js?v=20261008.1';
 import {
   getLocale,
   initI18n,
   localePreference,
   setLocalePreference,
   t,
-} from './i18n.js?v=20261006.1';
+} from './i18n.js?v=20261008.1';
 
 initI18n();
 
@@ -34,7 +34,7 @@ const uiLocale = () => (getLocale() === 'en' ? 'en-US' : 'tr-TR');
 let _shareCardsModule;
 function loadShareCardsModule() {
   if (!_shareCardsModule) {
-    _shareCardsModule = import('./share-cards.js?v=20261006.1');
+    _shareCardsModule = import('./share-cards.js?v=20261008.1');
   }
   return _shareCardsModule;
 }
@@ -4264,14 +4264,15 @@ async function loadProfile() {
   try {
     const profile = await apiJSON('/api/profile/me');
     renderPersistedProfile(profile);
-    if (_account?.profile_sync_status === 'pending' || profile.needs_refresh) syncProfile();
+    if (!profile.sync_job?.imported && (_account?.profile_sync_status === 'pending' || profile.needs_refresh)) syncProfile();
     else {
       // Fav 4 and recent-history checks are coalesced into the background
       // entry sync. Keep watchlist on its own, longer-lived fingerprint.
       checkWatchlistFreshness();
     }
   } catch (_) {
-    if (_account?.profile_sync_status === 'pending') syncProfile();
+    // When the snapshot is unavailable, its import source is unknown. Do not
+    // silently replace a user-supplied export with a public-profile crawl.
   }
 }
 
@@ -4345,17 +4346,12 @@ function enterApp(account, opts = {}) {
   refreshFeedBadge();
   startBlendBadgePolling();
   startFeedNotificationPolling();
-  // Onboarding always plays right after a fresh registration. Otherwise it
-  // plays only while the first sync is still pending and it hasn't already
-  // been shown for this account in this tab.
+  // New members choose their own export first. A completed onboarding never
+  // replays merely because background enrichment is still running.
   const key = _onboardKey(account);
   if (opts.fromRegistration) sessionStorage.removeItem(key);
-  if (
-    opts.fromRegistration ||
-    !account.onboarding_completed_at ||
-    (['pending', 'syncing'].includes(account.profile_sync_status) && !sessionStorage.getItem(key))
-  ) {
-    startOnboarding();
+  if (opts.fromRegistration || !account.onboarding_completed_at) {
+    startArchiveOnboarding();
     return;
   }
   queueEntrySync();
@@ -4382,6 +4378,7 @@ let _obFactTimer = null;      // bilgi kartı rotasyonu
 let _obReveal = null;         // { slides:[fn], index, token } — sunum durumu
 let _obEscapeTimer = null;    // bekleme uzarsa "uygulamaya geç" çıkışını açar
 let _obEscapeOnly = false;    // buton sunumu bitirmiyor, sadece uygulamaya alıyor
+let _obArchiveImported = false;
 const OB_SLIDE_MS = 15000;
 const OB_FACT_MS = 7000;
 const OB_MAX_RETRIES = 3;
@@ -4420,7 +4417,7 @@ function finishOnboarding() {
   // Onboarding, `enterApp`'in giriş senkronunu atlayarak dallanıyordu — yani
   // yeni bir üyenin Letterboxd'daki kendi yorumları akışa ancak ikinci
   // açılışında düşüyordu. İlk akış ekranı boş görünmesin.
-  queueEntrySync();
+  if (!_obArchiveImported) queueEntrySync();
   _obClearTimers();
   if (_account) sessionStorage.setItem(_onboardKey(_account), '1');
   $('ob-skip').classList.add('hidden');
@@ -4460,6 +4457,86 @@ function _obStage(html) {
 function _obDots(active, total) {
   $('ob-dots').innerHTML = Array.from({ length: total }, (_, i) =>
     `<i class="${i === active ? 'on' : ''}"></i>`).join('');
+}
+
+function startArchiveOnboarding() {
+  ++_obToken;
+  _obClearTimers();
+  _obArchiveImported = false;
+  _obEscapeOnly = false;
+  showView('onboarding');
+  $('ob-prev').classList.add('hidden');
+  $('ob-next').classList.add('hidden');
+  $('ob-skip').classList.add('hidden');
+  $('ob-dots').innerHTML = '';
+  $('ob-bg-note').textContent = 'Letterboxd parolanı istemiyoruz; ZIP dosyası yalnızca hesabına aktarılır.';
+  _obStage(`
+    <p class="font-label-sm text-label-sm uppercase tracking-[.24em] text-primary-container">Arşivini getir</p>
+    <h2 class="mt-3 font-headline-lg text-[30px] text-on-surface">Filmlerini tek dosyayla aktar</h2>
+    <p class="mt-3 font-body-md text-body-md text-on-surface-variant/80">Letterboxd’dan kendi arşivini indir; ZIP’i açmadan buraya yükle. İzlediklerin ve izleme listen arka planda hazırlanır.</p>
+    <ol class="mt-6 space-y-3 text-left font-body-md text-body-md text-on-surface-variant">
+      <li>1. <a class="text-primary-container underline underline-offset-4" href="https://letterboxd.com/user/exportdata/" target="_blank" rel="noopener noreferrer">Letterboxd veri dışa aktarma sayfasını aç</a>.</li>
+      <li>2. “Export Data” düğmesiyle ZIP dosyasını indir.</li>
+      <li>3. İndirdiğin ZIP’i açmadan aşağıdan seç.</li>
+    </ol>
+    <input id="ob-archive-file" type="file" accept=".zip,application/zip" class="hidden" aria-label="Letterboxd ZIP dosyası"/>
+    <button id="ob-archive-pick" type="button" class="mt-7 w-full rounded-xl bg-primary-container px-5 py-3.5 font-label-md text-label-md uppercase tracking-wide text-black">ZIP dosyasını seç ve yükle</button>
+    <p id="ob-archive-status" role="status" aria-live="polite" class="mt-3 min-h-5 font-label-sm text-label-sm text-on-surface-variant/75"></p>
+    <button id="ob-archive-scrape" type="button" class="mt-4 font-label-sm text-label-sm text-on-surface-variant/70 underline underline-offset-4">ZIP olmadan devam et · herkese açık profilimi tara</button>`);
+  $('ob-archive-pick').addEventListener('click', () => $('ob-archive-file').click());
+  $('ob-archive-file').addEventListener('change', event => uploadArchiveOnboarding(event.target.files?.[0]));
+  $('ob-archive-scrape').addEventListener('click', () => startOnboarding());
+  if (_account?.profile_sync_status !== 'pending') {
+    const token = _obToken;
+    apiJSON('/api/profile/sync-status').then(data => {
+      if (!_obLive(token)) return;
+      if (data.sync_job?.imported) showArchiveImported(null, data.sync_job);
+      else if (data.sync_job?.state === 'running') startOnboarding();
+    }).catch(() => {});
+  }
+}
+
+function showArchiveImported(data, job) {
+  _obArchiveImported = true;
+  _account.profile_sync_status = job?.state === 'done' ? 'ready' : 'syncing';
+  _persistedProfile = null;
+  _sweepJob = job;
+  const films = data ? Number(data.watched_count).toLocaleString(uiLocale()) : null;
+  const watchlist = data?.watchlist_count ? Number(data.watchlist_count).toLocaleString(uiLocale()) : null;
+  const countMessage = films ? (watchlist
+    ? t('{films} film ve {watchlist} izleme listesi kaydı içe aktarıldı.', { films, watchlist })
+    : t('{count} film içe aktarıldı.', { count: films })) : '';
+  _obStage(`
+    <span class="material-symbols-outlined text-[56px] text-primary-container" aria-hidden="true">task_alt</span>
+    <h2 class="mt-4 font-headline-lg text-[30px] text-on-surface">Arşivin alındı</h2>
+    <p class="mt-3 font-body-md text-body-md text-on-surface-variant">${countMessage} ${t('Film bilgileri arka planda tamamlanırken uygulamayı kullanabilirsin.')}</p>`);
+  $('ob-bg-note').textContent = 'İlerlemeyi profilinde takip edebilirsin.';
+  $('ob-skip-label').textContent = 'Uygulamaya geç';
+  $('ob-skip').classList.remove('hidden');
+}
+
+async function uploadArchiveOnboarding(file) {
+  const status = $('ob-archive-status');
+  const button = $('ob-archive-pick');
+  if (!file) return;
+  if (!/\.zip$/i.test(file.name) || file.size > 16 * 1024 * 1024) {
+    status.textContent = 'Lütfen 16 MB altında bir Letterboxd ZIP dosyası seç.';
+    return;
+  }
+  button.disabled = true;
+  button.textContent = 'Arşiv yükleniyor…';
+  status.textContent = 'Dosyan aktarılıyor; bu ekranı açık tut.';
+  try {
+    const data = await apiJSON('/api/profile/import-letterboxd', {
+      method: 'POST', headers: csrfHeaders({ 'Content-Type': 'application/zip' }), body: file,
+    });
+    showArchiveImported(data, data.sync_job);
+  } catch (error) {
+    status.textContent = error.message || 'Arşiv yüklenemedi. Dosyayı yeniden deneyebilirsin.';
+    button.disabled = false;
+    button.textContent = 'ZIP dosyasını seç ve yükle';
+    $('ob-archive-file').value = '';
+  }
 }
 
 function _countUp(el, target, ms = 1100) {
@@ -4646,6 +4723,7 @@ function _obRevealNav(delta) {
 
 async function startOnboarding(retry = 0) {
   const token = ++_obToken;
+  _obArchiveImported = false;
   _obClearTimers();
   showView('onboarding');
   $('ob-prev').classList.add('hidden');
@@ -5885,6 +5963,7 @@ async function logoutAccount() {
   _recentLoaded = false;
   _statsLoaded = false;
   _obToken += 1;
+  _obArchiveImported = false;
   _obClearTimers();
   resetLoginPrompt();
   $('ob-skip').classList.add('hidden');

@@ -1,5 +1,5 @@
 import { $ } from './dom.js?v=20261006.1';
-import { t, getLocale } from './i18n.js?v=20261006.1';
+import { t, getLocale } from './i18n.js?v=20261008.1';
 
 export function cookieValue(name) {
   const prefix = `${name}=`;

@@ -177,6 +177,7 @@ def progress_of(job: dict | None) -> dict | None:
     onboarding_ready = bool(state == "done" and job.get("scope") == "full")
     return {
         "state": state,
+        "imported": is_import_job(job),
         "phase": job.get("phase") or "diary",
         "scope": job.get("scope") or "full",
         "processed": processed,
@@ -574,6 +575,8 @@ async def _crawl(pipeline, service, account, *, lease_token: str | None = None) 
         lease_token=None,
         _release_lease=True,
     )
+    if imported:
+        await asyncio.to_thread(service.mark_sync_status, uid, "ready")
     log.warning("profile_sync job DONE user=%s films=%d", uid, total)
 
 

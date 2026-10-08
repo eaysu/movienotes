@@ -1444,10 +1444,10 @@ def test_shell_asset_content_changes_force_a_version_bump():
     files that no longer existed.
     """
     expected = {
-        "js/app.js": "883468b4772a3cca526b5a2d36f52073ee67a74928f7e41d427fbaf57d79f0e3",
+        "js/app.js": "85e4dc0cb83b70a6746f14f1d30e3bd67f4350c83441304e4cb615f028040df7",
         "app.css": "5f763f94b8393ca456d31cb0cb9ded070201fe3b8dca83ac33350d958625287a",
-        "js/share-cards.js": "d6455552dfb0f19892e81840b2e8bbfe9a702a5c933360326379c9f17623d029",
-        "js/i18n.js": "de805876788574605b786c7156f950bf067a25d7f83e23ba5d67b60215dee5b3",
+        "js/share-cards.js": "40125d0ea31836aa34147f5e1a1eecf31ae5d2d2241b909d0010c5e16a2cfb59",
+        "js/i18n.js": "4a2dd953de6810347df8314ed6bd4f45bb999d356a2587ed96684ab700c0536d",
         "site.webmanifest": "7a7de349179ed9f226d38632dfde5a8478edd10305972ea52641b0dc6aa7f405",
         "movienotes-mark.png": "850aa9117aa52768952843f8e2c410c0c17868877d81b2058274290373b4ee1e",
         "movienotes-icon-192.png": "3b04c52ffd23799ce424f1acefd0a1d7c386b8c968b09be9bd5c87b623c6ac12",
@@ -1484,24 +1484,24 @@ def test_every_app_shell_asset_has_an_explicit_immutable_version():
 
     dependency_version = "v=20260902.15"
     dom_version = "v=20261006.1"
-    api_version = "v=20261006.1"
+    api_version = "v=20261008.1"
     css_version = "v=20260920.22"
     assert f"/static/app.css?{css_version}" in html
-    assert "/static/js/app.js?v=20261006.2" in html
-    assert "./i18n.js?v=20261006.1" in app_js
+    assert "/static/js/app.js?v=20261008.2" in html
+    assert "./i18n.js?v=20261008.1" in app_js
     assert app_js.count(f"?{dependency_version}") == 1
     assert f"./api.js?{api_version}" in app_js
-    assert "./recommendations.js?v=20261006.1" in app_js
-    assert "./share-cards.js?v=20261006.1" in app_js
-    assert "./auth.js?v=20261006.1" in app_js
+    assert "./recommendations.js?v=20261008.1" in app_js
+    assert "./share-cards.js?v=20261008.1" in app_js
+    assert "./auth.js?v=20261008.1" in app_js
     assert f"./dom.js?{dom_version}" in auth_js
-    assert "./i18n.js?v=20261006.1" in auth_js
+    assert "./i18n.js?v=20261008.1" in auth_js
     assert f"./dom.js?{dom_version}" in profile_js
-    assert "./i18n.js?v=20261006.1" in profile_js
+    assert "./i18n.js?v=20261008.1" in profile_js
     assert f"./dom.js?{dom_version}" in recommendations_js
-    assert "./i18n.js?v=20261006.1" in recommendations_js
+    assert "./i18n.js?v=20261008.1" in recommendations_js
     assert f"./api.js?{api_version}" in share_js
-    assert "./i18n.js?v=20261006.1" in share_js
+    assert "./i18n.js?v=20261008.1" in share_js
     assert f"criterion-closet-bg.jpg?{dependency_version}" in source_css
 
 
@@ -1571,7 +1571,7 @@ def test_png_share_renderer_is_lazy_loaded_on_first_share_action():
 
     imports = app_js.split("// ── Cinema facts", 1)[0]
     assert "from './share-cards.js" not in imports
-    assert "import('./share-cards.js?v=20261006.1')" in imports
+    assert "import('./share-cards.js?v=20261008.1')" in imports
     assert "const shareCards = await loadShareCardsModule();" in app_js
 
 
@@ -1638,6 +1638,21 @@ def test_onboarding_slides_only_use_data_the_archive_sweep_is_not_needed_for():
     assert "apiJSON('/api/profile/recent?preview=1')" in build
     # Consent is the last slide, so its button is the one that opens the app.
     assert slides.rstrip().rstrip(",").endswith("_obRenderSinefilConsent()")
+
+
+def test_new_member_can_import_letterboxd_zip_before_any_scrape():
+    app_js = (FRONTEND / "js" / "app.js").read_text()
+    enter = app_js.split("function enterApp(account, opts = {})", 1)[1].split(
+        "// ── Onboarding reveal", 1
+    )[0]
+    archive = app_js.split("function startArchiveOnboarding()", 1)[1].split(
+        "function showArchiveImported", 1
+    )[0]
+    assert "startArchiveOnboarding();" in enter
+    assert "startOnboarding();" not in enter
+    assert "https://letterboxd.com/user/exportdata/" in archive
+    assert "uploadArchiveOnboarding" in archive
+    assert "herkese açık profilimi tara" in archive
 
 
 def test_the_profile_says_which_cards_the_running_sweep_still_owes():
