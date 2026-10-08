@@ -399,6 +399,23 @@ def test_export_backed_account_does_not_scrape_on_entry():
     lightweight.assert_not_awaited()
 
 
+def test_unfinished_export_resumes_without_an_entry_scrape():
+    account = _account()
+    job = {"state": "queued", "scope": "full", "cursor_page": 0}
+    service = SimpleNamespace(get_sync_job=lambda _uid: job)
+    starter = AsyncMock(return_value=job)
+    with (
+        patch("app.main.profile_sync.ensure_started", new=starter),
+        patch("app.main._run_entry_sync", new_callable=AsyncMock) as lightweight,
+    ):
+        status = asyncio.run(main._schedule_entry_sync(account, _settings(), service))
+    assert status == "deferred"
+    starter.assert_awaited_once()
+    assert starter.await_args.kwargs["scope"] == "full"
+    assert starter.await_args.args[0].use_stored_profile is True
+    lightweight.assert_not_awaited()
+
+
 def test_background_retry_loop_resumes_a_queued_profile_import():
     account = _account()
     job = {"state": "queued", "scope": "full", "backoff_until": None}

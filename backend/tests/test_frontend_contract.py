@@ -1444,8 +1444,8 @@ def test_shell_asset_content_changes_force_a_version_bump():
     files that no longer existed.
     """
     expected = {
-        "js/app.js": "85e4dc0cb83b70a6746f14f1d30e3bd67f4350c83441304e4cb615f028040df7",
-        "app.css": "5f763f94b8393ca456d31cb0cb9ded070201fe3b8dca83ac33350d958625287a",
+        "js/app.js": "f52582597c3406048ecd879e1831e5206df8b94b0bea239775941ab5fcd42076",
+        "app.css": "ae5de611507d58e5032fcd38a867174fb1fe8c737655ffb3b390ac883d3f57b4",
         "js/share-cards.js": "40125d0ea31836aa34147f5e1a1eecf31ae5d2d2241b909d0010c5e16a2cfb59",
         "js/i18n.js": "4a2dd953de6810347df8314ed6bd4f45bb999d356a2587ed96684ab700c0536d",
         "site.webmanifest": "7a7de349179ed9f226d38632dfde5a8478edd10305972ea52641b0dc6aa7f405",
@@ -1485,9 +1485,9 @@ def test_every_app_shell_asset_has_an_explicit_immutable_version():
     dependency_version = "v=20260902.15"
     dom_version = "v=20261006.1"
     api_version = "v=20261008.1"
-    css_version = "v=20260920.22"
+    css_version = "v=20261008.1"
     assert f"/static/app.css?{css_version}" in html
-    assert "/static/js/app.js?v=20261008.2" in html
+    assert "/static/js/app.js?v=20261008.3" in html
     assert "./i18n.js?v=20261008.1" in app_js
     assert app_js.count(f"?{dependency_version}") == 1
     assert f"./api.js?{api_version}" in app_js
@@ -1653,6 +1653,18 @@ def test_new_member_can_import_letterboxd_zip_before_any_scrape():
     assert "https://letterboxd.com/user/exportdata/" in archive
     assert "uploadArchiveOnboarding" in archive
     assert "herkese açık profilimi tara" in archive
+    profile_load = app_js.split("async function loadProfile()", 1)[1].split(
+        "function queueEntrySync()", 1
+    )[0]
+    assert "if (profile.sync_job?.imported) return;" in profile_load
+    assert "_obEscapeTimer" not in app_js
+    assert "mb_onboarded:" not in app_js
+
+
+def test_archive_onboarding_styles_are_in_the_compiled_css():
+    css = (FRONTEND / "app.css").read_text()
+    for selector in (".mt-7{", ".min-h-5{", ".space-y-3>:not([hidden])~:not([hidden]){"):
+        assert selector in css
 
 
 def test_the_profile_says_which_cards_the_running_sweep_still_owes():

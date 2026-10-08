@@ -4264,7 +4264,8 @@ async function loadProfile() {
   try {
     const profile = await apiJSON('/api/profile/me');
     renderPersistedProfile(profile);
-    if (!profile.sync_job?.imported && (_account?.profile_sync_status === 'pending' || profile.needs_refresh)) syncProfile();
+    if (profile.sync_job?.imported) return;
+    if (_account?.profile_sync_status === 'pending' || profile.needs_refresh) syncProfile();
     else {
       // Fav 4 and recent-history checks are coalesced into the background
       // entry sync. Keep watchlist on its own, longer-lived fingerprint.
@@ -4331,10 +4332,6 @@ async function checkWatchlistFreshness() {
   }
 }
 
-function _onboardKey(account) {
-  return 'mb_onboarded:' + (account?.username || account?.id || '');
-}
-
 function enterApp(account, opts = {}) {
   applyAccount(account);
   // Authentication intentionally keeps social preference columns optional for
@@ -4348,8 +4345,6 @@ function enterApp(account, opts = {}) {
   startFeedNotificationPolling();
   // New members choose their own export first. A completed onboarding never
   // replays merely because background enrichment is still running.
-  const key = _onboardKey(account);
-  if (opts.fromRegistration) sessionStorage.removeItem(key);
   if (opts.fromRegistration || !account.onboarding_completed_at) {
     startArchiveOnboarding();
     return;
@@ -4376,7 +4371,6 @@ let _obToken = 0;             // her yeni çalışma bu sayacı artırır — as
 let _obSlideTimer = null;     // slayt otomatik ilerleme
 let _obFactTimer = null;      // bilgi kartı rotasyonu
 let _obReveal = null;         // { slides:[fn], index, token } — sunum durumu
-let _obEscapeTimer = null;    // bekleme uzarsa "uygulamaya geç" çıkışını açar
 let _obEscapeOnly = false;    // buton sunumu bitirmiyor, sadece uygulamaya alıyor
 let _obArchiveImported = false;
 const OB_SLIDE_MS = 15000;
@@ -4386,7 +4380,6 @@ const OB_MAX_RETRIES = 3;
 function _obClearTimers() {
   if (_obSlideTimer) { clearTimeout(_obSlideTimer); _obSlideTimer = null; }
   if (_obFactTimer)  { clearInterval(_obFactTimer); _obFactTimer = null; }
-  if (_obEscapeTimer) { clearTimeout(_obEscapeTimer); _obEscapeTimer = null; }
   _obReveal = null;
 }
 
@@ -4395,7 +4388,7 @@ function _obClearTimers() {
 // yolu yoksa, yeni kaydolmuş bir üye kendi hesabına giremeden dönen bir bilgi
 // kartına kilitleniyor. Bekleme uzarsa kapıyı açıyoruz: slaytları görmeden
 // girmek, hiç girememekten iyidir. Sunum "tamamlandı" sayılmadığı için bir
-// sonraki girişte tekrar oynar.
+// sonraki girişte arşiv seçimi yeniden gösterilir.
 function _obOfferEscape(note) {
   _obEscapeOnly = true;
   $('ob-skip-label').textContent = 'Uygulamaya geç';
@@ -4419,7 +4412,6 @@ function finishOnboarding() {
   // açılışında düşüyordu. İlk akış ekranı boş görünmesin.
   if (!_obArchiveImported) queueEntrySync();
   _obClearTimers();
-  if (_account) sessionStorage.setItem(_onboardKey(_account), '1');
   $('ob-skip').classList.add('hidden');
   $('ob-prev').classList.add('hidden');
   $('ob-next').classList.add('hidden');

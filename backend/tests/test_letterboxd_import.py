@@ -65,6 +65,25 @@ class LetterboxdExportTests(unittest.TestCase):
 
 
 class ImportEndpointTests(unittest.TestCase):
+    def test_export_backed_profile_checks_do_not_scrape(self):
+        job = {"scope": "full", "cursor_page": 0, "state": "done"}
+        service = SimpleNamespace(get_sync_job=lambda _uid: job)
+        account = SimpleNamespace(id=7, username="example")
+        with (
+            patch.object(main, "_require_csrf"),
+            patch.object(main, "_require_account", new=AsyncMock(return_value=account)),
+            patch.object(main, "_auth_service", return_value=service),
+            patch.object(main, "_check_profile_watchlist_freshness", new=AsyncMock()) as watchlist_scrape,
+            patch.object(main, "_refresh_profile_favorites", new=AsyncMock()) as favorites_scrape,
+            TestClient(main.app) as client,
+        ):
+            watchlist = client.post("/api/profile/watchlist/check")
+            favorites = client.post("/api/profile/favorites/check")
+        self.assertEqual(watchlist.json(), {"status": "export", "changed": False})
+        self.assertEqual(favorites.json(), {"changed": False})
+        watchlist_scrape.assert_not_awaited()
+        favorites_scrape.assert_not_awaited()
+
     def test_import_queues_enrichment_without_scraping(self):
         class Service:
             def __init__(self):
