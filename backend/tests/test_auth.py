@@ -10,8 +10,11 @@ from starlette.requests import Request
 from app import main
 from app.auth import (
     Account,
+    AccountExistsError,
+    AuthError,
     AuthService,
     AuthSession,
+    InvalidCredentialsError,
     PasswordRequiredError,
     TransientStorageError,
     validate_password,
@@ -584,22 +587,15 @@ def test_account_mode_rejects_state_change_without_csrf_before_work_starts():
     assert response.json()["detail"] == "Güvenlik doğrulaması başarısız."
 
 
-def test_username_only_registration_opens_a_session_immediately():
-    account = _account("new_member")
-    session = AuthSession(
-        account=account,
-        access_token="quick-access-token",
-        refresh_token="quick-refresh-token",
-        expires_in=3600,
-    )
+def test_quick_endpoint_cannot_create_a_new_account_without_bio_proof():
+    register = AsyncMock()
     fake_service = SimpleNamespace(
         username_requires_existence_check=lambda _username: True,
-        register_username_only=lambda *_args, **_kwargs: (session, True),
+        register_username_only=register,
     )
     with (
         patch("app.main.get_settings", return_value=_settings()),
         patch("app.main._auth_service", return_value=fake_service),
-        patch("app.main.check_public_profile_exists", new=AsyncMock(return_value=True)),
         patch("app.main._enforce_auth_rate_limit", new=AsyncMock()),
         TestClient(main.app, base_url="https://testserver") as client,
     ):
@@ -608,12 +604,39 @@ def test_username_only_registration_opens_a_session_immediately():
             json={"username": "new_member"},
         )
 
-    assert response.status_code == 200
-    assert response.json()["created"] is True
-    assert response.json()["logged_in"] is True
-    cookies = response.headers.get_list("set-cookie")
-    assert any(cookie.startswith("mb_access=quick-access-token") for cookie in cookies)
-    assert any(cookie.startswith("mb_refresh=quick-refresh-token") for cookie in cookies)
+    assert response.status_code == 409
+    assert response.headers["X-Error-Code"] == "bio_verification_required"
+    assert not response.headers.get_list("set-cookie")
+    register.assert_not_called()
+
+
+def test_username_only_service_cannot_create_a_new_account_either():
+    service = AuthService(_settings(), client_factory=lambda *_args: None)
+    with (
+        patch.object(service, "_service_client", return_value=object()),
+        patch.object(service, "_account_row_by_username", return_value=None),
+    ):
+        with pytest.raises(InvalidCredentialsError):
+            service.register_username_only("new_member")
+
+
+@pytest.mark.parametrize(
+    ("status", "error"),
+    [
+        ("active", AccountExistsError),
+        ("verification_deferred", AccountExistsError),
+        ("disabled", AuthError),
+    ],
+)
+def test_registration_cannot_replace_an_existing_account_credential(status, error):
+    service = AuthService(_settings(), client_factory=lambda *_args: None)
+    existing = {"id": 9, "auth_user_id": "existing-auth-id", "account_status": status}
+    with (
+        patch.object(service, "_service_client", return_value=object()),
+        patch.object(service, "_account_row_by_username", return_value=existing),
+    ):
+        with pytest.raises(error):
+            service.start_registration("return_member", "long-enough-password")
 
 
 def test_existing_accounts_do_not_need_a_live_letterboxd_check():
@@ -679,31 +702,7 @@ def test_username_only_login_reports_that_a_password_is_required():
     assert response.headers["X-Error-Code"] == "password_required"
 
 
-@pytest.mark.parametrize(
-    ("verdict", "status", "code"),
-    [(False, 404, "profile_not_found"), (None, 503, "profile_unverified")],
-)
-def test_quick_registration_never_creates_unverified_account(verdict, status, code):
-    register = AsyncMock()
-    fake_service = SimpleNamespace(
-        username_requires_existence_check=lambda _username: True,
-        register_username_only=register,
-    )
-    with (
-        patch("app.main.get_settings", return_value=_settings()),
-        patch("app.main._auth_service", return_value=fake_service),
-        patch("app.main.check_public_profile_exists", new=AsyncMock(return_value=verdict)),
-        patch("app.main._enforce_auth_rate_limit", new=AsyncMock()),
-        TestClient(main.app, base_url="https://testserver") as client,
-    ):
-        response = client.post("/api/auth/register/quick", json={"username": "not_real"})
-    assert response.status_code == status
-    assert response.headers["X-Error-Code"] == code
-    assert not response.headers.get_list("set-cookie")
-    register.assert_not_called()
-
-
-def test_existing_quick_account_skips_letterboxd_probe():
+def test_existing_quick_account_can_still_sign_in():
     account = _account("return_member")
     session = AuthSession(account, "access", "refresh", 3600)
     fake_service = SimpleNamespace(
@@ -713,14 +712,12 @@ def test_existing_quick_account_skips_letterboxd_probe():
     with (
         patch("app.main.get_settings", return_value=_settings()),
         patch("app.main._auth_service", return_value=fake_service),
-        patch("app.main.check_public_profile_exists", new=AsyncMock()) as probe,
         patch("app.main._enforce_auth_rate_limit", new=AsyncMock()),
         TestClient(main.app, base_url="https://testserver") as client,
     ):
         response = client.post("/api/auth/register/quick", json={"username": "return_member"})
     assert response.status_code == 200
     assert response.json()["created"] is False
-    probe.assert_not_awaited()
 
 
 def test_register_password_mismatch_stops_before_scraping():
@@ -810,17 +807,10 @@ def test_registration_verification_can_issue_session_without_second_login_reques
     )
 
 
-def test_bio_check_keeps_signup_moving_when_letterboxd_blocks_the_profile_read():
-    account = _account()
-    session = AuthSession(
-        account=account,
-        access_token="access-token",
-        refresh_token="refresh-token",
-        expires_in=3600,
-    )
+def test_bio_check_never_activates_an_account_when_letterboxd_blocks_the_read():
+    defer = AsyncMock()
     fake_service = SimpleNamespace(
-        defer_ownership_verification=lambda *_args, **_kwargs: account,
-        login=lambda *_args, **_kwargs: session,
+        defer_ownership_verification=defer,
     )
     scrape = AsyncMock(side_effect=AccessBlockedError("Letterboxd HTTP 403", status=403))
     with (
@@ -839,10 +829,9 @@ def test_bio_check_keeps_signup_moving_when_letterboxd_blocks_the_profile_read()
             },
         )
 
-    assert response.status_code == 200
-    assert response.json()["verification_deferred"] is True
-    assert response.json()["logged_in"] is True
-    assert any(cookie.startswith("mb_access=") for cookie in response.headers.get_list("set-cookie"))
+    assert response.status_code == 503
+    assert not response.headers.get_list("set-cookie")
+    defer.assert_not_called()
 
 
 def test_authenticated_user_can_create_consent_based_blend_request():

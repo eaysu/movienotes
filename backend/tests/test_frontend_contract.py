@@ -266,7 +266,7 @@ def test_public_registration_count_is_rendered_without_exposing_user_records():
     assert 'directed by:' in html
     assert 'href="https://twitter.com/caddebogasi"' in html
     assert 'id="auth-title"' in html
-    assert "title.textContent = t('Letterboxd kullanıcı adınla devam et')" in (FRONTEND / "js" / "auth.js").read_text()
+    assert "const register = mode === 'register'" in (FRONTEND / "js" / "auth.js").read_text()
     auth = html.split('id="view-auth"', 1)[1].split('id="view-idle"', 1)[0]
     assert auth.index('data-public-user-count') < auth.index('<main')
     assert "apiJSON('/api/public/stats')" in app_js
@@ -1444,10 +1444,10 @@ def test_shell_asset_content_changes_force_a_version_bump():
     files that no longer existed.
     """
     expected = {
-        "js/app.js": "f52582597c3406048ecd879e1831e5206df8b94b0bea239775941ab5fcd42076",
+        "js/app.js": "43d16b3fe860786125d0a6f86a5c29ccd4d88e2e0455c66942a8e9fb275c802f",
         "app.css": "ae5de611507d58e5032fcd38a867174fb1fe8c737655ffb3b390ac883d3f57b4",
-        "js/share-cards.js": "40125d0ea31836aa34147f5e1a1eecf31ae5d2d2241b909d0010c5e16a2cfb59",
-        "js/i18n.js": "4a2dd953de6810347df8314ed6bd4f45bb999d356a2587ed96684ab700c0536d",
+        "js/share-cards.js": "f4822476119fd9fa25c9dd86020680944f153570711873c0cc9f633b1a428e46",
+        "js/i18n.js": "1d83b0218ef92b77424b8af7f167ce1947b37d5c32269b9ae0b7535faf82e534",
         "site.webmanifest": "7a7de349179ed9f226d38632dfde5a8478edd10305972ea52641b0dc6aa7f405",
         "movienotes-mark.png": "850aa9117aa52768952843f8e2c410c0c17868877d81b2058274290373b4ee1e",
         "movienotes-icon-192.png": "3b04c52ffd23799ce424f1acefd0a1d7c386b8c968b09be9bd5c87b623c6ac12",
@@ -1484,24 +1484,24 @@ def test_every_app_shell_asset_has_an_explicit_immutable_version():
 
     dependency_version = "v=20260902.15"
     dom_version = "v=20261006.1"
-    api_version = "v=20261008.1"
+    api_version = "v=20261008.2"
     css_version = "v=20261008.1"
     assert f"/static/app.css?{css_version}" in html
-    assert "/static/js/app.js?v=20261008.3" in html
-    assert "./i18n.js?v=20261008.1" in app_js
+    assert "/static/js/app.js?v=20261008.4" in html
+    assert "./i18n.js?v=20261008.2" in app_js
     assert app_js.count(f"?{dependency_version}") == 1
     assert f"./api.js?{api_version}" in app_js
-    assert "./recommendations.js?v=20261008.1" in app_js
-    assert "./share-cards.js?v=20261008.1" in app_js
-    assert "./auth.js?v=20261008.1" in app_js
+    assert "./recommendations.js?v=20261008.2" in app_js
+    assert "./share-cards.js?v=20261008.2" in app_js
+    assert "./auth.js?v=20261008.2" in app_js
     assert f"./dom.js?{dom_version}" in auth_js
-    assert "./i18n.js?v=20261008.1" in auth_js
+    assert "./i18n.js?v=20261008.2" in auth_js
     assert f"./dom.js?{dom_version}" in profile_js
-    assert "./i18n.js?v=20261008.1" in profile_js
+    assert "./i18n.js?v=20261008.2" in profile_js
     assert f"./dom.js?{dom_version}" in recommendations_js
-    assert "./i18n.js?v=20261008.1" in recommendations_js
+    assert "./i18n.js?v=20261008.2" in recommendations_js
     assert f"./api.js?{api_version}" in share_js
-    assert "./i18n.js?v=20261008.1" in share_js
+    assert "./i18n.js?v=20261008.2" in share_js
     assert f"criterion-closet-bg.jpg?{dependency_version}" in source_css
 
 
@@ -1571,7 +1571,7 @@ def test_png_share_renderer_is_lazy_loaded_on_first_share_action():
 
     imports = app_js.split("// ── Cinema facts", 1)[0]
     assert "from './share-cards.js" not in imports
-    assert "import('./share-cards.js?v=20261008.1')" in imports
+    assert "import('./share-cards.js?v=20261008.2')" in imports
     assert "const shareCards = await loadShareCardsModule();" in app_js
 
 
@@ -1659,6 +1659,24 @@ def test_new_member_can_import_letterboxd_zip_before_any_scrape():
     assert "if (profile.sync_job?.imported) return;" in profile_load
     assert "_obEscapeTimer" not in app_js
     assert "mb_onboarded:" not in app_js
+
+
+def test_new_account_requires_password_and_letterboxd_bio_code():
+    html = (FRONTEND / "index.html").read_text()
+    app_js = (FRONTEND / "js" / "app.js").read_text()
+    auth_js = (FRONTEND / "js" / "auth.js").read_text()
+    main_py = (ROOT / "app" / "main.py").read_text()
+    register = app_js.split("async function startRegistration(event)", 1)[1].split(
+        "async function verifyRegistration()", 1
+    )[0]
+    assert 'id="register-password"' in html
+    assert 'id="register-password-confirm"' in html
+    assert "'/api/auth/register/start'" in register
+    assert "setAuthMode('verify')" in register
+    assert "'/api/auth/register/verify'" in app_js
+    assert "const register = mode === 'register'" in auth_js
+    assert "bio_verification_required" in main_py
+    assert "defer_ownership_verification" not in main_py
 
 
 def test_archive_onboarding_styles_are_in_the_compiled_css():

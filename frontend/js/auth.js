@@ -1,5 +1,5 @@
 import { $ } from './dom.js?v=20261006.1';
-import { t, getLocale } from './i18n.js?v=20261008.1';
+import { t, getLocale } from './i18n.js?v=20261008.2';
 
 export function cookieValue(name) {
   const prefix = `${name}=`;
@@ -60,21 +60,19 @@ export function setAuthMode(mode) {
   }
   $('sandbox-form').classList.add('hidden');
   $('sandbox-form').classList.remove('flex');
-  const login = true;
+  const login = mode === 'login';
+  const register = mode === 'register';
   const title = $('auth-title');
-  if (title) title.textContent = t('Letterboxd kullanıcı adınla devam et');
-  $('login-form').classList.remove('hidden');
-  $('login-form').classList.add('flex');
-  $('register-form').classList.add('hidden');
-  $('register-form').classList.remove('flex');
-  $('verify-panel').classList.add('hidden');
-  $('verify-panel').classList.remove('flex');
-  $('reset-panel').classList.add('hidden');
-  $('reset-panel').classList.remove('flex');
-  // Username-only access uses one visible field. Keep the legacy tab nodes in
-  // the DOM for older clients, but never expose the two-step switch in the UI.
-  $('auth-tabs').classList.add('hidden');
+  if (title) title.textContent = t(register ? 'Movienotes’da hesap oluştur' : mode === 'verify' ? 'Letterboxd hesabını doğrula' : mode === 'reset' ? 'Parolanı sıfırla' : 'Giriş yap');
+  for (const [id, visible] of [
+    ['login-form', login], ['register-form', register],
+    ['verify-panel', mode === 'verify'], ['reset-panel', mode === 'reset'],
+  ]) {
+    $(id).classList.toggle('hidden', !visible);
+    $(id).classList.toggle('flex', visible);
+  }
+  $('auth-tabs').classList.toggle('hidden', !login && !register);
   $('auth-tab-login').className = `py-2.5 rounded-lg font-label-md text-label-md uppercase ${login ? 'bg-primary-container text-black' : 'bg-surface-variant text-on-surface-variant border border-outline-variant/30'}`;
-  $('auth-tab-register').className = `py-2.5 rounded-lg font-label-md text-label-md uppercase ${!login ? 'bg-primary-container text-black' : 'bg-surface-variant text-on-surface-variant border border-outline-variant/30'}`;
+  $('auth-tab-register').className = `py-2.5 rounded-lg font-label-md text-label-md uppercase ${register ? 'bg-primary-container text-black' : 'bg-surface-variant text-on-surface-variant border border-outline-variant/30'}`;
   setAuthMessage(null);
 }

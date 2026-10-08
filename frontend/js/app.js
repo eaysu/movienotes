@@ -8,24 +8,24 @@ import {
   finishApiRequest,
   scrapeErrorMessage,
   streamErrorMessage,
-} from './api.js?v=20261008.1';
+} from './api.js?v=20261008.2';
 import {
   cookieValue,
   csrfHeaders,
   setAuthMessage,
   setAuthMode,
   setPasswordVisibility,
-} from './auth.js?v=20261008.1';
-import { directorAvatar, directorFilmGrid, directorFilmTile } from './profile.js?v=20261008.1';
+} from './auth.js?v=20261008.2';
+import { directorAvatar, directorFilmGrid, directorFilmTile } from './profile.js?v=20261008.2';
 import { animateScore, getScoreInfo } from './blend.js?v=20260902.15';
-import { createRecommendationCards } from './recommendations.js?v=20261008.1';
+import { createRecommendationCards } from './recommendations.js?v=20261008.2';
 import {
   getLocale,
   initI18n,
   localePreference,
   setLocalePreference,
   t,
-} from './i18n.js?v=20261008.1';
+} from './i18n.js?v=20261008.2';
 
 initI18n();
 
@@ -34,7 +34,7 @@ const uiLocale = () => (getLocale() === 'en' ? 'en-US' : 'tr-TR');
 let _shareCardsModule;
 function loadShareCardsModule() {
   if (!_shareCardsModule) {
-    _shareCardsModule = import('./share-cards.js?v=20261008.1');
+    _shareCardsModule = import('./share-cards.js?v=20261008.2');
   }
   return _shareCardsModule;
 }
@@ -1426,16 +1426,10 @@ let _account = null;
 let _persistedProfile = null;
 let _lastUnreadNotificationCount = null;
 let _feedNotificationPollTimer = null;
-// Legacy bio-verification state kept for older clients still finishing the
-// previous registration flow.
 let _verification = null;
-let _deferredVerificationTimer = null;
 let _resetChallenge = null;
 let _loginPasswordRequired = false;
-// Legacy password state: the current signup flow never puts a password in the
-// browser, but an older tab may still finish its bio-verification challenge.
 let _pendingRegPassword = null;
-let _registrationAccount = null;
 
 function syncLanguageControl() {
   const select = $('profile-language-select');
@@ -5700,7 +5694,8 @@ async function loginAccount(event) {
   event.preventDefault();
   const button = $('btn-login');
   button.disabled = true;
-  const clearReassurance = _loginPasswordRequired ? () => {} : _registerWaitReassurance();
+  const clearReassurance = _loginPasswordRequired ? () => {} : _authWaitReassurance(
+    'Hesabın hazırlanıyor…', 'Profil bağlantısı gecikti, birkaç saniye daha…');
   try {
     const password = $('login-password')?.value || '';
     const data = await apiJSON(
@@ -5725,6 +5720,14 @@ async function loginAccount(event) {
       $('btn-login').textContent = t('Giriş yap');
       setAuthMessage(t('Bu hesap parola kullanıyor. Parolanı girerek devam et.'));
       $('login-password').focus();
+      return;
+    }
+    if (error.code === 'bio_verification_required') {
+      const username = $('login-username').value.trim();
+      setAuthMode('register');
+      $('register-username').value = username;
+      setAuthMessage(error.message);
+      $('register-password').focus();
       return;
     }
     setAuthMessage(error.message || 'Giriş yapılamadı.', true);
@@ -5759,10 +5762,10 @@ function _scrapeWaitReassurance(startText) {
   return () => timers.forEach(clearTimeout);
 }
 
-function _registerWaitReassurance() {
-  setAuthMessage('Hesabın hazırlanıyor…');
+function _authWaitReassurance(startText, delayedText) {
+  setAuthMessage(startText);
   const timers = [
-    setTimeout(() => setAuthMessage('Profil bağlantısı gecikti, birkaç saniye daha…'), 4000),
+    setTimeout(() => setAuthMessage(delayedText), 4000),
     setTimeout(() => setAuthMessage('Hesap bağlantısı gecikti ama hâlâ çalışıyor…'), 10000),
   ];
   return () => timers.forEach(clearTimeout);
@@ -5770,19 +5773,33 @@ function _registerWaitReassurance() {
 
 async function startRegistration(event) {
   event.preventDefault();
+  const password = $('register-password').value;
+  const passwordConfirm = $('register-password-confirm').value;
+  if (password !== passwordConfirm) {
+    setAuthMessage(t('Parolalar eşleşmiyor.'), true);
+    return;
+  }
   const button = $('btn-register');
   button.disabled = true;
-  const clearReassurance = _registerWaitReassurance();
+  const clearReassurance = _authWaitReassurance(
+    'Doğrulama kodu hazırlanıyor…', 'Kod hazırlanıyor, birkaç saniye daha…');
   try {
-    const data = await apiJSON('/api/auth/register/quick', {
+    const data = await apiJSON('/api/auth/register/start', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         username: $('register-username').value.trim(),
+        password,
+        password_confirm: passwordConfirm,
       }),
     });
-    setAuthMessage(null);
-    enterApp(data.account, { fromRegistration: Boolean(data.created) });
+    _verification = data;
+    _pendingRegPassword = password;
+    $('register-password').value = '';
+    $('register-password-confirm').value = '';
+    $('verification-code').textContent = data.verification_code;
+    setAuthMode('verify');
+    setAuthMessage(t('Kod 15 dakika geçerli. Bio’yu kaydettikten sonra kontrol et.'));
   } catch (error) {
     setAuthMessage(error.message || 'Hesap oluşturulamadı.', true);
   } finally {
@@ -5808,8 +5825,7 @@ async function verifyRegistration() {
       }),
     });
     clearReassurance();
-    const verificationDeferred = Boolean(data.verification_deferred);
-    if (!verificationDeferred) _verification = null;
+    _verification = null;
 
     // Doğrulama ve oturum açma artık aynı istekte tamamlanıyor. Eski bir
     // sunucu yanıtı logged_in döndürmezse manuel giriş ekranına düş.
@@ -5817,12 +5833,6 @@ async function verifyRegistration() {
       _pendingRegPassword = null;
       setAuthMessage(null);
       enterApp(data.account, { fromRegistration: true });
-      if (verificationDeferred) {
-        setTimeout(() => setIdleNotice(
-          data.message || 'Letterboxd bio kontrolü sıraya alındı; bu sırada yalnızca sana açık şekilde devam edebilirsin.'
-        ), 300);
-        scheduleDeferredRegistrationVerification();
-      }
       return;
     }
     _pendingRegPassword = null;
@@ -5835,37 +5845,6 @@ async function verifyRegistration() {
     clearReassurance();
     button.disabled = false;
   }
-}
-
-function scheduleDeferredRegistrationVerification() {
-  if (_deferredVerificationTimer) clearTimeout(_deferredVerificationTimer);
-  if (!_verification) return;
-  const expiresAt = Date.parse(_verification.expires_at || '');
-  const remaining = Number.isFinite(expiresAt) ? expiresAt - Date.now() : 0;
-  if (remaining < 15_000) return;
-  _deferredVerificationTimer = setTimeout(async () => {
-    if (!_verification) return;
-    try {
-      const data = await apiJSON('/api/auth/register/verify', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          username: _verification.username,
-          code: _verification.verification_code,
-        }),
-      });
-      if (data.verification_deferred) {
-        scheduleDeferredRegistrationVerification();
-        return;
-      }
-      _verification = null;
-      if (data.account) applyAccount(data.account);
-      setIdleNotice(t('Letterboxd bio kontrolü tamamlandı. Hesabın artık tamamen doğrulandı.'));
-    } catch (_) {
-      // A still-pending bio edit and a temporary upstream block are both
-      // expected here. The member is already in the app, so retry quietly.
-      scheduleDeferredRegistrationVerification();
-    }
-  }, Math.min(60_000, Math.max(15_000, remaining - 5_000)));
 }
 
 // Deneme oturumu: yazılan ad taranır ve o profil bu oturumun kimliği olur.
@@ -6003,9 +5982,18 @@ $('dialog-sweep-gate').addEventListener('click', event => {
   setProfileWatchMode(mode.dataset.sweepGoMode);
 });
 $('auth-tab-login').addEventListener('click', () => setAuthMode('login'));
-$('auth-tab-register').addEventListener('click', () => setAuthMode('register'));
+$('auth-tab-register').addEventListener('click', () => { resetLoginPrompt(); setAuthMode('register'); });
+$('login-username').addEventListener('input', resetLoginPrompt);
+$('btn-auth-forgot').addEventListener('click', () => {
+  $('reset-username').value = $('login-username').value.trim();
+  setAuthMode('reset');
+});
 $('btn-verify').addEventListener('click', verifyRegistration);
-$('btn-verify-back').addEventListener('click', () => { _pendingRegPassword = null; setAuthMode('register'); });
+$('btn-verify-back').addEventListener('click', () => {
+  _verification = null;
+  _pendingRegPassword = null;
+  setAuthMode('register');
+});
 $('verification-code').addEventListener('click', () => copyCode($('verification-code')));
 $('reset-code-display').addEventListener('click', () => copyCode($('reset-code-display')));
 $('btn-reset-back').addEventListener('click', () => setAuthMode('login'));

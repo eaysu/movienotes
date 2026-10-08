@@ -1,8 +1,9 @@
-"""Username-first account service backed by Supabase Auth.
+"""Account service backed by Supabase Auth.
 
 Passwords and password hashes never enter application tables. A deterministic,
-non-routable synthetic email maps each Letterboxd username to Supabase Auth while
-the user-facing product remains username-only.
+non-routable synthetic email maps each Letterboxd username to Supabase Auth.
+New accounts prove ownership with a Letterboxd bio code; legacy username-only
+accounts remain able to sign in.
 """
 
 from __future__ import annotations
@@ -374,14 +375,7 @@ class AuthService:
         return self._digest(code.upper(), purpose="challenge")
 
     def username_only_password(self, username: str) -> str:
-        """Return the server-only password used by frictionless accounts.
-
-        Username-only registration deliberately trades ownership proof for a
-        one-field onboarding flow.  Supabase Auth still needs a password under
-        the hood, so derive an unguessable value from the server secret instead
-        of exposing or storing one in the browser.  Password-based accounts are
-        never changed by this path.
-        """
+        """Return the server-only password for pre-existing username-only accounts."""
         return self._digest(username, purpose="username_only_auth")
 
     @staticmethod
@@ -506,7 +500,9 @@ class AuthService:
         validate_password(password)
         service = self._service_client()
         existing = self._account_row_by_username(service, username)
-        if existing and existing.get("account_status") == "active":
+        if existing and existing.get("account_status") == "disabled":
+            raise AuthError("Bu hesap devre dışı.")
+        if existing and existing.get("account_status") in {"active", "verification_deferred"}:
             raise AccountExistsError("Bu Letterboxd kullanıcı adı zaten kayıtlı.")
 
         auth_user_id = ""
@@ -639,7 +635,7 @@ class AuthService:
         )
 
     def username_requires_existence_check(self, username: str) -> bool:
-        """Existing accounts can sign in during an upstream Letterboxd block."""
+        """Whether the legacy quick endpoint must redirect to bio registration."""
         row = self._account_row_by_username(self._service_client(), username)
         if not row:
             return True
@@ -653,90 +649,29 @@ class AuthService:
     def register_username_only(
         self, username: str, *, ip_hash: str = ""
     ) -> tuple[AuthSession, bool]:
-        """Create or resume a username-only account and return a session.
+        """Sign in a pre-existing username-only account without creating one.
 
-        This is intentionally separate from the legacy password + bio
-        ownership flow.  The product has explicitly chosen low friction over
-        ownership proof here: submitting a new valid Letterboxd name opens a
-        username-only account. Existing password accounts stay protected and
-        ask for their password. The boolean says whether a new account row was
-        made.
+        The boolean remains for older clients of the quick endpoint; it is
+        always False now that registration requires bio ownership proof.
         """
         service = self._service_client()
         existing = self._account_row_by_username(service, username)
         if existing and existing.get("account_status") == "disabled":
             raise AuthError("Bu hesap devre dışı.")
-        if existing and existing.get("auth_user_id"):
-            metadata = self._auth_metadata(service, str(existing["auth_user_id"]))
-            if not metadata.get("username_only"):
-                raise PasswordRequiredError(
-                    "Bu hesap parola kullanıyor. Parolanı girerek devam et."
-                )
-            session = self._username_only_session(username, existing)
-            self._audit(service, int(existing["id"]), "username_only_login", ip_hash)
-            return session, False
-        auth_user_id = ""
-        created_new_auth_user = False
-        password = self.username_only_password(username)
-        try:
-            if existing and existing.get("auth_user_id"):
-                auth_user_id = str(existing["auth_user_id"])
-                service.auth.admin.update_user_by_id(
-                    auth_user_id,
-                    {
-                        "password": password,
-                        "user_metadata": {
-                            "letterboxd_username": username,
-                            "username_only": True,
-                        },
-                    },
-                )
-            else:
-                created = service.auth.admin.create_user(
-                    {
-                        "email": self.identity_email(username),
-                        "password": password,
-                        "email_confirm": True,
-                        "user_metadata": {
-                            "letterboxd_username": username,
-                            "username_only": True,
-                        },
-                    }
-                )
-                auth_user_id = str(created.user.id)
-                created_new_auth_user = True
-
-            now = datetime.now(timezone.utc).isoformat()
-            account_result = service.table("users").upsert(
-                {
-                    "username": username,
-                    "auth_user_id": auth_user_id,
-                    "display_name": (existing or {}).get("display_name") or username,
-                    "avatar_url": (existing or {}).get("avatar_url") or None,
-                    "account_status": "active",
-                    "profile_sync_status": "pending",
-                    "updated_at": now,
-                },
-                on_conflict="username",
-            ).execute()
-            account_row = self._first(account_result) or self._account_row_by_username(
-                service, username
+        if (
+            not existing
+            or not existing.get("auth_user_id")
+            or existing.get("account_status") not in {"active", "verification_deferred"}
+        ):
+            raise InvalidCredentialsError("Kullanıcı adı veya parola hatalı.")
+        metadata = self._auth_metadata(service, str(existing["auth_user_id"]))
+        if not metadata.get("username_only"):
+            raise PasswordRequiredError(
+                "Bu hesap parola kullanıyor. Parolanı girerek devam et."
             )
-            if account_row is None:
-                raise RuntimeError("Account row could not be created")
-            session = self._username_only_session(username, account_row)
-            self._audit(service, int(account_row["id"]), "username_only_register", ip_hash)
-            return session, True
-        except (AccountExistsError, InvalidCredentialsError, TransientStorageError):
-            if auth_user_id and created_new_auth_user:
-                with contextlib.suppress(Exception):
-                    service.auth.admin.delete_user(auth_user_id)
-            raise
-        except Exception as exc:
-            if auth_user_id and created_new_auth_user:
-                with contextlib.suppress(Exception):
-                    service.auth.admin.delete_user(auth_user_id)
-            raise AuthError("Hesap oluşturulamadı.") from exc
+        session = self._username_only_session(username, existing)
+        self._audit(service, int(existing["id"]), "username_only_login", ip_hash)
+        return session, False
 
     def verify_ownership(
         self,
@@ -818,49 +753,6 @@ class AuthService:
             # the background profile rebuild will repair favorites.
             pass
         self._audit(service, int(row["id"]), f"{kind}_verified", ip_hash)
-        return self._account(updated)
-
-    def defer_ownership_verification(
-        self, username: str, code: str, *, ip_hash: str = ""
-    ) -> Account:
-        """Open a private, provisional session when Letterboxd blocks a bio read.
-
-        The user must still possess the one-time code we issued. The account is
-        deliberately kept out of every active/social query until a later bio
-        check can promote it, so a temporary upstream block never strands a
-        legitimate signup or turns into an ownership bypass.
-        """
-        service = self._service_client()
-        row = self._account_row_by_username(service, username)
-        if row is None or not row.get("auth_user_id"):
-            raise VerificationError("Doğrulama başarısız.")
-        challenge = self._active_challenge(service, int(row["id"]), "register")
-        if challenge is None:
-            raise VerificationError("Doğrulama başarısız.")
-        if int(challenge.get("attempts") or 0) >= self.MAX_CHALLENGE_ATTEMPTS:
-            raise VerificationError("Doğrulama deneme sınırına ulaşıldı.")
-        expires = datetime.fromisoformat(challenge["expires_at"].replace("Z", "+00:00"))
-        if expires <= datetime.now(timezone.utc):
-            raise VerificationExpiredError("Doğrulama kodunun süresi doldu.")
-        if not hmac.compare_digest(challenge["code_hash"], self.challenge_hash(code)):
-            service.table("auth_challenges").update(
-                {"attempts": int(challenge.get("attempts") or 0) + 1}
-            ).eq("id", challenge["id"]).execute()
-            raise OwnershipProofError("Doğrulama kodu geçersiz.")
-
-        now = datetime.now(timezone.utc).isoformat()
-        updated = self._first(
-            service.table("users").update(
-                {
-                    "account_status": "verification_deferred",
-                    "profile_sync_status": "pending",
-                    "updated_at": now,
-                }
-            ).eq("id", row["id"]).execute()
-        ) or self._account_row_by_username(service, username)
-        if updated is None:
-            raise TransientStorageError("Doğrulama durumu kaydedilemedi.")
-        self._audit(service, int(row["id"]), "register_verification_deferred", ip_hash)
         return self._account(updated)
 
     def start_password_reset(

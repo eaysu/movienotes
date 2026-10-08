@@ -1,11 +1,11 @@
 # Movienotes
 
 Letterboxd hesabına bağlanan bir **sinefil akışı** ve **yapay zekâ destekli film
-önerici**. Kullanıcı yalnızca herkese açık Letterboxd kullanıcı adıyla kaydolur;
-adın varlığı kontrol edildikten sonra hesap açılır. İzleme geçmişi, Fav 4'ü ve puan farkındalı zevk analizi
-arka planda kalıcı olarak saklanır. Bu düşük sürtünmeli kayıt sahiplik doğrulaması
-yapmaz; yeni hesaplar isterse Ayarlar’dan Movienotes parolası oluşturabilir ve
-yanlış profil bildirimleri manuel incelenir.
+önerici**. Yeni üyeler Letterboxd kullanıcı adını ve ayrı bir Movienotes parolasını
+belirler; hesap, Letterboxd bio alanındaki tek kullanımlık kod doğrulandıktan
+sonra açılır. İzleme geçmişi, Fav 4'ü ve puan farkındalı zevk analizi arka
+planda kalıcı olarak saklanır. Önceden açılmış kullanıcı-adı-only hesaplar
+giriş yapmaya devam eder ve isterlerse Ayarlar’dan parola oluşturabilir.
 
 Uygulamanın ana ekranı akıştır: üyeler film notu paylaşır, birbirini takip eder,
 Letterboxd güncesindeki yorumlu kayıtlar otomatik olarak akışa düşer. İzleme
@@ -120,8 +120,9 @@ açıyor. Doğrudan da çalıştırılabilir:
 python -m scripts.sandbox --no-browser --port 9000
 ```
 
-Giriş ekranı yalnızca bir Letterboxd adı sorar — yeni hesapta parola yoktur.
-Kayıt, herkese açık profilin varlığını kontrol eder. Yeni onboarding önce
+Sandbox giriş ekranı yalnızca bir Letterboxd adı sorar; bu geçici oturumda
+parola veya kalıcı kayıt yoktur. Gerçek kayıtta Movienotes parolası ve
+Letterboxd bio kodu gerekir. Yeni onboarding önce
 kullanıcının kendi Letterboxd ZIP dışa aktarımını ister;
 istersen herkese açık profil taramasını ayrıca seçebilirsin. İçe aktarma ve
 isteğe bağlı tarama gerçektir; tek fark her şeyin bellekte durması.
@@ -448,10 +449,10 @@ double-submit CSRF token'ı istiyor. Auth ve ağır rotaların ayrı IP bütçel
   scraping servisi kullanılmıyor. Ölçek büyütmeden önce Letterboxd'un kullanım
   şartlarını kontrol edin. Günlük bir canary (`scripts.check_scraper`, GitHub
   Actions) ayrıştırıcının sağlığını izliyor.
-- Yeni kullanıcı adı açılmadan önce `/films/` ve gerekirse `/rss/` ile varlık
-  kontrolü yapılır. İki sayfa da 404 ise kayıt reddedilir; erişim engeli veya
-  ağ hatası doğrulama sayılmaz ve hesap oluşturulmaz. Mevcut hesapların girişi
-  bu kontrole bağlı değildir. Bu kontrol profil sahipliğini kanıtlamaz.
+- Yeni üyeye önce tek kullanımlık kod verilir; kod herkese açık Letterboxd
+  bio alanında görülmeden hesap etkinleşmez. Letterboxd erişimi engellerse
+  doğrulama bekler ve kullanıcı daha sonra tekrar dener. Önceden açılmış
+  kullanıcı-adı-only hesapların girişi bu kontrole bağlı değildir.
 - Tam geçmiş için üye profil ayarlarından Letterboxd'un indirdiği ZIP arşivini
   yükleyebilir. `watched.csv`, `ratings.csv` ve `diary.csv` tekilleştirilerek
   mevcut filmlere eklenir; `watchlist.csv` varsa aday havuzuna alınır. Bu yol
@@ -529,9 +530,9 @@ import işlemi bu soğuma süresinden etkilenmez.
 3. Dağıt. `/api/health` `auth_enabled: true` bildirmeli.
 4. `/api/readiness` `status: ready` dönmeli; 503 ya şemanın uygulanmadığını ya
    da Supabase'in erişilemez olduğunu söylüyor.
-5. Test kullanıcısı için yalnızca Letterboxd kullanıcı adını gönder; profil
-   erişilebilir olduğu doğrulanınca hesap aynı istekte açılır. Çok sayfalı tarama engellenirse profil ayarlarındaki
-   “Letterboxd arşivini yükle” ile ZIP dışa aktarımını yükle.
+5. Test kullanıcısıyla Movienotes parolası belirleyip verilen kodu Letterboxd
+   bio alanına ekle; “Bio’yu kontrol et” sonrası hesap açılmalı. Ardından
+   onboarding’de Letterboxd ZIP dışa aktarımını yükleyebilirsin.
 
 ## Açık işler
 

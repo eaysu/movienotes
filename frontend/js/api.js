@@ -1,4 +1,4 @@
-import { t, getLocale } from './i18n.js?v=20261008.1';
+import { t, getLocale } from './i18n.js?v=20261008.2';
 
 export const API_BASE = window.__API_BASE__ || '';
 

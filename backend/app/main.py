@@ -74,7 +74,6 @@ from .scraper import (
     scrape_recent_watched,
     scrape_official_list,
     resolve_missing_posters,
-    check_public_profile_exists,
     scrape_watchlist,
     scrape_watched,
 )
@@ -1383,7 +1382,7 @@ class RegisterStartRequest(_UsernameRequest):
 
 
 class UsernameOnlyRegisterRequest(_UsernameRequest):
-    """Low-friction signup: a public Letterboxd name is the only input."""
+    """Compatibility sign-in for accounts created before bio verification returned."""
 
     username: str
 
@@ -1743,13 +1742,7 @@ async def readiness(response: Response) -> dict:
 async def register_quick(
     req: UsernameOnlyRegisterRequest, request: Request, response: Response
 ) -> dict:
-    """Create/sign in a username-only account and open the app immediately.
-
-    This intentionally does not claim Letterboxd ownership. The product can
-    review impersonation complaints manually while the early signup funnel is
-    being measured. Using this path also switches an older account to the
-    username-only session credential.
-    """
+    """Sign in existing username-only accounts; new accounts need bio proof."""
     await _enforce_auth_rate_limit(request)
     service = _auth_service()
     try:
@@ -1759,19 +1752,11 @@ async def register_quick(
     except AuthError as exc:
         _raise_auth_http(exc)
     if needs_check:
-        exists = await check_public_profile_exists(req.username)
-        if exists is False:
-            raise HTTPException(
-                status_code=404,
-                detail="Letterboxd kullanıcısı bulunamadı. Kullanıcı adını kontrol edip tekrar dene.",
-                headers={"X-Error-Code": "profile_not_found"},
-            )
-        if exists is None:
-            raise HTTPException(
-                status_code=503,
-                detail="Letterboxd erişimi geçici olarak engelledi. Birkaç dakika sonra tekrar dene.",
-                headers={"Retry-After": "60", "X-Error-Code": "profile_unverified"},
-            )
+        raise HTTPException(
+            status_code=409,
+            detail="Yeni hesap için Letterboxd bio koduyla doğrulama gerekli.",
+            headers={"X-Error-Code": "bio_verification_required"},
+        )
     try:
         session, created = await asyncio.to_thread(
             service.register_username_only,
@@ -1855,36 +1840,6 @@ async def register_verify(
                 # fallback if the combined auth handshake has a transient
                 # failure, instead of making the user repeat verification.
                 session = None
-    except AccessBlockedError:
-        # A public bio is still the ownership proof, but Cloudflare blocks a
-        # Render IP from time to time. Do not trap a member on this screen:
-        # open a private provisional session and keep the account out of every
-        # active/social surface until a later successful bio read promotes it.
-        try:
-            account = await asyncio.to_thread(
-                _auth_service().defer_ownership_verification,
-                req.username,
-                req.code.strip(),
-                ip_hash=_ip_hash(request),
-            )
-            if req.password is not None:
-                session = await asyncio.to_thread(
-                    _auth_service().login,
-                    req.username,
-                    req.password,
-                    ip_hash=_ip_hash(request),
-                )
-        except AuthError as exc:
-            _raise_auth_http(exc)
-        if session is not None:
-            _set_session_cookies(response, session, remember=True)
-        return {
-            "ok": True,
-            "account": account.__dict__,
-            "logged_in": session is not None,
-            "verification_deferred": True,
-            "message": "Letterboxd bio kontrolü geçici olarak ertelendi; hesabın yalnızca sana açık şekilde devam ediyor.",
-        }
     except ScrapeError as exc:
         _raise_scrape_http(exc)
     except ValueError as exc:
