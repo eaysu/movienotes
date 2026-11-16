@@ -364,6 +364,7 @@ def test_profile_visit_does_not_start_a_daily_incremental_scrape():
     with (
         patch("app.main.profile_sync.is_running", return_value=False),
         patch("app.main.profile_sync.incremental_due", return_value=True),
+        patch("app.main.get_settings", return_value=_settings(letterboxd_scraping_enabled=True)),
         patch("app.main.profile_sync.ensure_started", new=starter),
     ):
         status = asyncio.run(main._profile_sync_status(account, fake_service))
@@ -1401,7 +1402,7 @@ def test_remember_me_keeps_the_session_until_logout_and_one_day_without_it():
     app_js = (Path(__file__).resolve().parents[2] / "frontend" / "js" / "app.js").read_text()
     html = (Path(__file__).resolve().parents[2] / "frontend" / "index.html").read_text()
     assert 'id="login-password-wrap"' in html
-    assert "'/api/auth/register/quick'" in app_js
+    assert "'/api/auth/login'" in app_js
 
 
 def test_every_screen_shares_one_top_bar():

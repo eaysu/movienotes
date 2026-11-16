@@ -166,6 +166,8 @@ class Account:
     password_enabled: bool = True
     # `auto` follows the device locale; explicit values travel with the account.
     preferred_locale: str = "auto"
+    profile_source: str = "letterboxd"
+    letterboxd_username: str | None = None
 
 
 @dataclass
@@ -409,6 +411,8 @@ class AuthService:
             letter_receiving_enabled=bool(row.get("letter_receiving_enabled", False)),
             private_account=bool(row.get("private_account", False)),
             preferred_locale=(row.get("preferred_locale") or "auto").lower(),
+            profile_source=row.get("profile_source") or "letterboxd",
+            letterboxd_username=row.get("letterboxd_username"),
         )
 
     @staticmethod
@@ -420,7 +424,7 @@ class AuthService:
         # migrations must never turn a valid password into a server error.
         identity_columns = (
             "id,auth_user_id,username,display_name,avatar_url,"
-            "account_status,profile_sync_status,onboarding_completed_at,letterboxd_stats"
+            "account_status,profile_sync_status,onboarding_completed_at,letterboxd_stats,profile_source,letterboxd_username"
         )
 
         def read():
@@ -488,6 +492,42 @@ class AuthService:
             ).execute()
         except Exception:
             self._activity_disabled_until = time.monotonic() + 300.0
+
+    def register_native(self, username: str, password: str, *, ip_hash: str = "") -> AuthSession:
+        """Create a unique independent account; never overwrite a tracked user.
+
+        Supabase's unique auth email and users.username constraints arbitrate
+        concurrent registrations. Only the identity created by this call can
+        be cleaned up after an unsuccessful account insert.
+        """
+        validate_password(password)
+        service = self._service_client()
+        if self._account_row_by_username(service, username):
+            raise AccountExistsError("Bu kullanıcı adı alınmış. Başka bir kullanıcı adı seç.")
+        created_id = None
+        try:
+            created = service.auth.admin.create_user({
+                "email": self.identity_email(username), "password": password,
+                "email_confirm": True,
+                "user_metadata": {"movienotes_username": username, "username_only": False},
+            })
+            created_id = str(created.user.id)
+            service.table("users").insert({
+                "username": username, "auth_user_id": created_id,
+                "display_name": username, "account_status": "active",
+                "profile_source": "native", "profile_sync_status": "pending",
+            }).execute()
+        except Exception as exc:
+            if created_id:
+                with contextlib.suppress(Exception):
+                    service.auth.admin.delete_user(created_id)
+            detail = str(exc).casefold()
+            if any(marker in detail for marker in ("23505", "duplicate", "already registered", "email_exists", "user_already_exists")):
+                raise AccountExistsError("Bu kullanıcı adı alınmış. Başka bir kullanıcı adı seç.") from exc
+            raise TransientStorageError("Hesap oluşturulamadı. Lütfen yeniden dene.") from exc
+        # Account creation is durable even if issuing a session temporarily
+        # fails: the member can sign in with the password they just chose.
+        return self.login(username, password, ip_hash=ip_hash)
 
     def start_registration(
         self,
@@ -762,6 +802,8 @@ class AuthService:
         row = self._account_row_by_username(service, username)
         if row is None or row.get("account_status") != "active":
             raise InvalidCredentialsError("Hesap bulunamadı.")
+        if row.get("profile_source") == "native":
+            raise AuthError("Otomatik parola kurtarma şimdilik kullanılamıyor.")
         code = f"MOVIENOTES-{secrets.token_hex(3).upper()}"
         expires = datetime.now(timezone.utc) + timedelta(
             minutes=self.CHALLENGE_TTL_MINUTES
@@ -850,7 +892,7 @@ class AuthService:
             service = self._service_client()
             columns = (
                 "id,auth_user_id,username,display_name,avatar_url,"
-                "account_status,profile_sync_status,onboarding_completed_at,letterboxd_stats"
+                "account_status,profile_sync_status,onboarding_completed_at,letterboxd_stats,profile_source,letterboxd_username"
             )
             result = service.table("users").select(columns).eq(
                 "auth_user_id", auth_user_id
@@ -1029,7 +1071,7 @@ class AuthService:
         )
         favorites = (
             service.table("profile_favorites")
-            .select("position,slug,title,release_year,tmdb_id,poster_url")
+            .select("position,slug,title,release_year,tmdb_id,poster_url,film_id")
             .eq("user_id", account.id)
             .order("position")
             .execute()
@@ -1911,6 +1953,7 @@ class AuthService:
     _POST_COLS = (
         "id,author_id,kind,body,film_slug,tmdb_id,film_title,film_year,payload,"
         "spoiler,reply_to,like_count,reply_count,created_at,source,source_key"
+        ",film_id,user_rating"
     )
 
     def import_diary_entries(self, user_id: int, entries: list[dict]) -> int:
@@ -1976,6 +2019,18 @@ class AuthService:
                         written += 1
         return written
 
+    def canonical_film_id(self, slug: str) -> str | None:
+        if slug.startswith('movie-'):
+            try:
+                return str(UUID(slug[6:]))
+            except ValueError:
+                return None
+        try:
+            row=self._first(self._service_client().table('film_aliases').select('film_id').eq('provider','letterboxd').eq('external_id',slug).limit(1).execute())
+            return row['film_id'] if row else None
+        except Exception:
+            return None
+
     def film_overview_for_community(self, film_slug: str) -> dict:
         """Bir filmin topluluk künyesi: kaç üye izlemiş, ortalama kaç puan.
 
@@ -1986,6 +2041,11 @@ class AuthService:
         blank = {"watched_count": 0, "average": None, "rated_count": 0}
         if not film_slug:
             return blank
+        identity=self.canonical_film_id(film_slug)
+        if identity:
+            records=self._service_client().table('user_films').select('rating').eq('film_id',identity).eq('watched',True).execute().data or []
+            ratings=[float(r['rating']) for r in records if r.get('rating') is not None]
+            return {'watched_count':len(records),'rated_count':len(ratings),'average':round(sum(ratings)/len(ratings),2) if ratings else None}
         try:
             rows = service.table("user_watched_films").select(
                 "user_rating,rating_observed"
@@ -2006,6 +2066,10 @@ class AuthService:
         """Bu üyenin o filme dair kendi kaydı: izlemiş mi, kaç puan vermiş."""
         if not film_slug:
             return {}
+        identity=self.canonical_film_id(film_slug)
+        if identity:
+            entries=self._service_client().table('user_films').select('watched,rating,watchlist').eq('user_id',account.id).eq('film_id',identity).limit(1).execute().data or []
+            return entries[0] if entries else {'watched':False}
         row = self._first(
             self._service_client().table("user_watched_films").select(
                 "user_rating,rating_observed"
@@ -2021,6 +2085,10 @@ class AuthService:
     def film_catalog_entry(self, film_slug: str) -> dict:
         if not film_slug:
             return {}
+        identity=self.canonical_film_id(film_slug)
+        if identity:
+            entries=self._service_client().table('films').select('*').eq('id',identity).limit(1).execute().data or []
+            if entries:return {**entries[0],'film_slug':film_slug,'film_id':identity}
         row = self._first(
             self._service_client().table("film_posters").select(
                 "film_slug,title,release_year,poster_url,director"
@@ -2391,7 +2459,8 @@ class AuthService:
                 query, scanned_cursor, sort="engagement" if engagement_sorted else "recent"
             )
             if film_slug:
-                query = query.eq("film_slug", film_slug)
+                identity = self.canonical_film_id(film_slug)
+                query = query.eq("film_id", identity) if identity else query.eq("film_slug", film_slug)
             elif following is not None:
                 query = query.in_("author_id", following)
             if windowed:

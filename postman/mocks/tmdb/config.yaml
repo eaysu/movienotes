@@ -1,0 +1,10 @@
+version: 1
+name: tmdb-catalog
+slug: tmdb-catalog
+protocol: http
+origin: api.themoviedb.org
+interceptRequests: true
+scenarios:
+  - name: default
+    path: ./default.js
+    default: true

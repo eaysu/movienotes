@@ -1,0 +1,11 @@
+simulation: native-membership
+routing: path
+mocks:
+  - name: tmdb-catalog
+    routeKey: tmdb
+    origin: api.themoviedb.org
+    path: postman/mocks/tmdb
+  - name: openai-taste
+    routeKey: openai
+    origin: api.openai.com
+    path: postman/mocks/openai

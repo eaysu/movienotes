@@ -15,11 +15,13 @@ what an account with no history would see anyway.
 from __future__ import annotations
 
 import secrets
+import hashlib
+import hmac
 import threading
 from datetime import datetime, timezone
 from typing import Any
 
-from .auth import Account, AuthSession, InvalidCredentialsError
+from .auth import Account, AuthSession, InvalidCredentialsError, AccountExistsError, validate_password
 
 # Anything not implemented below is answered from the shape its name implies,
 # so a surface this session never populates stays empty instead of raising.
@@ -84,6 +86,28 @@ class SandboxAuthService:
             self.token = secrets.token_urlsafe(24)
             return self.account, self.token
 
+    def register_native(self, username, password, **_kwargs):
+        validate_password(password)
+        with self._lock:
+            if self.account is not None:
+                raise AccountExistsError("Bu kullanıcı adı alınmış. Başka bir kullanıcı adı seç.")
+            self._password_salt = secrets.token_bytes(16)
+            self._password_hash = hashlib.scrypt(password.encode(), salt=self._password_salt, n=16384, r=8, p=1)
+            self.account = Account(id=1, auth_user_id="sandbox", username=username,
+                                   display_name=username, profile_source="native")
+            self.token = secrets.token_urlsafe(24)
+            return AuthSession(self.account, self.token, self.token, 86400)
+
+    def login(self, username, password, **_kwargs):
+        with self._lock:
+            if not self.account or username != self.account.username or not hasattr(self, '_password_hash'):
+                raise InvalidCredentialsError("Kullanıcı adı veya parola hatalı.")
+            digest = hashlib.scrypt(password.encode(), salt=self._password_salt, n=16384, r=8, p=1)
+            if not hmac.compare_digest(digest, self._password_hash):
+                raise InvalidCredentialsError("Kullanıcı adı veya parola hatalı.")
+            self.token = secrets.token_urlsafe(24)
+            return AuthSession(self.account, self.token, self.token, 86400)
+
     def current_account(self, access_token: str) -> Account:
         with self._lock:
             if not self.account or not self.token or access_token != self.token:
@@ -109,6 +133,9 @@ class SandboxAuthService:
 
     def revoke(self, *_args, **_kwargs) -> None:
         with self._lock:
+            if self.account and self.account.profile_source == "native":
+                self.token = ""
+                return
             self.account = None
             self.token = ""
             self._films.clear()
@@ -252,7 +279,7 @@ class SandboxAuthService:
                 "tmdb_id": payload.get("tmdb_id"),
                 "film_title": payload.get("film_title") or "",
                 "film_year": payload.get("film_year"),
-                "payload": {}, "spoiler": bool(payload.get("spoiler")),
+                "payload": {}, "film_id": payload.get("film_id"), "user_rating": payload.get("user_rating"), "spoiler": bool(payload.get("spoiler")),
                 "reply_to": payload.get("reply_to"),
                 "like_count": 0, "reply_count": 0, "created_at": _now(),
             }

@@ -115,13 +115,16 @@ async def _lifespan(_app):
     if getattr(settings, "bulletin_enabled", False) and getattr(settings, "has_tmdb", False):
         schedulers.append(asyncio.create_task(_bulletin_refresh_loop()))
     # Günce taraması hesaplardan bağımsız çalışamaz: üye listesi Supabase'de.
-    if getattr(settings, "diary_scan_enabled", True) and getattr(settings, "has_auth", False):
+    if getattr(settings, "letterboxd_scraping_enabled", True) and getattr(settings, "diary_scan_enabled", True) and getattr(settings, "has_auth", False):
         schedulers.append(asyncio.create_task(_diary_refresh_loop()))
     # Full profile imports are durable jobs.  The worker picks them up even if
     # the member closes the PWA while Letterboxd is temporarily rate-limiting
     # us, rather than requiring another visit to resume the crawl.
     if getattr(settings, "has_auth", False):
-        schedulers.append(asyncio.create_task(_profile_sync_retry_loop()))
+        from .native_api import resume_imports
+        schedulers.append(asyncio.create_task(resume_imports()))
+        if getattr(settings, "letterboxd_scraping_enabled", True):
+            schedulers.append(asyncio.create_task(_profile_sync_retry_loop()))
         if getattr(settings, "nightly_pick_enabled", True):
             schedulers.append(asyncio.create_task(_nightly_pick_loop()))
     try:
@@ -131,6 +134,12 @@ async def _lifespan(_app):
             scheduler.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await scheduler
+        from .library import _import_tasks
+        pending_imports = list(_import_tasks.values())
+        for task in pending_imports:
+            task.cancel()
+        if pending_imports:
+            await asyncio.gather(*pending_imports, return_exceptions=True)
         await close_tmdb_client()
 
 
@@ -141,8 +150,8 @@ _allowed_origins = os.environ.get("ALLOWED_ORIGINS", "*").split(",")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_allowed_origins,
-    allow_methods=["GET", "POST", "DELETE"],
-    allow_headers=["Content-Type", "X-CSRF-Token"],
+    allow_methods=["GET", "POST", "PUT", "DELETE"],
+    allow_headers=["Content-Type", "X-CSRF-Token", "X-Movienotes-Locale"],
     allow_credentials="*" not in _allowed_origins,
 )
 
@@ -1010,6 +1019,8 @@ async def _attach_letterboxd_ratings(rows: list[dict]) -> None:
     for a day in-process, and every failure is silent: a missing average simply
     does not render.
     """
+    if not getattr(get_settings(), "letterboxd_scraping_enabled", True):
+        return
     targets = {
         str(row.get("slug") or ""): row
         for row in rows
@@ -1264,6 +1275,19 @@ async def _load_user_films(
     list_type: 'watched' | 'watchlist'.
     Döner: (list[EnrichedFilm], from_cache: bool).
     """
+    if not getattr(settings, "letterboxd_scraping_enabled", True):
+        from .library import Library, enriched
+        service = _auth_service()
+        if isinstance(service, SandboxAuthService):
+            account = service.account
+        else:
+            row = await asyncio.to_thread(service._account_row_by_username, service._service_client(), username)
+            account = service._account(row) if row else None
+        if account is None:
+            return [], True
+        rows = await asyncio.to_thread(Library(service, settings).list, account.id)
+        flag = "watched" if list_type == "watched" else "watchlist"
+        return [enriched(row["film"], row.get("rating")) for row in rows if row.get(flag)], True
     ns = f"films_{list_type}"
     if pcache is not None and not force:
         entry = await asyncio.to_thread(
@@ -1321,17 +1345,13 @@ _LETTERBOXD_USERNAME_RE = re.compile(r"^[a-z0-9_]{2,15}$")
 
 
 def _normalize_username(value: str) -> str:
-    """Normalize and validate a public Letterboxd profile name.
-
-    Keeping usernames to a small URL-safe alphabet prevents path/query injection
-    into scraper URLs and avoids wasting external API budget on malformed input.
-    """
+    """Normalize the member's own username for unique, URL-safe account names."""
     if not isinstance(value, str):
-        raise ValueError("Letterboxd kullanıcı adı metin olmalı.")
+        raise ValueError("Kullanıcı adı metin olmalı.")
     username = value.strip().lstrip("@").lower()
     if not _LETTERBOXD_USERNAME_RE.fullmatch(username):
         raise ValueError(
-            "Letterboxd kullanıcı adı 2–15 karakter olmalı; yalnızca harf, rakam "
+            "Kullanıcı adı 2–15 karakter olmalı; yalnızca harf, rakam "
             "veya alt çizgi içerebilir."
         )
     return username
@@ -1355,7 +1375,7 @@ class RandomRequest(_UsernameRequest):
     @field_validator("source")
     @classmethod
     def validate_source(cls, value: str) -> str:
-        valid = {"community", "official_top_500", "official_most_fans"}
+        valid = {"community", "catalog", "watchlist", "official_top_500", "official_most_fans"}
         if value not in valid:
             raise ValueError("Geçersiz öneri kaynağı.")
         return value
@@ -1499,7 +1519,18 @@ class FollowRequestDecision(BaseModel):
 
 
 class PostRequest(BaseModel):
+    model_config = {"extra": "forbid"}
     body: str
+    film_id: uuid.UUID | None = None
+    user_rating: float | None = None
+
+    @field_validator("user_rating")
+    @classmethod
+    def validate_note_rating(cls, value):
+        if value is not None and (not 0.5 <= value <= 5 or value * 2 != int(value * 2)):
+            raise ValueError("Puan 0.5–5 arasında ve yarım yıldız adımlarında olmalı.")
+        return value
+
     film_slug: str = ""
     tmdb_id: int | None = None
     film_title: str = ""
@@ -1583,6 +1614,7 @@ def health() -> dict:
         # The shell reads this to drop the password fields: there is no account
         # to protect, and asking for a password nobody set would be theatre.
         "sandbox": bool(getattr(settings, "sandbox_mode", False)),
+        "native_accounts": True,
     }
 
 
@@ -1641,7 +1673,7 @@ async def share_image(
             candidates.append(asset["poster_url"])
         if not tmdb_id and asset.get("tmdb_id"):
             tmdb_id = int(asset["tmdb_id"])
-        if asset.get("poster_resolver_url"):
+        if asset.get("poster_resolver_url") and getattr(get_settings(), "letterboxd_scraping_enabled", True):
             holder = {
                 "poster_url": "",
                 "poster_resolver_url": asset["poster_resolver_url"],
@@ -2031,6 +2063,8 @@ async def refresh_session(request: Request, response: Response) -> dict:
         raise HTTPException(status_code=401, detail="Oturum yenilenemedi.")
     try:
         session = await asyncio.to_thread(_auth_service().refresh, refresh_token)
+        if session is None:
+            raise InvalidCredentialsError("Oturum yenilenemedi.")
     except TransientStorageError as exc:
         # Do not clear a valid refresh cookie merely because an upstream edge
         # briefly dropped the request. The PWA will retry this safely.
@@ -2061,6 +2095,9 @@ async def password_reset_start(
     req: PasswordResetStartRequest, request: Request
 ) -> dict:
     await _enforce_auth_rate_limit(request)
+    if not getattr(get_settings(), "letterboxd_scraping_enabled", True):
+        raise HTTPException(status_code=410, detail="Otomatik parola kurtarma şimdilik kullanılamıyor.")
+
     try:
         challenge = await asyncio.to_thread(
             _auth_service().start_password_reset,
@@ -2082,6 +2119,9 @@ async def password_reset_finish(
     req: PasswordResetFinishRequest, request: Request
 ) -> dict:
     await _enforce_auth_rate_limit(request)
+    if not getattr(get_settings(), "letterboxd_scraping_enabled", True):
+        raise HTTPException(status_code=410, detail="Otomatik parola kurtarma şimdilik kullanılamıyor.")
+
     try:
         validate_password(req.new_password, req.new_password_confirm)
         profile = await scrape_profile(
@@ -2120,6 +2160,8 @@ async def _profile_sync_status(account: Account, service) -> dict | None:
     turn a normal visit into another Letterboxd crawl just because the daily
     incremental check is due.
     """
+    if not getattr(get_settings(), "letterboxd_scraping_enabled", True):
+        return None
     job = await asyncio.to_thread(service.get_sync_job, account.id)
     if not profile_sync.is_running(account.id):
         if job and job.get("scope") == "full" and profile_sync.job_is_resumable(job):
@@ -2151,7 +2193,7 @@ async def profile_me(request: Request) -> dict:
         or not narratives[language].get("analysis")
         for language in _NARRATIVE_LOCALES
     )
-    if missing_narrative and (profile.get("taste") or {}).get("sample_size"):
+    if getattr(get_settings(), "letterboxd_scraping_enabled", True) and missing_narrative and (profile.get("taste") or {}).get("sample_size"):
         _schedule_favorite_taste_refresh(account, force_analysis=True, locale=locale)
         profile["taste_refreshing"] = True
     profile["needs_refresh"] = bool(
@@ -2184,6 +2226,11 @@ async def complete_profile_onboarding(request: Request) -> dict:
     _require_csrf(request)
     account = await _require_account(request)
     service = _auth_service()
+    if getattr(account, "profile_source", "letterboxd") == "native":
+        profile = await asyncio.to_thread(service.get_profile, account)
+        if len(profile.get("favorite_films") or []) != 4:
+            raise HTTPException(status_code=409, detail="Önce dört favori filmini seç.")
+
     # The first four favourites are enough to make the onboarding useful.
     # A full crawl remains a background task; keeping a new member trapped on
     # this endpoint until that crawl finishes made the signup time depend on
@@ -2841,6 +2888,8 @@ async def _official_list_pool(source: str, service, account, cache) -> list[Enri
     normally reads one cached page and one local database query; it does not
     trigger a profile crawl or download an entire public list.
     """
+    if not getattr(get_settings(), "letterboxd_scraping_enabled", True):
+        return []
     config = OFFICIAL_LIST_SOURCES.get(source)
     if not config or service is None or account is None:
         return []
@@ -2941,7 +2990,7 @@ async def _hydrate_random_picks(chosen: list[EnrichedFilm], settings, cache, ser
         with contextlib.suppress(Exception):
             chosen = await enricher.enrich(chosen, include_details=True)
     still_missing = [film for film in chosen if not film.poster_url and film.slug]
-    if still_missing:
+    if still_missing and getattr(settings, "letterboxd_scraping_enabled", True):
         with contextlib.suppress(Exception):
             await resolve_missing_posters(still_missing)
     return chosen
@@ -3040,6 +3089,9 @@ async def _diary_recent_rows(
     /films/ listing, which is ordered by release date — so falling back to it
     answers a different question, and the caller is told when that happened.
     """
+    if not getattr(settings, "letterboxd_scraping_enabled", True):
+        rows = await asyncio.to_thread(service.list_recent_watched, account.id, limit)
+        return rows, False
     try:
         films, _ = await scrape_diary(
             account.username, max_pages=1, film_limit=max(limit + 5, 15),
@@ -3381,6 +3433,11 @@ async def bulletin(request: Request) -> dict:
 async def profile_stats(request: Request) -> dict:
     """Lightweight Letterboxd counters (total watched, films this year)."""
     account = await _require_account(request)
+    if not getattr(get_settings(), "letterboxd_scraping_enabled", True):
+        from .library import Library
+        rows = await asyncio.to_thread(Library(_auth_service(), get_settings()).list, account.id)
+        return {"films": sum(bool(row.get("watched")) for row in rows), "this_year": 0}
+
     if account.letterboxd_stats:
         return {
             "films": int(account.letterboxd_stats.get("films", 0) or 0),
@@ -3789,6 +3846,9 @@ async def _run_entry_sync(account: Account, settings, service) -> None:
 
 async def _schedule_entry_sync(account: Account, settings, service) -> str:
     """Queue one durable, throttled background refresh for an app entry."""
+    if not getattr(settings, "letterboxd_scraping_enabled", True):
+        return "native"
+
     if account.id in _entry_sync_tasks:
         return "running"
 
@@ -4607,6 +4667,9 @@ async def check_my_watchlist(request: Request) -> dict:
     """Non-blocking entry check: one Letterboxd page, full crawl only on change."""
     _require_csrf(request)
     account = await _require_account(request)
+    if not getattr(get_settings(), "letterboxd_scraping_enabled", True):
+        return {"status": "native", "changed": False}
+
     service = _auth_service()
     if profile_sync.is_import_job(await asyncio.to_thread(service.get_sync_job, account.id)):
         return {"status": "export", "changed": False}
@@ -4630,6 +4693,9 @@ async def check_my_profile_favorites(request: Request) -> dict:
     """Quickly reflect Fav 4 edits without scheduling a full Letterboxd crawl."""
     _require_csrf(request)
     account = await _require_account(request)
+    if not getattr(get_settings(), "letterboxd_scraping_enabled", True):
+        return {"changed": False}
+
     service = _auth_service()
     if profile_sync.is_import_job(await asyncio.to_thread(service.get_sync_job, account.id)):
         return {"changed": False}
@@ -4654,80 +4720,9 @@ async def sync_profile_on_entry(request: Request) -> dict:
 
 @app.post("/api/profile/import-letterboxd")
 async def import_letterboxd_export(request: Request) -> dict:
-    """Import the owner's export; film enrichment continues in the durable job."""
-    _require_csrf(request)
-    account = await _require_account(request)
-    service = _auth_service()
-    if profile_sync.is_running(account.id):
-        raise HTTPException(status_code=409, detail="Profil taraması sürüyor. Tamamlanınca yeniden dene.")
-    job = await asyncio.to_thread(service.get_sync_job, account.id)
-    if job and job.get("state") == "running" and not profile_sync.job_is_resumable(job):
-        raise HTTPException(status_code=409, detail="Profil taraması sürüyor. Tamamlanınca yeniden dene.")
-    body = bytearray()
-    async for chunk in request.stream():
-        body.extend(chunk)
-        if len(body) > MAX_UPLOAD_BYTES:
-            raise HTTPException(status_code=413, detail="ZIP dosyası 16 MB sınırını aşıyor.")
-    try:
-        exported = await asyncio.to_thread(parse_letterboxd_export, bytes(body))
-    except InvalidLetterboxdExport as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    if exported.username and exported.username != account.username.lower():
-        raise HTTPException(status_code=400, detail="ZIP dosyası bu Letterboxd kullanıcı adına ait değil.")
-    try:
-        await asyncio.to_thread(service.check_sync_schema)
-    except Exception as exc:
-        raise HTTPException(status_code=503, detail="Film arşivi şu anda kullanılamıyor.") from exc
-
-    # Reuse the canonical catalog slug when the film is already in this
-    # account's archive. Export short links otherwise have a reversible slug.
-    existing = await asyncio.to_thread(service.get_watched_films, account.id)
-    matches: dict[tuple[str, int | None], set[str]] = {}
-    for row in existing:
-        if not row.get("film_slug"):
-            continue
-        key = ((row.get("title") or "").casefold(), row.get("release_year"))
-        matches.setdefault(key, set()).add(row["film_slug"])
-    seen_slugs: set[str] = set()
-    for row in exported.watched:
-        key = (row["title"].casefold(), row.get("release_year"))
-        candidates = matches.get(key, set())
-        if len(candidates) == 1 and next(iter(candidates)) not in seen_slugs:
-            row["slug"] = next(iter(candidates))
-        seen_slugs.add(row["slug"])
-
-    # An export is a merge, not a deletion: a newly watched film after the
-    # export date must survive. Supplying a run id reactivates older rows.
-    import_run_id = str(uuid.uuid4())
-    for offset in range(0, len(exported.watched), 200):
-        batch = exported.watched[offset : offset + 200]
-        for row in batch:
-            row["last_seen_run_id"] = import_run_id
-            row["is_active"] = True
-        await asyncio.to_thread(service.save_watched_films, account.id, batch)
-
-    if exported.watchlist_present:
-        client, _cache = _make_cache(get_settings())
-        pcache = _make_persistent_cache(get_settings(), client)
-        await asyncio.to_thread(pcache.set, "films_watchlist", account.username, exported.watchlist)
-        await asyncio.to_thread(pcache.set, "films_watchlist_import_raw", account.username, exported.watchlist)
-
-    queued = await asyncio.to_thread(
-        service.upsert_sync_job,
-        account.id,
-        state="queued", phase="enrich", scope="full",
-        cursor_page=profile_sync.IMPORT_CURSOR_MARKER,
-        films_processed=0, films_total=len(exported.watched), attempts=0,
-        last_error="", backoff_until=None, sync_run_id=None,
-        lease_token=None, lease_expires_at=None,
-    )
-    await asyncio.to_thread(service.mark_sync_status, account.id, "syncing")
-    profile_sync.start(_SyncPipeline(get_settings(), use_stored_profile=True), service, account)
-    return {
-        "watched_count": len(exported.watched),
-        "watchlist_count": len(exported.watchlist),
-        "sync_job": profile_sync.progress_of(queued),
-    }
+    """Import a member-supplied archive without ownership claims or scraping."""
+    from .native_api import import_export
+    return await import_export(request)
 
 
 @app.post("/api/profile/sync")
@@ -4740,6 +4735,10 @@ async def sync_my_profile(
     account = await _require_account(request)
     settings = get_settings()
     service = _auth_service()
+    if not getattr(settings, "letterboxd_scraping_enabled", True):
+        from .library import Library
+        return await Library(service, settings).rebuild(account, _response_locale(account, request))
+
     await _record_activity_event(
         service,
         account,
@@ -4891,6 +4890,8 @@ def _kick_diary_backfill(settings, service) -> None:
 
     Çağıran beklemiyor — tek bir görev, süreç başına.
     """
+    if not getattr(settings, "letterboxd_scraping_enabled", True):
+        return
     global _diary_backfill_task
     if not getattr(settings, "diary_scan_enabled", True):
         return
@@ -4983,6 +4984,8 @@ def _kick_diary_ingest(settings, service) -> None:
     taşıyor: art arda elli film yorumsuz loglanırsa yeni yazılan yorum oradan
     görünmez oluyor. Sayfa yalnızca yorumluları listeliyor.
     """
+    if not getattr(settings, "letterboxd_scraping_enabled", True):
+        return
     global _diary_ingest_task
     if not getattr(settings, "diary_scan_enabled", True):
         return
@@ -5141,11 +5144,21 @@ async def create_post(req: PostRequest, request: Request) -> dict:
     account = await _require_account(request)
     service = _auth_service()
     if account.profile_sync_status not in ("ready", "stale"):
-        # Raising the cost of a throwaway account: a profile has to exist first.
-        raise HTTPException(
-            status_code=409,
-            detail="Profilin hazırlanınca not yazabilirsin.",
-        )
+        raise HTTPException(status_code=409, detail="Profilin hazırlanınca not yazabilirsin.")
+    if req.film_id is not None:
+        from .library import Library
+        library = Library(service, get_settings())
+        try:
+            film = await library.catalog.details(str(req.film_id))
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        post = await asyncio.to_thread(library.publish, account, film, req.body, req.user_rating, req.spoiler)
+        # The note is already committed. A profile refresh failure must not
+        # report a failed publication and encourage a duplicate submission.
+        with contextlib.suppress(Exception):
+            await library.rebuild(account, _response_locale(account, request))
+        return {"ok": True, "post": post}
+
     try:
         post = await asyncio.to_thread(service.create_post, account, req.model_dump())
     except BlendServiceError as exc:
@@ -5996,6 +6009,17 @@ async def recommend(req: RecommendRequest, request: Request):
     global _q_waiting, _q_active
     account = await _enforce_account_username(request, req.username)
     await _enforce_heavy_rate_limit(request)
+    if account is not None and not getattr(get_settings(), "letterboxd_scraping_enabled", True):
+        from .native_api import native_recommendations
+        async def native_stream():
+            yield _sse({"type": "step", "step": "ranking"})
+            try:
+                result = await native_recommendations(account, request)
+                yield _sse({"type": "result", **result})
+            except Exception:
+                log.exception("native recommendations failed")
+                yield _sse({"type": "error", "detail": "Öneriler hazırlanamadı. Yeniden dene."})
+        return StreamingResponse(native_stream(), media_type="text/event-stream")
     service = _auth_service() if account is not None else None
     response_locale = _response_locale(account, request)
 
@@ -6404,7 +6428,11 @@ async def random_pick(req: RandomRequest, request: Request):
 
         yield _sse({"type": "step", "step": "enriching"})
         source = req.source
-        if source in OFFICIAL_LIST_SOURCES:
+        if source in ("catalog", "watchlist") or not getattr(settings, "letterboxd_scraping_enabled", True):
+            from .native_api import native_random_pool
+            pool = await native_random_pool(account, source)
+            source = "discover" if source in OFFICIAL_LIST_SOURCES else source
+        elif source in OFFICIAL_LIST_SOURCES:
             pool = await _official_list_pool(source, service, account, cache)
         else:
             pool = await _community_random_pool(service, account, locale=response_locale)
@@ -7077,3 +7105,8 @@ async def blend(req: BlendRequest, request: Request):
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+# Independent account/catalog routes share the existing session and CSRF guards.
+from .native_api import router as native_router
+app.include_router(native_router)

@@ -54,6 +54,9 @@ class Settings(BaseSettings):
     # which also points DATA_DIR at a temporary folder it removes on exit.
     # Never set this in a deployed environment: it has no passwords at all.
     sandbox_mode: bool = False
+    # Membership, imports, catalog and notes never depend on Letterboxd HTML.
+    # Retained only for explicitly enabled legacy maintenance tooling.
+    letterboxd_scraping_enabled: bool = False
 
     # --- Sinema gündemi (bülten) ---
     # Sinema gündemi ve ona bağlı haftalık vizyon bildirimi varsayılan olarak

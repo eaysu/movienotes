@@ -7,6 +7,11 @@ from app import main
 from app.scraper import ScrapeListResult, ScrapedFilm
 
 
+@pytest.fixture(autouse=True)
+def legacy_scraping_enabled(monkeypatch):
+    monkeypatch.setattr(main, "get_settings", lambda: SimpleNamespace(letterboxd_scraping_enabled=True))
+
+
 class _Account:
     id = 42
 

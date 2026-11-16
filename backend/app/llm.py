@@ -100,7 +100,7 @@ def _build_prompt(
         return (
             "You are an experienced film recommendation editor. Write every value in natural English.\n\n"
             f"{english_heading}:\n{watched_block}\n\n"
-            f"Letterboxd Favourite Four (the strongest preference signal):\n{english_favorites}\n\n"
+            f"Favourite Four (the strongest preference signal):\n{english_favorites}\n\n"
             "These are watchlist candidates already prefiltered for similarity to the member's history:\n"
             f"{english_candidates}\n\n"
             f"Choose and rank the best {n} films. For each `reason`, write a warm two- or three-sentence paragraph "
@@ -114,7 +114,7 @@ def _build_prompt(
     prompt = (
         "Sen deneyimli bir film öneri uzmanısın.\n\n"
         f"{reference_heading}:\n{watched_block}\n\n"
-        f"Letterboxd Favori 4 (en güçlü tercih sinyali):\n{fav_four_block}\n\n"
+        f"Favori 4 (en güçlü tercih sinyali):\n{fav_four_block}\n\n"
         "Aşağıdaki filmler kullanıcının watchlist'inden seçilmiş adaylardır "
         "(izleme geçmişine benzerliğe göre ön filtrelendi):\n"
         f"{candidate_block}\n\n"
@@ -175,7 +175,7 @@ async def rank_candidates(
     try:
         from openai import AsyncOpenAI
 
-        client = AsyncOpenAI(api_key=settings.openai_api_key)
+        client = AsyncOpenAI(api_key=settings.openai_api_key, timeout=30.0, max_retries=1)
         model_id = _resolve_model(settings.openai_model)
         # Reasoning modelleri (gpt-5-mini, o-serisi):
         #   max_completion_tokens = reasoning_tokens + output_tokens
@@ -282,7 +282,7 @@ def _taste_analysis_prompt(
             f"Decade distribution: {_decade_histogram(watched)}\n"
             f"Ratings: {english_rating}\n\n"
             f"Examples from films they enjoy:\n{watched_lines}\n\n"
-            f"Letterboxd Favourite Four:\n{fav_lines}\n\n"
+            f"Favourite Four:\n{fav_lines}\n\n"
             "Return only this JSON:\n"
             '{"analysis":["A three- to four-sentence connected taste reading, one sentence per array item."],'
             '"personality":"A two- to three-sentence reading of temperament and worldview drawn from the Favourite Four. '
@@ -298,7 +298,7 @@ def _taste_analysis_prompt(
         f"Dönem dağılımı: {_decade_histogram(watched)}\n"
         f"Puanlama: {rating_note}\n\n"
         f"Sevdiği filmlerden örnek:\n{watched_lines}\n\n"
-        f"Letterboxd Favori 4:\n{fav_lines}\n\n"
+        f"Favori 4:\n{fav_lines}\n\n"
         "SADECE şu JSON'u döndür:\n"
         '{\n'
         '  "analysis": ["Sevdiği türlerin BİLEŞİMİNDEN yola çıkan 3-4 cümlelik, tek '
@@ -329,7 +329,7 @@ async def analyze_taste(
     try:
         from openai import AsyncOpenAI
 
-        client = AsyncOpenAI(api_key=settings.openai_api_key)
+        client = AsyncOpenAI(api_key=settings.openai_api_key, timeout=30.0, max_retries=1)
         model_id = _resolve_model(
             (settings.openai_analysis_model or settings.openai_model).strip()
         )

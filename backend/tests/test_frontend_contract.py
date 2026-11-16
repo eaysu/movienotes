@@ -1444,10 +1444,10 @@ def test_shell_asset_content_changes_force_a_version_bump():
     files that no longer existed.
     """
     expected = {
-        "js/app.js": "43d16b3fe860786125d0a6f86a5c29ccd4d88e2e0455c66942a8e9fb275c802f",
-        "app.css": "ae5de611507d58e5032fcd38a867174fb1fe8c737655ffb3b390ac883d3f57b4",
-        "js/share-cards.js": "f4822476119fd9fa25c9dd86020680944f153570711873c0cc9f633b1a428e46",
-        "js/i18n.js": "1d83b0218ef92b77424b8af7f167ce1947b37d5c32269b9ae0b7535faf82e534",
+        "js/app.js": "ed2db0797b84d2a9ff7898e4715f883edf2dd3f59aada930d2da33781e496d2f",
+        "app.css": "69b77f9bf53fed9e859d5d1e9253641217178956143d0b183992718c6b08150d",
+        "js/share-cards.js": "2ba73cf2638ed315daff9c94d9a8e5be513f3c7d32d238db913f09730d8d172d",
+        "js/i18n.js": "84e7b3cca7e507f161cdad3dcfeb6ad1c29b1b1c958d61517f415fbf57bf52c1",
         "site.webmanifest": "7a7de349179ed9f226d38632dfde5a8478edd10305972ea52641b0dc6aa7f405",
         "movienotes-mark.png": "850aa9117aa52768952843f8e2c410c0c17868877d81b2058274290373b4ee1e",
         "movienotes-icon-192.png": "3b04c52ffd23799ce424f1acefd0a1d7c386b8c968b09be9bd5c87b623c6ac12",
@@ -1483,25 +1483,25 @@ def test_every_app_shell_asset_has_an_explicit_immutable_version():
     source_css = (FRONTEND / "css" / "source.css").read_text()
 
     dependency_version = "v=20260902.15"
-    dom_version = "v=20261006.1"
-    api_version = "v=20261008.2"
-    css_version = "v=20261008.1"
+    dom_version = "v=20261116.1"
+    api_version = "v=20261116.1"
+    css_version = "v=20261116.1"
     assert f"/static/app.css?{css_version}" in html
-    assert "/static/js/app.js?v=20261008.4" in html
-    assert "./i18n.js?v=20261008.2" in app_js
+    assert "/static/js/app.js?v=20261116.1" in html
+    assert "./i18n.js?v=20261116.1" in app_js
     assert app_js.count(f"?{dependency_version}") == 1
     assert f"./api.js?{api_version}" in app_js
-    assert "./recommendations.js?v=20261008.2" in app_js
-    assert "./share-cards.js?v=20261008.2" in app_js
-    assert "./auth.js?v=20261008.2" in app_js
+    assert "./recommendations.js?v=20261116.1" in app_js
+    assert "./share-cards.js?v=20261116.1" in app_js
+    assert "./auth.js?v=20261116.1" in app_js
     assert f"./dom.js?{dom_version}" in auth_js
-    assert "./i18n.js?v=20261008.2" in auth_js
+    assert "./i18n.js?v=20261116.1" in auth_js
     assert f"./dom.js?{dom_version}" in profile_js
-    assert "./i18n.js?v=20261008.2" in profile_js
+    assert "./i18n.js?v=20261116.1" in profile_js
     assert f"./dom.js?{dom_version}" in recommendations_js
-    assert "./i18n.js?v=20261008.2" in recommendations_js
+    assert "./i18n.js?v=20261116.1" in recommendations_js
     assert f"./api.js?{api_version}" in share_js
-    assert "./i18n.js?v=20261008.2" in share_js
+    assert "./i18n.js?v=20261116.1" in share_js
     assert f"criterion-closet-bg.jpg?{dependency_version}" in source_css
 
 
@@ -1571,7 +1571,7 @@ def test_png_share_renderer_is_lazy_loaded_on_first_share_action():
 
     imports = app_js.split("// ── Cinema facts", 1)[0]
     assert "from './share-cards.js" not in imports
-    assert "import('./share-cards.js?v=20261008.2')" in imports
+    assert "import('./share-cards.js?v=20261116.1')" in imports
     assert "const shareCards = await loadShareCardsModule();" in app_js
 
 
@@ -1645,23 +1645,17 @@ def test_new_member_can_import_letterboxd_zip_before_any_scrape():
     enter = app_js.split("function enterApp(account, opts = {})", 1)[1].split(
         "// ── Onboarding reveal", 1
     )[0]
-    archive = app_js.split("function startArchiveOnboarding()", 1)[1].split(
-        "function showArchiveImported", 1
-    )[0]
-    assert "startArchiveOnboarding();" in enter
+    onboarding = (FRONTEND / "js" / "onboarding.js").read_text()
+    assert "_nativeOnboarding.start(account)" in enter
     assert "startOnboarding();" not in enter
-    assert "https://letterboxd.com/user/exportdata/" in archive
-    assert "uploadArchiveOnboarding" in archive
-    assert "herkese açık profilimi tara" in archive
-    profile_load = app_js.split("async function loadProfile()", 1)[1].split(
-        "function queueEntrySync()", 1
-    )[0]
-    assert "if (profile.sync_job?.imported) return;" in profile_load
-    assert "_obEscapeTimer" not in app_js
+    assert "https://letterboxd.com/user/exportdata/" in onboarding
+    assert "'/api/profile/import-letterboxd'" in onboarding
+    assert "'/api/profile/favorites'" in onboarding
+    assert "herkese açık profilimi tara" not in onboarding
     assert "mb_onboarded:" not in app_js
 
 
-def test_new_account_requires_password_and_letterboxd_bio_code():
+def test_new_account_requires_password_confirmation_without_letterboxd_bio():
     html = (FRONTEND / "index.html").read_text()
     app_js = (FRONTEND / "js" / "app.js").read_text()
     auth_js = (FRONTEND / "js" / "auth.js").read_text()
@@ -1671,12 +1665,11 @@ def test_new_account_requires_password_and_letterboxd_bio_code():
     )[0]
     assert 'id="register-password"' in html
     assert 'id="register-password-confirm"' in html
-    assert "'/api/auth/register/start'" in register
-    assert "setAuthMode('verify')" in register
-    assert "'/api/auth/register/verify'" in app_js
+    assert "'/api/auth/register'" in register
+    assert "setAuthMode('verify')" not in register
+    assert "password_confirm: confirmation" in register
     assert "const register = mode === 'register'" in auth_js
-    assert "bio_verification_required" in main_py
-    assert "defer_ownership_verification" not in main_py
+    assert "Letterboxd hesabı gerekmiyor." in html
 
 
 def test_archive_onboarding_styles_are_in_the_compiled_css():

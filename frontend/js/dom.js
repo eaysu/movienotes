@@ -20,6 +20,7 @@ const _FILM_SLUG_RE = /^[a-z0-9][a-z0-9-]{0,159}$/;
 // Public Letterboxd film page for a slug (used to make posters clickable).
 export function letterboxdFilmURL(slug) {
   const clean = String(slug || '').trim().toLowerCase();
+  if (/^movie-[0-9a-f-]{36}$/.test(clean)) return ''; // Native identity has no implied Letterboxd URL.
   const short = /^boxd-((?:[0-9a-f]{2}){2,24})$/.exec(clean);
   if (short) {
     const id = short[1].match(/.{2}/g).map(hex => String.fromCharCode(parseInt(hex, 16))).join('');

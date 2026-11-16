@@ -1,0 +1,37 @@
+purpose:
+  stands_in_for: TMDb movie search/details and OpenAI chat completions during native membership onboarding.
+  unblocks: Local verification of the real FastAPI application without production credentials, scraping, paid model calls or member data changes.
+assumptions:
+  - id: catalog-and-analysis-caller-path
+    status: supported
+    claim: The caller can save four catalog favorites and display an analysis with the response shapes served by these stand-ins.
+    reason: Both dependencies recorded requests from the running application, and the browser displayed the persisted selections and analysis.
+    verification: On 2026-11-16 the real local application registered a throwaway account, requested TMDb popular films and four detail records (HTTP 200), saved four favorites, and called OpenAI chat completions (HTTP 200). Desktop and 390px mobile onboarding completed. Two notes on Arrival were published, one with a 4.5 rating. A representative ZIP upload preserved its multiline private review and left the native 4.5 rating unchanged despite an imported rating of 3; the public feed stayed at two notes. Latest browser requests all returned 200, with no Letterboxd fetches or console errors in the exercised flow.
+    source: backend/app/catalog.py; backend/app/library.py; backend/app/llm.py; frontend/js/onboarding.js; local ephemeral run /tmp/moviebox-simulation-fixed.ndjson; docs/native-membership.md
+    updated_at: "2026-11-16"
+  - id: analysis-failure-preserves-four-favorites
+    status: supported
+    claim: In the exercised server-error scenario, analysis failure leaves the saved favorites usable and offers a retry.
+    reason: The first mock handler returned HTTP 500 because it incorrectly assumed a raw body. The application retained the four favorites and showed its deterministic fallback; retry succeeded after correcting the mock.
+    verification: On 2026-11-16 observed two OpenAI HTTP 500 attempts in the initial simulation, a usable fallback reading in the browser, and HTTP 200 plus the modeled analysis after retry. This was a server-error scenario, not a timeout or a real-provider outage test.
+    source: backend/app/llm.py; backend/app/library.py; postman/mocks/openai/default.js; ephemeral runs /tmp/moviebox-simulation.ndjson and /tmp/moviebox-simulation-fixed.ndjson
+    updated_at: "2026-11-16"
+  - id: real-tmdb-contract-and-availability
+    status: unknown
+    claim: The production TMDb key and current provider return compatible search and detail responses for imported film titles.
+    reason: The local stand-in uses public movie metadata already present in the repository's local cache and the shapes consumed by the existing enricher. It does not establish current provider access, search recall, ordering or rate limits.
+    verification: The modeled popular/details paths ran locally; no current real-provider check was performed in this implementation pass. Unknown endpoints return 501. Confirm production search and one detail request after deployment.
+    source: backend/app/enrich.py; backend/app/catalog.py; postman/mocks/tmdb/default.js
+    updated_at: "2026-11-16"
+  - id: real-model-and-owner-mock-discovery
+    status: unknown
+    claim: The configured production GPT model accepts the current chat-completions request and returns usable taste prose.
+    reason: The stand-in returns deterministic JSON in a chat-completion envelope; it accepts the requested model without validating availability. Published owner mocks were not discovered because the local Postman CLI could not read an authenticated session from macOS Keychain.
+    verification: Local successful response and fallback paths were observed. Postman 1.86.0 reported SecItemCopyMatching error -50 for status; owner search was skipped and no mocks were published. Verify the actual configured model on Render after deployment.
+    source: backend/app/llm.py; postman/mocks/openai/default.js; render.yaml; docs/native-membership.md
+    updated_at: "2026-11-16"
+fingerprints:
+  - id: native-membership-local-20261116
+    date: "2026-11-16"
+    commit: "0f44cbc1e03f683bca1b6f6267f6c692b677bd4d (dirty working tree with native membership implementation)"
+    cli: "Postman 1.86.0"

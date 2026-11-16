@@ -6,6 +6,7 @@ Results are cached so a film looked up once is never fetched again.
 """
 
 import asyncio
+import os
 import logging
 from dataclasses import dataclass, field, asdict
 from typing import Optional
@@ -14,7 +15,7 @@ import httpx
 
 from .cache import Cache
 
-TMDB_BASE = "https://api.themoviedb.org/3"
+TMDB_BASE = os.environ.get("TMDB_API_BASE", "https://api.themoviedb.org/3").rstrip("/")
 TMDB_IMAGE_BASE = "https://image.tmdb.org/t/p/w500"
 SEARCH_TTL = 60 * 60 * 24 * 30  # 30 days
 NEGATIVE_LOOKUP_TTL = 60 * 60 * 24  # retry genuine "not found" results daily

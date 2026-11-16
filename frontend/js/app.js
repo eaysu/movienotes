@@ -1,4 +1,6 @@
-import { $, escapeHTML, safeImageURL, letterboxdFilmURL } from './dom.js?v=20261006.1';
+import { createNativeOnboarding } from './onboarding.js?v=20261116.1';
+import { createLibraryPanel } from './library.js?v=20261116.1';
+import { $, escapeHTML, safeImageURL, letterboxdFilmURL } from './dom.js?v=20261116.1';
 import {
   API_BASE,
   apiJSON,
@@ -8,24 +10,24 @@ import {
   finishApiRequest,
   scrapeErrorMessage,
   streamErrorMessage,
-} from './api.js?v=20261008.2';
+} from './api.js?v=20261116.1';
 import {
   cookieValue,
   csrfHeaders,
   setAuthMessage,
   setAuthMode,
   setPasswordVisibility,
-} from './auth.js?v=20261008.2';
-import { directorAvatar, directorFilmGrid, directorFilmTile } from './profile.js?v=20261008.2';
+} from './auth.js?v=20261116.1';
+import { directorAvatar, directorFilmGrid, directorFilmTile } from './profile.js?v=20261116.1';
 import { animateScore, getScoreInfo } from './blend.js?v=20260902.15';
-import { createRecommendationCards } from './recommendations.js?v=20261008.2';
+import { createRecommendationCards } from './recommendations.js?v=20261116.1';
 import {
   getLocale,
   initI18n,
   localePreference,
   setLocalePreference,
   t,
-} from './i18n.js?v=20261008.2';
+} from './i18n.js?v=20261116.1';
 
 initI18n();
 
@@ -34,7 +36,7 @@ const uiLocale = () => (getLocale() === 'en' ? 'en-US' : 'tr-TR');
 let _shareCardsModule;
 function loadShareCardsModule() {
   if (!_shareCardsModule) {
-    _shareCardsModule = import('./share-cards.js?v=20261008.2');
+    _shareCardsModule = import('./share-cards.js?v=20261116.1');
   }
   return _shareCardsModule;
 }
@@ -508,15 +510,15 @@ function setProfileWatchMode(mode) {
     btn.classList.toggle('text-on-surface-variant', !on);
     btn.classList.toggle('border-primary-container/50', on && mode === 'taste');
     btn.classList.toggle('border-tertiary-container/50', on && mode === 'random');
-    btn.classList.toggle('border-secondary-container/50', on && mode === 'official_top_500');
-    btn.classList.toggle('border-error-container/50', on && mode === 'official_most_fans');
+    btn.classList.toggle('border-secondary-container/50', on && mode === 'catalog');
+    btn.classList.toggle('border-error-container/50', on && mode === 'watchlist');
     btn.classList.toggle('border-outline-variant/25', !on);
   });
   const detail = {
     taste: { color: 'bg-primary-container text-black', icon: 'auto_awesome', label: 'Öner' },
     random: { color: 'bg-tertiary-container text-on-tertiary-container', icon: 'shuffle', label: 'Rastgele seç' },
-    official_top_500: { color: 'bg-secondary-container text-on-secondary-container', icon: 'workspace_premium', label: 'Top 500’den seç' },
-    official_most_fans: { color: 'bg-error-container text-on-error-container', icon: 'groups', label: 'Top Fans 250’den seç' },
+    catalog: { color: 'bg-secondary-container text-on-secondary-container', icon: 'workspace_premium', label: 'Katalogdan seç' },
+    watchlist: { color: 'bg-error-container text-on-error-container', icon: 'groups', label: 'Listemden seç' },
   }[mode] || { color: 'bg-primary-container text-black', icon: 'auto_awesome', label: 'Öner' };
   $('profile-watch-go').className = `mt-4 w-full ${detail.color} py-3.5 rounded-xl font-label-md text-label-md uppercase tracking-wider hover:opacity-90 active:scale-[0.98] transition-all duration-200 flex items-center justify-center gap-2 disabled:opacity-40`;
   $('profile-watch-go-icon').textContent = detail.icon;
@@ -711,7 +713,7 @@ function _recoLoadingHTML(mode) {
   return `
     <div class="flex flex-col items-center gap-4 py-6 text-center">
       <div class="spinner" style="width:44px;height:44px"></div>
-      <p id="profile-reco-status" class="font-label-md text-label-md text-on-surface-variant uppercase tracking-wide">${mode === 'taste' ? t('İzleme listen okunuyor') : mode === 'random' ? t('Topluluk havuzu karıştırılıyor') : t('Letterboxd listesi hazırlanıyor')}</p>
+      <p id="profile-reco-status" class="font-label-md text-label-md text-on-surface-variant uppercase tracking-wide">${mode === 'taste' ? t('İzleme listen okunuyor') : mode === 'random' ? t('Topluluk havuzu karıştırılıyor') : t('Film havuzu hazırlanıyor')}</p>
     </div>`;
 }
 
@@ -874,7 +876,7 @@ function openShareSheet(opts = {}) {
   const url = SITE_URL;
   const message = notFound
     ? t('Movienotes’da film zevkimizi karşılaştıralım (Blend) — kaydol: {url}', { url })
-    : t('Letterboxd zevkine göre film öneren Movienotes’u dene: {url}', { url });
+    : t('Film zevkine göre öneriler sunan Movienotes’u dene: {url}', { url });
 
   $('share-title').textContent = notFound
     ? t('@{username} sitemize kaydolmamış 😔', { username: notFound })
@@ -1428,7 +1430,9 @@ let _lastUnreadNotificationCount = null;
 let _feedNotificationPollTimer = null;
 let _verification = null;
 let _resetChallenge = null;
-let _loginPasswordRequired = false;
+let _loginPasswordRequired = true;
+let _nativeOnboarding = null;
+let _libraryPanel = null;
 let _pendingRegPassword = null;
 
 function syncLanguageControl() {
@@ -1949,7 +1953,7 @@ function renderPersistedProfile(data) {
              ${badge}${emptyCard}
            ${href ? closeTag : '</article>'}`;
     }).join('')
-    : '<div class="col-span-full rounded-2xl border border-dashed border-outline-variant/30 p-10 text-center text-on-surface-variant">Letterboxd Fav 4 henüz alınamadı.</div>';
+    : '<div class="col-span-full rounded-2xl border border-dashed border-outline-variant/30 p-10 text-center text-on-surface-variant">Henüz dört favori film seçilmedi.</div>';
 
   const profileShareReady = favorites.length >= 4 && Boolean(accountSummary);
   $('btn-share-personality').classList.toggle('hidden', !profileShareReady);
@@ -1977,7 +1981,7 @@ const FEED_COMPOSER_PROMPTS = [
   'Bir film hakkında düşüncelerini paylaş',
   'Perde kapandıktan sonra aklında ne kaldı?',
   'Bu sahne sende nasıl bir iz bıraktı?',
-  'Bugün izlediğin filmle iki cümle kur',
+  'Bu film hakkında bir not yaz',
   'Bir oyunculuk, bir plan ya da final… paylaş',
   'Sinefillerin arasında bir not bırak',
 ];
@@ -1985,7 +1989,7 @@ const FEED_COMPOSER_PROMPTS_EN = [
   'Share your thoughts about a film',
   'What stayed with you after the credits?',
   'How did this scene stay with you?',
-  'Write two sentences about the film you watched today',
+  'Write a note about this film',
   'Share a performance, a shot, or an ending…',
   'Leave a note among cinephiles',
 ];
@@ -2061,7 +2065,7 @@ function feedPostCard(post, { compact = false } = {}) {
   const body = escapeHTML(post.body || '');
   const poster = film ? safeImageURL(film.poster_url) : '';
   const filmRail = film
-    ? `<a href="${letterboxdFilmURL(film.slug) || '#'}" target="_blank" rel="noopener" title="${escapeHTML(film.title || 'Film')} — Letterboxd" class="group order-3 ml-auto w-[68px] shrink-0 self-start text-left sm:w-[78px]">
+    ? `<button type="button" data-film-open="${escapeHTML(film.slug)}" data-film-title="${escapeHTML(film.title || 'Film')}" class="group order-3 ml-auto w-[68px] shrink-0 self-start text-left sm:w-[78px]">
         <span class="block overflow-hidden rounded-xl border border-outline-variant/30 bg-surface-container shadow-[0_16px_34px_-22px_rgba(0,0,0,.95)] transition-transform duration-300 group-hover:-translate-y-1 group-hover:border-primary-container/50">
           ${poster
             ? `<img src="${poster}" alt="${escapeHTML(film.title || '')}" onerror="posterErr(this)" loading="lazy" class="aspect-[2/3] w-full object-cover bg-surface-container"/>`
@@ -2070,7 +2074,7 @@ function feedPostCard(post, { compact = false } = {}) {
         <strong class="mt-2 block line-clamp-2 text-[11px] leading-snug text-on-surface group-hover:text-primary-container sm:text-[12px]">${escapeHTML(film.title || 'Film')}</strong>
         <span class="mt-1 block text-[10px] text-on-surface-variant/60">${escapeHTML(String(film.year || ''))}</span>
         <span class="mt-0.5 block line-clamp-2 text-[10px] leading-snug text-on-surface-variant">${escapeHTML(film.director || '')}</span>
-      </a>`
+      </button>`
     : '';
   // Günce kaydı da nottan farksız görünür: kartta okunacak şey yorumun
   // kendisi. Künye ve puan, Letterboxd'un verisini tekrar etmekten başka bir
@@ -2091,6 +2095,7 @@ function feedPostCard(post, { compact = false } = {}) {
           </div>
         </div>
         ${text}
+        ${post.user_rating != null ? `<span class="native-stars text-xs" aria-label="${escapeHTML(post.user_rating)} / 5">★ ${escapeHTML(post.user_rating)} / 5</span>` : ''}
         <div class="feed-actions mt-auto flex h-9 shrink-0 items-center gap-4 text-sm text-on-surface-variant">
           <button type="button" data-post-like class="flex items-center gap-1.5 hover:text-primary-container transition-colors ${post.liked ? 'text-primary-container' : ''}">
             <span class="material-symbols-outlined text-[18px]" style="${post.liked ? "font-variation-settings:'FILL' 1" : ''}">favorite</span>
@@ -2151,14 +2156,14 @@ async function searchFeedFilms() {
   try {
     const endpoint = _feedFilmPickerMode === 'filter'
       ? `/api/feed/films?q=${encodeURIComponent(query)}`
-      : `/api/profile/watched?q=${encodeURIComponent(query)}`;
+      : `/api/catalog/search?q=${encodeURIComponent(query)}`;
     const data = await apiJSON(endpoint);
     const films = (data.films || []).slice(0, 8).map(film => ({
       ...film, slug: film.slug || film.film_slug || '',
     })).filter(film => film.slug);
     $('feed-film-results').innerHTML = films.length
       ? films.map((film, index) => `<button type="button" data-feed-film-index="${index}" class="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm hover:bg-surface-variant">${letterFilmMarkup(film)}</button>`).join('')
-      : '<p class="px-3 py-2 text-sm text-on-surface-variant/60">İzlediklerin arasında bulunamadı.</p>';
+      : '<p class="px-3 py-2 text-sm text-on-surface-variant/60">Film bulunamadı. Başka bir adla arayabilirsin.</p>';
     $('feed-film-results')._feedFilms = films;
   } catch (_) { $('feed-film-results').innerHTML = ''; }
 }
@@ -2373,6 +2378,8 @@ async function submitPost() {
       headers: csrfHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({
         body,
+        film_id: _feedPickedFilm.film_id || _feedPickedFilm.id || null,
+        user_rating: $('feed-compose-rating').value ? Number($('feed-compose-rating').value) : null,
         film_slug: _feedPickedFilm.slug,
         tmdb_id: _feedPickedFilm.tmdb_id || null,
         film_title: _feedPickedFilm.title || '',
@@ -2382,9 +2389,12 @@ async function submitPost() {
     });
     $('feed-compose-text').value = '';
     $('feed-compose-spoiler').checked = false;
+    $('feed-compose-rating').value = '';
     $('feed-compose-count').textContent = '420';
     clearComposerFilm();
     closeComposerOnPhone();
+    _persistedProfile = null; _recentLoaded = false; _statsLoaded = false;
+    loadProfile();
     await loadFeed();
   } catch (err) {
     error.textContent = err.message || 'Not paylaşılamadı.';
@@ -4340,7 +4350,17 @@ function enterApp(account, opts = {}) {
   // New members choose their own export first. A completed onboarding never
   // replays merely because background enrichment is still running.
   if (opts.fromRegistration || !account.onboarding_completed_at) {
-    startArchiveOnboarding();
+    if (!_nativeOnboarding) _nativeOnboarding = createNativeOnboarding({
+      showView,
+      onProfile(profile) { _persistedProfile = profile; renderPersistedProfile(profile); },
+      async onComplete() {
+        const data = await apiJSON('/api/profile/onboarding-complete', { method: 'POST', headers: csrfHeaders() });
+        if (_account) _account.onboarding_completed_at = data.completed_at;
+        finishOnboarding();
+        await openFeed();
+      },
+    });
+    _nativeOnboarding.start(account);
     return;
   }
   queueEntrySync();
@@ -4807,7 +4827,7 @@ async function boot() {
     apiJSON('/api/auth/me', { cache: 'no-store' }).catch(() => null),
   ]);
   _authEnabled = Boolean(health?.auth_enabled);
-  _sandbox = Boolean(health?.sandbox);
+  _sandbox = Boolean(health?.sandbox) && !health.native_accounts;
   if (!_authEnabled) { showView('idle'); loadPublicStats(); return; }
   if (me?.account) {
     enterApp(me.account);
@@ -5692,59 +5712,25 @@ async function deleteMyData() {
 
 async function loginAccount(event) {
   event.preventDefault();
-  const button = $('btn-login');
-  button.disabled = true;
-  const clearReassurance = _loginPasswordRequired ? () => {} : _authWaitReassurance(
-    'Hesabın hazırlanıyor…', 'Profil bağlantısı gecikti, birkaç saniye daha…');
+  const button = $('btn-login'); button.disabled = true;
   try {
-    const password = $('login-password')?.value || '';
-    const data = await apiJSON(
-      _loginPasswordRequired ? '/api/auth/login' : '/api/auth/register/quick',
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          username: $('login-username').value.trim(),
-          ...(_loginPasswordRequired ? { password, remember: true } : {}),
-        }),
-      },
-    );
-    enterApp(data.account);
-    _loginPasswordRequired = false;
-    if ($('login-password')) $('login-password').value = '';
-  } catch (error) {
-    if (error.code === 'password_required') {
-      _loginPasswordRequired = true;
-      $('login-password-wrap').classList.remove('hidden');
-      $('login-password').required = true;
-      $('btn-login').textContent = t('Giriş yap');
-      setAuthMessage(t('Bu hesap parola kullanıyor. Parolanı girerek devam et.'));
-      $('login-password').focus();
-      return;
-    }
-    if (error.code === 'bio_verification_required') {
-      const username = $('login-username').value.trim();
-      setAuthMode('register');
-      $('register-username').value = username;
-      setAuthMessage(error.message);
-      $('register-password').focus();
-      return;
-    }
-    setAuthMessage(error.message || 'Giriş yapılamadı.', true);
-  } finally {
-    clearReassurance();
-    button.disabled = false;
-  }
+    const data = await apiJSON('/api/auth/login', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: $('login-username').value.trim(), password: $('login-password').value, remember: true }),
+    });
+    $('login-password').value = ''; setAuthMessage(null); enterApp(data.account);
+  } catch (error) { setAuthMessage(error.message || t('Giriş yapılamadı.'), true); }
+  finally { button.disabled = false; }
 }
 
 function resetLoginPrompt() {
-  _loginPasswordRequired = false;
+  _loginPasswordRequired = true;
   const password = $('login-password');
   if (password) {
     password.value = '';
-    password.required = false;
+    password.required = true;
   }
-  $('login-password-wrap')?.classList.add('hidden');
+  $('login-password-wrap')?.classList.remove('hidden');
   if ($('btn-login')) $('btn-login').textContent = t('Devam et');
 }
 
@@ -5774,38 +5760,19 @@ function _authWaitReassurance(startText, delayedText) {
 async function startRegistration(event) {
   event.preventDefault();
   const password = $('register-password').value;
-  const passwordConfirm = $('register-password-confirm').value;
-  if (password !== passwordConfirm) {
-    setAuthMessage(t('Parolalar eşleşmiyor.'), true);
-    return;
-  }
-  const button = $('btn-register');
-  button.disabled = true;
-  const clearReassurance = _authWaitReassurance(
-    'Doğrulama kodu hazırlanıyor…', 'Kod hazırlanıyor, birkaç saniye daha…');
+  const confirmation = $('register-password-confirm').value;
+  if (password !== confirmation) { setAuthMessage(t('Parolalar eşleşmiyor.'), true); return; }
+  const button = $('btn-register'); button.disabled = true;
+  setAuthMessage(t('Hesabın oluşturuluyor…'));
   try {
-    const data = await apiJSON('/api/auth/register/start', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        username: $('register-username').value.trim(),
-        password,
-        password_confirm: passwordConfirm,
-      }),
+    const data = await apiJSON('/api/auth/register', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: $('register-username').value.trim(), password, password_confirm: confirmation }),
     });
-    _verification = data;
-    _pendingRegPassword = password;
-    $('register-password').value = '';
-    $('register-password-confirm').value = '';
-    $('verification-code').textContent = data.verification_code;
-    setAuthMode('verify');
-    setAuthMessage(t('Kod 15 dakika geçerli. Bio’yu kaydettikten sonra kontrol et.'));
-  } catch (error) {
-    setAuthMessage(error.message || 'Hesap oluşturulamadı.', true);
-  } finally {
-    clearReassurance();
-    button.disabled = false;
-  }
+    $('register-password').value = ''; $('register-password-confirm').value = '';
+    setAuthMessage(null); enterApp(data.account, { fromRegistration: true });
+  } catch (error) { setAuthMessage(error.message || t('Hesap oluşturulamadı.'), true); }
+  finally { button.disabled = false; }
 }
 
 async function verifyRegistration() {
@@ -5928,6 +5895,7 @@ async function logoutAccount() {
   try {
     await apiJSON('/api/auth/logout', { method: 'POST', headers: csrfHeaders() });
   } catch (_) {}
+  _nativeOnboarding?.stop();
   _account = null;
   _persistedProfile = null;
   _pendingRegPassword = null;
@@ -6127,11 +6095,11 @@ function openFilmPicker(mode = 'compose') {
   _feedFilmPickerMode = mode;
   $('feed-film-search').value = '';
   $('feed-film-results').innerHTML = '';
-  $('feed-film-dialog-kicker').textContent = mode === 'filter' ? 'Topluluk notları' : 'Not yazmadan önce';
+  $('feed-film-dialog-kicker').textContent = mode === 'filter' ? 'Topluluk notları' : 'ORTAK FİLM KATALOĞU';
   $('feed-film-dialog-title').textContent = mode === 'filter' ? 'Bir filmde ara' : 'Hangi film?';
   $('feed-film-search').placeholder = mode === 'filter'
     ? 'Toplulukta notu olan filmlerde ara'
-    : 'İzlediğin filmlerde ara';
+    : 'Film adıyla ara…';
   $('dialog-feed-film').showModal();
   setTimeout(() => $('feed-film-search').focus(), 50);
 }
@@ -6170,6 +6138,9 @@ $('feed-film-results').addEventListener('click', event => {
 });
 
 function handleFeedCardClick(event) {
+  const filmButton = event.target.closest('[data-film-open]');
+  if (filmButton) { openFilmFeed(filmButton.dataset.filmOpen, filmButton.dataset.filmTitle); return; }
+
   // An author's name or avatar opens their page from wherever it was clicked.
   const author = event.target.closest('[data-post-author]');
   if (author && author.dataset.postAuthor) {
@@ -6690,3 +6661,16 @@ $('btn-blend-loading-back').addEventListener('click', () => {
 
 // ── Boot ───────────────────────────────────────────────────────────────────
 boot();
+
+function openNativeLibrary() {
+  if (!_libraryPanel) _libraryPanel = createLibraryPanel({
+    onCompose(film) { _feedPickedFilm = film; renderComposerFilm(); composeFromPencil(); },
+    onProfileChanged() { _persistedProfile = null; _recentLoaded = false; _statsLoaded = false; loadProfile(); },
+  });
+  _libraryPanel.open();
+}
+$('nav-library')?.addEventListener('click', openNativeLibrary);
+$('profile-library')?.addEventListener('click', openNativeLibrary);
+$('m-profile-library')?.addEventListener('click', openNativeLibrary);
+$('m-profile-favorites-edit')?.addEventListener('click', () => enterApp(_account, { fromRegistration: true }));
+$('profile-favorites-edit')?.addEventListener('click', () => enterApp(_account, { fromRegistration: true }));

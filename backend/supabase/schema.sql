@@ -406,7 +406,7 @@ INSERT INTO public.venues (slug, name, city, kind, source_url, config) VALUES
   ('paribu-cineverse', 'Paribu Cineverse', '', 'repertory',
    'https://www.paribucineverse.com/vizyondakiler',
    '{"strategy":"attr","item_selector":"div.movie-list-banner-item",
-     "title_attr":"data-movie-title","link_selector":"a[href*=\'-filmi-izle\']","limit":60,
+     "title_attr":"data-movie-title","link_selector":"a[href*=''-filmi-izle'']","limit":60,
      "robots":{"checked":"2026-09-04","allowed":true,
                "note":"Allow: / ; only /biletleme/ is disallowed and we never fetch it."}}'::jsonb),
   ('baska-sinema', 'Başka Sinema', '', 'repertory',
@@ -776,6 +776,15 @@ REVOKE ALL ON TABLE public.user_activity_events FROM anon, authenticated;
 REVOKE ALL ON SEQUENCE public.user_activity_events_id_seq FROM anon, authenticated;
 GRANT ALL ON TABLE public.user_activity_events TO service_role;
 GRANT USAGE, SELECT ON SEQUENCE public.user_activity_events_id_seq TO service_role;
+
+-- TMDb API önbelleği: SQLite'ın üretim ortamındaki yedeği.
+CREATE TABLE IF NOT EXISTS public.tmdb_cache (
+  namespace   TEXT         NOT NULL,
+  key         TEXT         NOT NULL,
+  value       JSONB        NOT NULL,
+  created_at  TIMESTAMPTZ  DEFAULT now(),
+  PRIMARY KEY (namespace, key)
+);
 
 -- One call for the local admin report. It returns aggregates only; raw film
 -- rows, passwords, tokens and event metadata are never exposed by the report.
@@ -1797,15 +1806,6 @@ DROP TRIGGER IF EXISTS trg_posts_reply_counter ON public.posts;
 CREATE TRIGGER trg_posts_reply_counter
   AFTER INSERT OR UPDATE OF deleted_at OR DELETE ON public.posts
   FOR EACH ROW EXECUTE FUNCTION public.posts_reply_counter();
-
--- TMDb API önbelleği: SQLite'ın üretim ortamındaki yedeği.
-CREATE TABLE IF NOT EXISTS public.tmdb_cache (
-  namespace   TEXT         NOT NULL,
-  key         TEXT         NOT NULL,
-  value       JSONB        NOT NULL,
-  created_at  TIMESTAMPTZ  DEFAULT now(),
-  PRIMARY KEY (namespace, key)
-);
 
 -- Row Level Security — backend yalnızca service_role secret ile bağlanır.
 -- anon/authenticated rolleri browser veya ele geçirilmiş public key üzerinden bu

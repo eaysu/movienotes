@@ -1,0 +1,10 @@
+version: 1
+name: openai-taste
+slug: openai-taste
+protocol: http
+origin: api.openai.com
+interceptRequests: true
+scenarios:
+  - name: default
+    path: ./default.js
+    default: true
