@@ -1,6 +1,6 @@
-import { createNativeOnboarding } from './onboarding.js?v=20261116.2';
-import { createLibraryPanel } from './library.js?v=20261116.2';
-import { $, escapeHTML, safeImageURL, letterboxdFilmURL } from './dom.js?v=20261116.2';
+import { createNativeOnboarding } from './onboarding.js?v=20261117.3';
+import { createLibraryPanel } from './library.js?v=20261117.3';
+import { $, escapeHTML, safeImageURL, letterboxdFilmURL } from './dom.js?v=20261117.3';
 import {
   API_BASE,
   apiJSON,
@@ -10,24 +10,24 @@ import {
   finishApiRequest,
   scrapeErrorMessage,
   streamErrorMessage,
-} from './api.js?v=20261116.2';
+} from './api.js?v=20261117.3';
 import {
   cookieValue,
   csrfHeaders,
   setAuthMessage,
   setAuthMode,
   setPasswordVisibility,
-} from './auth.js?v=20261116.2';
-import { directorAvatar, directorFilmGrid, directorFilmTile } from './profile.js?v=20261116.2';
+} from './auth.js?v=20261117.3';
+import { directorAvatar, directorFilmGrid, directorFilmTile } from './profile.js?v=20261117.3';
 import { animateScore, getScoreInfo } from './blend.js?v=20260902.15';
-import { createRecommendationCards } from './recommendations.js?v=20261116.2';
+import { createRecommendationCards } from './recommendations.js?v=20261117.3';
 import {
   getLocale,
   initI18n,
   localePreference,
   setLocalePreference,
   t,
-} from './i18n.js?v=20261116.2';
+} from './i18n.js?v=20261117.3';
 
 initI18n();
 
@@ -36,7 +36,7 @@ const uiLocale = () => (getLocale() === 'en' ? 'en-US' : 'tr-TR');
 let _shareCardsModule;
 function loadShareCardsModule() {
   if (!_shareCardsModule) {
-    _shareCardsModule = import('./share-cards.js?v=20261116.2');
+    _shareCardsModule = import('./share-cards.js?v=20261117.3');
   }
   return _shareCardsModule;
 }

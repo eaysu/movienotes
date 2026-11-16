@@ -1,8 +1,8 @@
-import { $, escapeHTML, safeImageURL } from './dom.js?v=20261116.2';
-import { apiJSON } from './api.js?v=20261116.2';
-import { csrfHeaders } from './auth.js?v=20261116.2';
-import { t } from './i18n.js?v=20261116.2';
-import { runLetterboxdImport } from './import-progress.js?v=20261116.2';
+import { $, escapeHTML, safeImageURL } from './dom.js?v=20261117.3';
+import { apiJSON } from './api.js?v=20261117.3';
+import { csrfHeaders } from './auth.js?v=20261117.3';
+import { t } from './i18n.js?v=20261117.3';
+import { runLetterboxdImport } from './import-progress.js?v=20261117.3';
 
 const icon = (name) => `<span class="material-symbols-outlined" aria-hidden="true">${name}</span>`;
 const poster = film => safeImageURL(film.poster_url)
@@ -65,7 +65,7 @@ export function createNativeOnboarding({ showView, onProfile, onComplete }) {
   }
   function pick() {
     buttons(); phase = 'pick';
-    stage.innerHTML = `<section class="native-onboard native-in"><div class="native-eyebrow"><span class="native-live-dot"></span>${t('SENİN SİNEMA DÜNYAN')}</div><h1>${t('Seni anlatan')}<br/><em>${t('dört film.')}</em></h1><p class="native-lede">${t('Kusursuz bir liste aramıyoruz. Sende iz bırakan dört filmi seç; hikâyen buradan başlasın.')}</p><div class="native-selection-head"><span>${t('FAVORİ DÖRTLÜN')}</span><strong id="native-fav-count">${selected.length} / 4</strong></div><div id="native-fav-slots" class="native-fav-slots">${slots()}</div><label class="native-search-label" for="native-film-search">${t('Bir film bul')}</label><div class="native-search-box">${icon('search')}<input id="native-film-search" type="search" placeholder="${t('Film adıyla ara…')}" autocomplete="off" maxlength="120"/></div><p id="native-search-status" class="native-status" role="status" aria-live="polite"></p><div id="native-film-results" class="native-film-results" aria-label="${t('Film sonuçları')}"></div><p id="native-onboard-error" class="native-error" role="alert"></p><button id="native-favorites-save" type="button" class="native-primary" ${selected.length !== 4 ? 'disabled' : ''}>${t('Sinema profilimi oluştur')}${icon('arrow_forward')}</button><details class="native-import"><summary>${icon('inventory_2')}<span>${t('Letterboxd arşivin mi var?')}</span>${icon('expand_more')}</summary><p>${t('ZIP dosyanı getir; filmlerin, puanların ve yorumların özel arşivine aktarılsın. Dört favorini yine burada seçebilirsin.')}</p><a href="https://letterboxd.com/user/exportdata/" target="_blank" rel="noopener noreferrer">${t('Letterboxd’dan arşivimi indir')}${icon('open_in_new')}</a><label class="native-import-upload" for="native-archive">${icon('upload_file')}${t('ZIP dosyası seç')}<input id="native-archive" type="file" accept=".zip,application/zip"/></label><p id="native-import-status" role="status">${escapeHTML(imported)}</p></details></section>`;
+    stage.innerHTML = `<section class="native-onboard native-in"><h1>${t('Seni anlatan')}<br/><em>${t('dört film.')}</em></h1><p class="native-lede">${t('Kusursuz bir liste aramıyoruz. Sende iz bırakan dört filmi seç; hikâyen buradan başlasın.')}</p><section class="native-import-card" aria-labelledby="native-import-title"><div class="native-import-card-head"><span class="native-import-card-icon">${icon('inventory_2')}</span><div><h2 id="native-import-title">${t('Letterboxd arşivin mi var?')}</h2><p>${t('ZIP dosyanı getir; filmlerin, puanların ve yorumların özel arşivine aktarılsın. Dört favorini yine burada seçebilirsin.')}</p></div></div><div class="native-import-card-actions"><label class="native-import-pick" for="native-archive">${icon('upload_file')}${t('ZIP dosyası seç')}<input id="native-archive" type="file" accept=".zip,application/zip"/></label><a href="https://letterboxd.com/user/exportdata/" target="_blank" rel="noopener noreferrer">${t('Letterboxd’dan arşivimi indir')}${icon('open_in_new')}</a></div><p id="native-import-status" role="status">${escapeHTML(imported)}</p></section><div class="native-or"><span>${t('ya da dört favorini seç')}</span></div><div class="native-selection-head"><span>${t('FAVORİ DÖRTLÜN')}</span><strong id="native-fav-count">${selected.length} / 4</strong></div><div id="native-fav-slots" class="native-fav-slots">${slots()}</div><label class="native-search-label" for="native-film-search">${t('Bir film bul')}</label><div class="native-search-box">${icon('search')}<input id="native-film-search" type="search" placeholder="${t('Film adıyla ara…')}" autocomplete="off" maxlength="120"/></div><p id="native-search-status" class="native-status" role="status" aria-live="polite"></p><div id="native-film-results" class="native-film-results" aria-label="${t('Film sonuçları')}"></div><p id="native-onboard-error" class="native-error" role="alert"></p><button id="native-favorites-save" type="button" class="native-primary" ${selected.length !== 4 ? 'disabled' : ''}>${t('Sinema profilimi oluştur')}${icon('arrow_forward')}</button></section>`;
     $('native-film-search').addEventListener('input', event => { clearTimeout(timer); timer = setTimeout(() => search(event.target.value.trim()), 280); });
     $('native-favorites-save').addEventListener('click', save);
     $('native-archive').addEventListener('change', event => upload(event.target.files?.[0]));
@@ -78,7 +78,7 @@ export function createNativeOnboarding({ showView, onProfile, onComplete }) {
     $('native-archive').disabled = true; status.textContent = t('Arşivin alınıyor…');
     try {
       const data = await runLetterboxdImport(file);
-      imported = t('{films} film, {ratings} puan ve {reviews} yorum alındı. Eşleştirmeler arka planda tamamlanıyor.', { films: data.watched_count, ratings: data.import?.counts?.ratings || 0, reviews: data.review_count });
+      imported = t('{films} film, {ratings} puan ve {reviews} yorum arşivine aktarıldı.', { films: data.watched_count, ratings: data.import?.counts?.ratings || 0, reviews: data.review_count });
       if (status.isConnected) status.textContent = imported;
     } catch (err) { if (status.isConnected) status.textContent = err.message; }
     finally { if ($('native-archive')) $('native-archive').disabled = false; }

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import logging
 from datetime import datetime, timedelta, timezone
 from uuid import NAMESPACE_URL, uuid5
 
@@ -15,6 +16,7 @@ from .taste_profile import build_taste_profile, personality_from_favorites
 from .scraper import ScrapedProfile
 from .llm import analyze_taste
 
+log = logging.getLogger(__name__)
 _import_tasks: dict[str, asyncio.Task] = {}
 # Distinct films matched at once. Each one is a handful of Supabase round trips
 # and two TMDb requests; TMDb's own semaphore still bounds the provider load.
@@ -807,19 +809,21 @@ class Library:
                 async def handle(key, group):
                     nonlocal retry
                     async with gate:
-                        film = matched_cache.get(key)
-                        if film is None:
-                            try:
+                        try:
+                            film = matched_cache.get(key)
+                            if film is None:
                                 film = await self._resolve(
                                     account, group[0]["data"], matched_cache, recent
                                 )
-                            except (RuntimeError, httpx.HTTPError):
-                                # Leave only this film pending; the rest of the
-                                # archive keeps moving and the job retries it.
-                                retry = True
-                                return []
-                            matched_cache[key] = film
-                        return await self._apply(account, group, film)
+                                matched_cache[key] = film
+                            return await self._apply(account, group, film)
+                        except (RuntimeError, httpx.HTTPError):
+                            # A TMDb or Supabase hiccup leaves only this film
+                            # pending; the archive keeps moving and the job
+                            # retries it a minute later.
+                            log.warning("import film retry key=%s", key, exc_info=True)
+                            retry = True
+                            return []
 
                 chunks = await asyncio.gather(
                     *(handle(key, group) for key, group in groups.items())
@@ -863,6 +867,7 @@ class Library:
             )
             raise
         except Exception as exc:
+            log.warning("library import failed job=%s", job["id"], exc_info=True)
             job["state"] = "failed"
             await asyncio.to_thread(
                 self.patch_job,
@@ -870,7 +875,7 @@ class Library:
                 state="failed",
                 counts=counts,
                 last_error=type(exc).__name__,
-                lease_until=lease(),
+                lease_until=lease(1),
             )
 
     def start_import(self, account, job):

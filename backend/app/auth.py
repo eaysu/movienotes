@@ -259,23 +259,22 @@ class AuthService:
         self.settings = settings
         self._client_factory = client_factory
         # Service-role requests do not carry a user's mutable auth session, so
-        # the underlying HTTP connection pool can safely be reused. Auth clients
-        # remain per-operation below to avoid sharing session state across users.
-        self._service_client_instance = None
-        self._service_client_ready = False
-        self._service_client_lock = threading.Lock()
+        # a client is reused, but once per worker thread: supabase-py talks
+        # HTTP/2, and one multiplexed connection driven from several threads
+        # fails with httpx.RemoteProtocolError (seen during concurrent ZIP
+        # imports). Auth clients remain per-operation below to avoid sharing
+        # session state across users.
+        self._service_clients = threading.local()
         self._activity_disabled_until = 0.0
 
     def _service_client(self):
-        if self._service_client_ready:
-            return self._service_client_instance
-        with self._service_client_lock:
-            if not self._service_client_ready:
-                self._service_client_instance = self._client_factory(
-                    self.settings.supabase_url, self.settings.supabase_key
-                )
-                self._service_client_ready = True
-        return self._service_client_instance
+        client = getattr(self._service_clients, "client", None)
+        if client is None:
+            client = self._client_factory(
+                self.settings.supabase_url, self.settings.supabase_key
+            )
+            self._service_clients.client = client
+        return client
 
     def _auth_client(self):
         return self._client_factory(

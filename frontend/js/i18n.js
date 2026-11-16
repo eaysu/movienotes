@@ -5,6 +5,9 @@ const SUPPORTED = new Set(['tr', 'en']);
 // document prevents the two shells from drifting; this dictionary translates
 // both server-rendered nodes and nodes created later by the app.
 const EN = Object.freeze({
+  '{films} film, {ratings} puan ve {reviews} yorum arşivine aktarıldı.': 'Imported {films} films, {ratings} ratings and {reviews} reviews into your archive.',
+  'ya da dört favorini seç': 'or pick your four favourites',
+  'Filmlerin rafına yerleşiyor; bu ekran aktarım bitince kapanabilir.': 'Your films are settling onto your shelf; you can close this screen once the import is done.',
   'ARŞİV AKTARIMI': 'ARCHIVE IMPORT',
   'Arşivin yükleniyor…': 'Uploading your archive…',
   'Filmlerin hazırlanıyor': 'Preparing your films',

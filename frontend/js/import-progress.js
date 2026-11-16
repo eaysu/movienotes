@@ -1,7 +1,7 @@
-import { escapeHTML, safeImageURL } from './dom.js?v=20261116.2';
-import { apiJSON } from './api.js?v=20261116.2';
-import { csrfHeaders } from './auth.js?v=20261116.2';
-import { t } from './i18n.js?v=20261116.2';
+import { escapeHTML, safeImageURL } from './dom.js?v=20261117.3';
+import { apiJSON } from './api.js?v=20261117.3';
+import { csrfHeaders } from './auth.js?v=20261117.3';
+import { t } from './i18n.js?v=20261117.3';
 
 // Full-screen progress for a Letterboxd ZIP import. The upload returns at once
 // and matching continues on the server; this screen polls the job, shows the
@@ -16,7 +16,6 @@ export function runLetterboxdImport(file, { onDone } = {}) {
   root.className = 'import-progress';
   root.setAttribute('aria-labelledby', 'import-progress-title');
   root.innerHTML = `<div class="import-progress-card import-in">
-    <div class="native-eyebrow"><span class="native-live-dot"></span>${t('ARŞİV AKTARIMI')}</div>
     <h2 id="import-progress-title" class="import-progress-title">${t('Arşivin yükleniyor…')}</h2>
     <div class="import-stage" aria-hidden="true">
       <div class="import-poster import-poster-back is-left"></div>
@@ -28,14 +27,15 @@ export function runLetterboxdImport(file, { onDone } = {}) {
     <div class="import-meta"><span class="import-percent"></span><span class="import-eta"></span></div>
     <div class="import-stats"></div>
     <p class="import-note" role="status"></p>
-    <button type="button" class="native-primary import-close">${t('Arka planda devam etsin')}${icon('arrow_forward')}</button>
+    <button type="button" class="native-primary import-close" hidden>${t('Harika, kapat')}${icon('check')}</button>
   </div>`;
   document.body.appendChild(root);
   root.showModal();
   document.body.classList.add('import-progress-open');
   const q = selector => root.querySelector(selector);
+  // The screen stays until the import ends: the member is not sent anywhere
+  // else while the archive is still being matched.
   const closeButton = q('.import-close');
-  closeButton.focus();
 
   let timer = 0, rotation = 0, recent = [], shown = -1, closed = false, finished = false, samples = [];
 
@@ -46,7 +46,11 @@ export function runLetterboxdImport(file, { onDone } = {}) {
     document.body.classList.remove('import-progress-open');
     setTimeout(() => { root.close(); root.remove(); }, 240);
   }
-  root.addEventListener('cancel', event => { event.preventDefault(); close(); });
+  // Chrome honours a prevented `cancel` only once per user activation, so the
+  // Escape key is stopped first and an unexpected close reopens the dialog.
+  root.addEventListener('keydown', event => { if (event.key === 'Escape') { event.preventDefault(); if (!closeButton.hidden) close(); } });
+  root.addEventListener('cancel', event => { event.preventDefault(); if (!closeButton.hidden) close(); });
+  root.addEventListener('close', () => { if (!closed && root.isConnected) root.showModal(); });
   closeButton.addEventListener('click', close);
 
   function poster(film) {
@@ -103,13 +107,13 @@ export function runLetterboxdImport(file, { onDone } = {}) {
       title.textContent = t('Aktarım tamamlandı');
       root.classList.add('is-done');
       note.textContent = counts.unresolved ? t('{count} filmin eşleşmesini Filmlerim → Arşiv aktarımı bölümünden seçebilirsin.', { count: counts.unresolved }) : t('Bütün filmlerin rafında.');
-      closeButton.innerHTML = `${t('Harika, kapat')}${icon('check')}`;
+      closeButton.hidden = false; closeButton.focus();
     } else if (job?.state === 'failed') {
       title.textContent = t('Filmlerin eşleştiriliyor');
       note.textContent = t('Film servisi kısa bir süre yanıt vermedi. Aktarım kaldığı yerden kendiliğinden devam edecek.');
     } else {
       title.textContent = t(job?.state === 'running' ? 'Filmlerin eşleştiriliyor' : 'Aktarım sırada');
-      note.textContent = t('Bu ekranı kapatabilirsin; aktarım arka planda sürer.');
+      note.textContent = t('Filmlerin rafına yerleşiyor; bu ekran aktarım bitince kapanabilir.');
     }
   }
   async function poll(jobId, upload) {
@@ -135,7 +139,7 @@ export function runLetterboxdImport(file, { onDone } = {}) {
       q('.import-bar').classList.remove('is-indeterminate');
       root.classList.add('is-error');
       q('.import-note').textContent = err.message;
-      closeButton.textContent = t('Kapat');
+      closeButton.textContent = t('Kapat'); closeButton.hidden = false; closeButton.focus();
       throw err;
     }
   })();

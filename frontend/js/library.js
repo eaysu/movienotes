@@ -1,8 +1,8 @@
-import { $, escapeHTML, safeImageURL } from './dom.js?v=20261116.2';
-import { apiJSON } from './api.js?v=20261116.2';
-import { csrfHeaders } from './auth.js?v=20261116.2';
-import { t } from './i18n.js?v=20261116.2';
-import { runLetterboxdImport } from './import-progress.js?v=20261116.2';
+import { $, escapeHTML, safeImageURL } from './dom.js?v=20261117.3';
+import { apiJSON } from './api.js?v=20261117.3';
+import { csrfHeaders } from './auth.js?v=20261117.3';
+import { t } from './i18n.js?v=20261117.3';
+import { runLetterboxdImport } from './import-progress.js?v=20261117.3';
 
 export function createLibraryPanel({ onCompose, onProfileChanged }) {
   let scope = 'watched', films = [], page = 1, timer, polling, epoch = 0, matching = null;

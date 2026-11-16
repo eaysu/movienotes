@@ -1422,3 +1422,21 @@ def test_every_screen_shares_one_top_bar():
         assert row.rsplit("<div", 1)[1].startswith(' class="page-topbar'), back
     # And "Ana sayfa" is gone: home is the feed now.
     assert "Ana sayfa" not in html
+
+
+def test_each_worker_thread_gets_its_own_service_client():
+    """supabase-py multiplexes HTTP/2; sharing one client across worker threads
+    broke concurrent ZIP imports with httpx.RemoteProtocolError."""
+    import threading
+
+    from app.auth import AuthService
+
+    made = []
+    settings = SimpleNamespace(supabase_url="http://db", supabase_key="service", has_auth=True)
+    service = AuthService(settings, client_factory=lambda *_: made.append(object()) or made[-1])
+    first = service._service_client()
+    assert service._service_client() is first
+    other = []
+    worker = threading.Thread(target=lambda: other.append(service._service_client()))
+    worker.start(); worker.join()
+    assert other[0] is not first and len(made) == 2
