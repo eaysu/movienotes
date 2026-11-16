@@ -1,7 +1,8 @@
-import { $, escapeHTML, safeImageURL } from './dom.js?v=20261116.1';
-import { apiJSON } from './api.js?v=20261116.1';
-import { csrfHeaders } from './auth.js?v=20261116.1';
-import { t } from './i18n.js?v=20261116.1';
+import { $, escapeHTML, safeImageURL } from './dom.js?v=20261116.2';
+import { apiJSON } from './api.js?v=20261116.2';
+import { csrfHeaders } from './auth.js?v=20261116.2';
+import { t } from './i18n.js?v=20261116.2';
+import { runLetterboxdImport } from './import-progress.js?v=20261116.2';
 
 const icon = (name) => `<span class="material-symbols-outlined" aria-hidden="true">${name}</span>`;
 const poster = film => safeImageURL(film.poster_url)
@@ -76,7 +77,7 @@ export function createNativeOnboarding({ showView, onProfile, onComplete }) {
     if (file.size > 16 * 1024 * 1024 || !/\.zip$/i.test(file.name)) { status.textContent = t('Lütfen 16 MB altında bir Letterboxd ZIP dosyası seç.'); return; }
     $('native-archive').disabled = true; status.textContent = t('Arşivin alınıyor…');
     try {
-      const data = await apiJSON('/api/profile/import-letterboxd', { method: 'POST', headers: csrfHeaders({ 'Content-Type': 'application/zip' }), body: file });
+      const data = await runLetterboxdImport(file);
       imported = t('{films} film, {ratings} puan ve {reviews} yorum alındı. Eşleştirmeler arka planda tamamlanıyor.', { films: data.watched_count, ratings: data.import?.counts?.ratings || 0, reviews: data.review_count });
       if (status.isConnected) status.textContent = imported;
     } catch (err) { if (status.isConnected) status.textContent = err.message; }

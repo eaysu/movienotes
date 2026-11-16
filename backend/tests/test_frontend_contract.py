@@ -1444,10 +1444,10 @@ def test_shell_asset_content_changes_force_a_version_bump():
     files that no longer existed.
     """
     expected = {
-        "js/app.js": "ed2db0797b84d2a9ff7898e4715f883edf2dd3f59aada930d2da33781e496d2f",
-        "app.css": "69b77f9bf53fed9e859d5d1e9253641217178956143d0b183992718c6b08150d",
-        "js/share-cards.js": "2ba73cf2638ed315daff9c94d9a8e5be513f3c7d32d238db913f09730d8d172d",
-        "js/i18n.js": "84e7b3cca7e507f161cdad3dcfeb6ad1c29b1b1c958d61517f415fbf57bf52c1",
+        "js/app.js": "75dfcb910674564cddbb6e34e04b177ed4e5272148713b5c14a1db2fcb08edef",
+        "app.css": "9befae9b607074448f69c08dca1364094c89759a62a512a0eb48d432878c7074",
+        "js/share-cards.js": "cf5461dbac05eaac836d5a748816cffc4f16c1d1e913b59b0054a623a908f8e1",
+        "js/i18n.js": "afd688b86578f7ae617f64d3158a5c9aa18cc62e9378b62160a4367034314809",
         "site.webmanifest": "7a7de349179ed9f226d38632dfde5a8478edd10305972ea52641b0dc6aa7f405",
         "movienotes-mark.png": "850aa9117aa52768952843f8e2c410c0c17868877d81b2058274290373b4ee1e",
         "movienotes-icon-192.png": "3b04c52ffd23799ce424f1acefd0a1d7c386b8c968b09be9bd5c87b623c6ac12",
@@ -1483,25 +1483,25 @@ def test_every_app_shell_asset_has_an_explicit_immutable_version():
     source_css = (FRONTEND / "css" / "source.css").read_text()
 
     dependency_version = "v=20260902.15"
-    dom_version = "v=20261116.1"
-    api_version = "v=20261116.1"
-    css_version = "v=20261116.1"
+    dom_version = "v=20261116.2"
+    api_version = "v=20261116.2"
+    css_version = "v=20261116.2"
     assert f"/static/app.css?{css_version}" in html
-    assert "/static/js/app.js?v=20261116.1" in html
-    assert "./i18n.js?v=20261116.1" in app_js
+    assert "/static/js/app.js?v=20261116.2" in html
+    assert "./i18n.js?v=20261116.2" in app_js
     assert app_js.count(f"?{dependency_version}") == 1
     assert f"./api.js?{api_version}" in app_js
-    assert "./recommendations.js?v=20261116.1" in app_js
-    assert "./share-cards.js?v=20261116.1" in app_js
-    assert "./auth.js?v=20261116.1" in app_js
+    assert "./recommendations.js?v=20261116.2" in app_js
+    assert "./share-cards.js?v=20261116.2" in app_js
+    assert "./auth.js?v=20261116.2" in app_js
     assert f"./dom.js?{dom_version}" in auth_js
-    assert "./i18n.js?v=20261116.1" in auth_js
+    assert "./i18n.js?v=20261116.2" in auth_js
     assert f"./dom.js?{dom_version}" in profile_js
-    assert "./i18n.js?v=20261116.1" in profile_js
+    assert "./i18n.js?v=20261116.2" in profile_js
     assert f"./dom.js?{dom_version}" in recommendations_js
-    assert "./i18n.js?v=20261116.1" in recommendations_js
+    assert "./i18n.js?v=20261116.2" in recommendations_js
     assert f"./api.js?{api_version}" in share_js
-    assert "./i18n.js?v=20261116.1" in share_js
+    assert "./i18n.js?v=20261116.2" in share_js
     assert f"criterion-closet-bg.jpg?{dependency_version}" in source_css
 
 
@@ -1571,7 +1571,7 @@ def test_png_share_renderer_is_lazy_loaded_on_first_share_action():
 
     imports = app_js.split("// ── Cinema facts", 1)[0]
     assert "from './share-cards.js" not in imports
-    assert "import('./share-cards.js?v=20261116.1')" in imports
+    assert "import('./share-cards.js?v=20261116.2')" in imports
     assert "const shareCards = await loadShareCardsModule();" in app_js
 
 
@@ -1649,7 +1649,10 @@ def test_new_member_can_import_letterboxd_zip_before_any_scrape():
     assert "_nativeOnboarding.start(account)" in enter
     assert "startOnboarding();" not in enter
     assert "https://letterboxd.com/user/exportdata/" in onboarding
-    assert "'/api/profile/import-letterboxd'" in onboarding
+    assert "runLetterboxdImport(file)" in onboarding
+    progress = (FRONTEND / "js" / "import-progress.js").read_text()
+    assert "'/api/profile/import-letterboxd'" in progress
+    assert "'/api/library/imports?progress=true'" in progress
     assert "'/api/profile/favorites'" in onboarding
     assert "herkese açık profilimi tara" not in onboarding
     assert "mb_onboarded:" not in app_js

@@ -885,3 +885,48 @@
 #library-tabs button{font-size:11px;padding:8px 12px;border:1px solid #9dada530;border-radius:20px}#library-tabs .is-active{color:#00e054;background:#00e05412;border-color:#00e05455}.library-film{display:flex;gap:14px;border-bottom:1px solid #9dada520;padding:16px 0}.library-film-poster{width:58px;min-width:58px;aspect-ratio:2/3;border-radius:6px;background:#718b7d15;overflow:hidden;display:flex;align-items:center;justify-content:center}.library-film-poster img{width:100%;height:100%;object-fit:cover}.library-film-info{min-width:0}.library-film-info>strong{display:block;font-size:13px;font-weight:500}.library-film-info>small{display:block;margin-top:4px;font-size:10px;opacity:.5}.library-film-actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:13px}.library-film-actions button,.library-match-row button{font-size:10px;padding:6px 9px;border:1px solid #9dada530;border-radius:20px}.library-film-actions button:first-child,.library-match-row button{color:#00e054;border-color:#00e05440}.library-film-actions button[aria-pressed=true]{background:#00e05418}.library-import-job{padding:14px;margin-top:12px;border:1px solid #9dada525;border-radius:12px;font-size:12px}.library-import-job p{margin:7px 0;opacity:.7}.library-import-job small{opacity:.5}.library-match-row{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid #9dada520;font-size:11px}
 .native-primary{font-family:'Space Grotesk','Geist',sans-serif;letter-spacing:.01em}
 .native-primary.hidden,.native-back.hidden{display:none}
+/* ZIP import progress: a cinema-dark overlay in both themes. */
+body.import-progress-open{overflow:hidden}
+.import-progress{position:fixed;inset:0;width:100%;height:100%;max-width:none;max-height:none;margin:0;border:0;z-index:90;display:none;align-items:center;justify-content:center;padding:16px;background:radial-gradient(120% 80% at 50% 0%,#0b2a18e6,#05080ae8 60%);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);color:#e0e2e6;animation:import-fade .25s ease both}
+.import-progress[open]{display:flex}.import-progress::backdrop{background:transparent}
+.import-progress.is-leaving{animation:import-fade .25s ease reverse both}
+@keyframes import-fade{from{opacity:0}to{opacity:1}}
+.import-progress-card{width:100%;max-width:440px;max-height:100%;overflow:auto;padding:28px 24px 22px;border:1px solid #9dada525;border-radius:22px;background:#0f1513f2;box-shadow:0 30px 80px #000a;text-align:center}
+.import-in{animation:native-enter .4s ease both}
+.import-progress .native-eyebrow{justify-content:center;font-size:9px;letter-spacing:.18em;opacity:.8}
+.import-progress-title{margin:14px 0 4px;font-size:clamp(24px,6vw,30px);line-height:1.15;letter-spacing:-.04em;font-weight:600}
+.import-stage{position:relative;height:210px;margin:22px auto 6px;perspective:900px}
+.import-poster{position:absolute;top:0;left:50%;width:128px;aspect-ratio:2/3;border-radius:12px;overflow:hidden;background:linear-gradient(135deg,#18221d,#0b100e);border:1px solid #9dada520;box-shadow:0 18px 40px #000b}
+.import-poster img{width:100%;height:100%;object-fit:cover;display:block}
+.import-poster-front{z-index:2;transform:translateX(-50%);animation:import-float 4s ease-in-out infinite}
+.import-poster-front.is-swapping{animation:import-swap .6s cubic-bezier(.2,.8,.2,1) both,import-float 4s ease-in-out .6s infinite}
+.import-poster-back{width:104px;top:22px;opacity:.45;filter:saturate(.6) blur(.4px)}
+.import-poster-back.is-left{transform:translateX(-128%) rotate(-9deg)}
+.import-poster-back.is-right{transform:translateX(28%) rotate(9deg)}
+@keyframes import-float{0%,100%{transform:translateX(-50%) translateY(0)}50%{transform:translateX(-50%) translateY(-6px)}}
+@keyframes import-swap{from{opacity:0;transform:translateX(-50%) translateY(14px) rotateY(-35deg) scale(.94)}to{opacity:1;transform:translateX(-50%) translateY(0) rotateY(0) scale(1)}}
+.import-reel{display:flex;width:100%;height:100%;align-items:center;justify-content:center;color:#00e054;background:linear-gradient(110deg,#ffffff00 30%,#00e05414 50%,#ffffff00 70%) 0 0/250% 100%;animation:import-shimmer 1.6s linear infinite}
+.import-reel .material-symbols-outlined{font-size:34px;animation:spin 3s linear infinite}
+@keyframes import-shimmer{to{background-position:-250% 0}}
+.import-caption{min-height:44px;margin:4px 0 18px}
+.import-caption strong{display:block;font-size:15px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.import-caption small{display:block;margin-top:4px;font-size:11px;opacity:.55}
+.import-bar{position:relative;height:8px;border-radius:99px;background:#9dada51f;overflow:hidden}
+.import-bar>span{position:absolute;inset:0 auto 0 0;width:2%;border-radius:inherit;background:linear-gradient(90deg,#00a83f,#00e054 60%,#7dffaa);transition:width .8s cubic-bezier(.2,.8,.2,1)}
+.import-bar>span::after{content:"";position:absolute;inset:0;background:linear-gradient(90deg,#fff0,#fff6,#fff0);transform:translateX(-100%);animation:import-glint 1.8s ease-in-out infinite}
+.import-bar.is-indeterminate>span{width:35%;animation:import-slide 1.3s ease-in-out infinite}
+@keyframes import-glint{to{transform:translateX(100%)}}
+@keyframes import-slide{from{left:-35%}to{left:100%}}
+.import-meta{display:flex;justify-content:space-between;gap:12px;margin-top:9px;font-size:11px;opacity:.65;min-height:16px;font-variant-numeric:tabular-nums}
+.import-stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin:20px 0 4px}
+.import-stats>span{display:flex;flex-direction:column;align-items:center;gap:3px;padding:10px 4px;border:1px solid #9dada51f;border-radius:12px;background:#7a90800a;font-size:9px;opacity:.85}
+.import-stats .material-symbols-outlined{font-size:17px;color:#00e054}
+.import-stats strong{font-size:15px;font-weight:600;font-variant-numeric:tabular-nums}
+.import-note{min-height:18px;margin-top:14px;font-size:11px;line-height:1.6;opacity:.65}
+.import-progress.is-done .import-bar>span{background:#00e054}
+.import-progress.is-done .import-bar>span::after,.import-progress.is-done .import-poster-front{animation:none}
+.import-progress.is-done .native-live-dot{animation:none}
+.import-progress.is-error .import-bar>span{width:100%;background:#ffb4ab}
+.import-progress.is-error .import-note{color:#ffb4ab;opacity:1}
+@media(max-width:400px){.import-progress-card{padding:22px 16px 18px}.import-stage{height:180px}.import-poster{width:110px}.import-poster-back{width:88px}.import-stats>span{font-size:8px}}
+@media(prefers-reduced-motion:reduce){.import-progress,.import-in,.import-poster-front,.import-poster-front.is-swapping,.import-reel,.import-reel .material-symbols-outlined,.import-bar>span::after,.import-bar.is-indeterminate>span{animation:none}.import-bar>span{transition:none}}

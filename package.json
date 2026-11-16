@@ -3,7 +3,7 @@
   "private": true,
   "scripts": {
     "build:css": "tailwindcss -c tailwind.config.cjs -i ./frontend/css/source.css -o ./frontend/app.css --minify",
-    "check:js": "node --check frontend/js/api.js && node --check frontend/js/app.js && node --check frontend/js/auth.js && node --check frontend/js/blend.js && node --check frontend/js/dom.js && node --check frontend/js/i18n.js && node --check frontend/js/library.js && node --check frontend/js/onboarding.js && node --check frontend/js/profile.js && node --check frontend/js/recommendations.js && node --check frontend/js/share-cards.js"
+    "check:js": "node --check frontend/js/api.js && node --check frontend/js/app.js && node --check frontend/js/auth.js && node --check frontend/js/blend.js && node --check frontend/js/dom.js && node --check frontend/js/i18n.js && node --check frontend/js/import-progress.js && node --check frontend/js/library.js && node --check frontend/js/onboarding.js && node --check frontend/js/profile.js && node --check frontend/js/recommendations.js && node --check frontend/js/share-cards.js"
   },
   "devDependencies": {
     "tailwindcss": "3.4.17"

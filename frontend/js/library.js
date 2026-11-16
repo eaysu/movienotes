@@ -1,7 +1,8 @@
-import { $, escapeHTML, safeImageURL } from './dom.js?v=20261116.1';
-import { apiJSON } from './api.js?v=20261116.1';
-import { csrfHeaders } from './auth.js?v=20261116.1';
-import { t } from './i18n.js?v=20261116.1';
+import { $, escapeHTML, safeImageURL } from './dom.js?v=20261116.2';
+import { apiJSON } from './api.js?v=20261116.2';
+import { csrfHeaders } from './auth.js?v=20261116.2';
+import { t } from './i18n.js?v=20261116.2';
+import { runLetterboxdImport } from './import-progress.js?v=20261116.2';
 
 export function createLibraryPanel({ onCompose, onProfileChanged }) {
   let scope = 'watched', films = [], page = 1, timer, polling, epoch = 0, matching = null;
@@ -56,9 +57,9 @@ export function createLibraryPanel({ onCompose, onProfileChanged }) {
     if (file.size > 16*1024*1024 || !/\.zip$/i.test(file.name)) { status.textContent = t('Lütfen 16 MB altında bir Letterboxd ZIP dosyası seç.'); return; }
     status.textContent = t('Arşiv yükleniyor…'); $('library-import-file').disabled = true;
     try {
-      await apiJSON('/api/profile/import-letterboxd',{method:'POST',headers:csrfHeaders({'Content-Type':'application/zip'}),body:file});
+      await runLetterboxdImport(file, { onDone: () => { onProfileChanged(); if ($('dialog-library').open && scope === 'imports') load(); } });
       await load();
-    } catch (err) { status.textContent = err.message; $('library-import-file').disabled = false; }
+    } catch (err) { status.textContent = err.message; if ($('library-import-file')) $('library-import-file').disabled = false; }
   }
   content.addEventListener('click', async event => {
     const button = event.target.closest('[data-library-action]'); if (!button) return;

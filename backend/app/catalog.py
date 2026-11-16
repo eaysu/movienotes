@@ -313,6 +313,50 @@ class Catalog:
         self.alias("letterboxd", slug, film["id"])
         return film
 
+    async def candidates(self, film: dict, *, exact_year: bool = True) -> list[dict]:
+        """Possible catalog identities for an imported title and year.
+
+        TMDb is asked directly with the release year, so a crowded local
+        catalog (``Z``, ``Pi``, ``Casablanca``) never hides the real film, and
+        only the single accepted candidate is written to the catalog.
+        """
+        if not self.settings.has_tmdb:
+            return await asyncio.to_thread(self.list, film["title"])
+        enricher = Enricher(self.settings.tmdb_api_key, self.cache)
+        try:
+            data = await enricher._get(
+                await _get_tmdb_client(),
+                "/search/movie",
+                **(
+                    {"primary_release_year": int(film["year"])}
+                    if exact_year
+                    else {}
+                ),
+                query=film["title"],
+                include_adult="false",
+                language="en-US",
+            )
+        except (httpx.HTTPError, ValueError, RuntimeError) as exc:
+            raise RuntimeError(
+                "Film eşleştirme servisi geçici olarak yanıt vermedi."
+            ) from exc
+        rows = []
+        for row in data.get("results") or []:
+            if row.get("adult") or not row.get("id"):
+                continue
+            release = row.get("release_date") or ""
+            rows.append(
+                {
+                    "tmdb_id": int(row["id"]),
+                    "title": row.get("title") or "",
+                    "original_title": row.get("original_title") or "",
+                    "year": int(release[:4]) if release[:4].isdigit() else None,
+                    "vote_count": int(row.get("vote_count") or 0),
+                    "_tmdb": row,
+                }
+            )
+        return rows
+
     async def match(self, film: dict) -> dict | None:
         if film.get("tmdb_id"):
             return film
@@ -320,20 +364,45 @@ class Catalog:
         # Missing dates and remakes remain explicit unresolved matches.
         if not film.get("year"):
             return None
-        films, unavailable = await self.search(film["title"], locale="en")
-        if unavailable:
-            raise RuntimeError("Film eşleştirme servisi geçici olarak yanıt vermedi.")
         names = {normalized_title(film["title"])}
-        matches = [
-            f
-            for f in films
-            if f.get("tmdb_id")
-            and f.get("year") == film["year"]
-            and names.intersection(
-                {
-                    normalized_title(f["title"]),
-                    normalized_title(f.get("original_title") or ""),
-                }
+
+        def pick(candidates, years):
+            matches = [
+                f
+                for f in candidates
+                if f.get("tmdb_id")
+                and f.get("year") in years
+                and names.intersection(
+                    {
+                        normalized_title(f["title"]),
+                        normalized_title(f.get("original_title") or ""),
+                    }
+                )
+            ]
+            if not matches:
+                return None, False
+            # TMDb lists student shorts and home videos under famous titles
+            # ("Arrival", 2016). A film with clearly established votes wins
+            # over such namesakes; genuinely competing remakes stay unresolved.
+            matches.sort(key=lambda f: f.get("vote_count") or 0, reverse=True)
+            if len(matches) > 1:
+                top = matches[0].get("vote_count") or 0
+                runner_up = matches[1].get("vote_count") or 0
+                if top < 50 or top < 10 * max(runner_up, 1):
+                    return None, True
+            return matches[0], True
+
+        year = film["year"]
+        found, seen = pick(await self.candidates(film), {year})
+        if not seen and self.settings.has_tmdb:
+            # Letterboxd and TMDb can date a film by different premieres
+            # (Casablanca 1942/1943, Split 2016/2017): allow one year apart.
+            found, _ = pick(
+                await self.candidates(film, exact_year=False),
+                {year - 1, year, year + 1},
             )
-        ]
-        return matches[0] if len(matches) == 1 else None
+        if not found:
+            return None
+        if "_tmdb" in found:
+            return await asyncio.to_thread(self.from_tmdb, found["_tmdb"])
+        return found

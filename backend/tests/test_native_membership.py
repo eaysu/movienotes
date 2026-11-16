@@ -396,15 +396,12 @@ def test_ambiguous_tmdb_match_never_selects_a_remake_arbitrarily(native):
     film = {"title": "One", "year": 2001}
     with patch.object(
         catalog,
-        "search",
+        "candidates",
         new=AsyncMock(
-            return_value=(
-                [
-                    {"id": "a", "tmdb_id": 1, "title": "One", "year": 2001},
-                    {"id": "b", "tmdb_id": 2, "title": "One", "year": 2001},
-                ],
-                False,
-            )
+            return_value=[
+                {"id": "a", "tmdb_id": 1, "title": "One", "year": 2001},
+                {"id": "b", "tmdb_id": 2, "title": "One", "year": 2001},
+            ]
         ),
     ):
         assert asyncio.run(catalog.match(film)) is None
@@ -464,3 +461,92 @@ def test_distinct_source_films_with_the_same_title_and_year_require_manual_match
     assert job["state"] == "done"
     assert len(library.list(1)) == 2 and len(library.unresolved(1)) == 2
     matcher.assert_not_called()
+
+
+def test_tmdb_is_asked_with_the_year_even_when_the_local_catalog_is_crowded(native):
+    settings, service, _, _ = native
+    catalog = Catalog(service, settings)
+    for i in range(15):
+        catalog.store(dict(catalog_key=f"tmdb:{900 + i}", tmdb_id=900 + i, title=f"Pi {i}", release_year=1990 + i))
+    before = len(service._catalog)
+    settings.tmdb_api_key = "simulation-only"
+    response = {
+        "results": [
+            {"id": 473, "title": "Pi", "original_title": "Pi", "release_date": "1998-07-10"},
+            {"id": 474, "title": "Pi Day", "original_title": "Pi Day", "release_date": "1998-03-14"},
+        ]
+    }
+    with patch("app.catalog._get_tmdb_client", new=AsyncMock()), patch(
+        "app.catalog.Enricher._get", new=AsyncMock(return_value=response)
+    ) as tmdb:
+        film = asyncio.run(catalog.match({"title": "Pi", "year": 1998}))
+    assert film["tmdb_id"] == 473
+    assert tmdb.call_args.kwargs["primary_release_year"] == 1998
+    # Only the accepted candidate enters the shared catalog.
+    assert len(service._catalog) == before + 1
+
+
+def test_provider_outage_leaves_only_that_film_pending_and_progress_lists_recent_films(native):
+    settings, service, films, client = native
+    register(client)
+    settings.tmdb_api_key = "simulation-only"
+    library = Library(service, settings)
+    parsed = parse_letterboxd_export(export_zip(**{
+        "watched.csv": "Date,Name,Year,Letterboxd URI\n2025-01-01,One,2001,https://boxd.it/Ab2\n2025-01-02,Two,2002,https://boxd.it/Ac2\n",
+    }))
+    job = library.prepare_import(service.account, parsed, "outage")
+
+    async def flaky(film):
+        if film["title"] == "Two":
+            raise RuntimeError("TMDb down")
+        return films[0]
+
+    with patch.object(Catalog, "match", new=AsyncMock(side_effect=flaky)):
+        asyncio.run(library.process_import(service.account, job))
+    assert job["state"] == "failed" and job["last_error"] == "ProviderUnavailable"
+    statuses = sorted(r["match_status"] for r in service._import_entries.values())
+    assert statuses == ["matched", "pending"]
+    assert job["counts"]["recent"][0]["title"] == films[0]["title"]
+
+    with patch.object(Catalog, "match", new=AsyncMock(return_value=films[1])):
+        asyncio.run(library.process_import(service.account, job))
+    assert job["state"] == "done" and job["last_error"] == ""
+    assert job["counts"]["processed"] == job["counts"]["records"]
+
+
+def test_a_well_known_film_wins_over_same_title_shorts_but_close_remakes_do_not(native):
+    settings, service, _, _ = native
+    catalog = Catalog(service, settings)
+    settings.tmdb_api_key = "simulation-only"
+
+    def results(*votes):
+        return {"results": [
+            {"id": 100 + i, "title": "Arrival", "release_date": "2016-11-10", "vote_count": v}
+            for i, v in enumerate(votes)
+        ]}
+
+    with patch("app.catalog._get_tmdb_client", new=AsyncMock()), patch(
+        "app.catalog.Enricher._get", new=AsyncMock(return_value=results(3, 19000, 0))
+    ):
+        assert asyncio.run(catalog.match({"title": "Arrival", "year": 2016}))["tmdb_id"] == 101
+    with patch("app.catalog._get_tmdb_client", new=AsyncMock()), patch(
+        "app.catalog.Enricher._get", new=AsyncMock(return_value=results(900, 400))
+    ):
+        assert asyncio.run(catalog.match({"title": "Arrival", "year": 2016})) is None
+
+
+def test_a_one_year_premiere_difference_is_matched_only_after_the_exact_year_finds_nothing(native):
+    settings, service, _, _ = native
+    catalog = Catalog(service, settings)
+    settings.tmdb_api_key = "simulation-only"
+    exact = {"results": []}
+    loose = {"results": [
+        {"id": 289, "title": "Casablanca", "release_date": "1943-01-15", "vote_count": 5600},
+        {"id": 900, "title": "Casablanca", "release_date": "1955-09-27", "vote_count": 4},
+    ]}
+    with patch("app.catalog._get_tmdb_client", new=AsyncMock()), patch(
+        "app.catalog.Enricher._get", new=AsyncMock(side_effect=[exact, loose])
+    ) as tmdb:
+        film = asyncio.run(catalog.match({"title": "Casablanca", "year": 1942}))
+    assert film["tmdb_id"] == 289
+    assert "primary_release_year" not in tmdb.call_args_list[1].kwargs

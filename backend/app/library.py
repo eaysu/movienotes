@@ -7,6 +7,8 @@ import hashlib
 from datetime import datetime, timedelta, timezone
 from uuid import NAMESPACE_URL, uuid5
 
+import httpx
+
 from .catalog import Catalog, public_film
 from .enrich import EnrichedFilm
 from .taste_profile import build_taste_profile, personality_from_favorites
@@ -14,6 +16,11 @@ from .scraper import ScrapedProfile
 from .llm import analyze_taste
 
 _import_tasks: dict[str, asyncio.Task] = {}
+# Distinct films matched at once. Each one is a handful of Supabase round trips
+# and two TMDb requests; TMDb's own semaphore still bounds the provider load.
+IMPORT_CONCURRENCY = 6
+IMPORT_CHUNK = 60
+RECENT_FILMS = 12
 
 
 def enriched(film: dict, rating=None) -> EnrichedFilm:
@@ -481,25 +488,31 @@ class Library:
                 "id", job_id
             ).execute()
 
-    def pending(self, job_id):
+    def pending(self, job_id, after=""):
+        """Next pending rows after ``after``; keyset paging lets one run skip
+        rows whose provider lookup failed, leaving them for the retry."""
         if self.memory:
-            return [
-                r
-                for r in self.service._import_entries.values()
-                if r["import_id"] == job_id and r["match_status"] == "pending"
-            ][:50]
-        return (
+            rows = sorted(
+                (
+                    r
+                    for r in self.service._import_entries.values()
+                    if r["import_id"] == job_id
+                    and r["match_status"] == "pending"
+                    and r["source_key"] > after
+                ),
+                key=lambda r: r["source_key"],
+            )
+            return rows[:IMPORT_CHUNK]
+        query = (
             self.service._service_client()
             .table("imported_film_entries")
             .select("*")
             .eq("import_id", job_id)
             .eq("match_status", "pending")
-            .order("source_key")
-            .limit(50)
-            .execute()
-            .data
-            or []
         )
+        if after:
+            query = query.gt("source_key", after)
+        return query.order("source_key").limit(IMPORT_CHUNK).execute().data or []
 
     def patch_entry(self, row, **values):
         if self.memory:
@@ -512,6 +525,19 @@ class Library:
             ).eq("user_id", row["user_id"]).eq(
                 "source_key", row["source_key"]
             ).execute()
+
+    def patch_entries(self, results):
+        """Write a chunk's match results in one request."""
+        if not results:
+            return
+        if self.memory:
+            for row, values in results:
+                self.patch_entry(row, **values)
+            return
+        self.service._service_client().table("imported_film_entries").upsert(
+            [{**row, **values} for row, values in results],
+            on_conflict="user_id,source_key",
+        ).execute()
 
     def archive_rows(self, user_id):
         if self.memory:
@@ -589,12 +615,22 @@ class Library:
                 .data
                 or []
             )
-        unique = {
-            r["film_id"]: self.catalog.get(r["film_id"])
-            for r in rows
-            if r.get("film_id")
-        }
-        return [f for f in unique.values() if f]
+        ids = list(dict.fromkeys(r["film_id"] for r in rows if r.get("film_id")))
+        if self.memory:
+            return [f for f in (self.catalog.get(i) for i in ids) if f]
+        # One request instead of one per film: this list is polled while an
+        # import runs.
+        films = (
+            self.service._service_client()
+            .table("films")
+            .select("*")
+            .in_("id", ids)
+            .execute()
+            .data
+            or []
+        ) if ids else []
+        by_id = {str(f["id"]): public_film(f) for f in films}
+        return [by_id[str(i)] for i in ids if str(i) in by_id]
 
     def merge(self, user_id, source, target):
         if not any(f["id"] == source for f in self.unresolved(user_id)):
@@ -657,6 +693,83 @@ class Library:
             if current:
                 self.mirror(user_id, target, current[0])
 
+    @staticmethod
+    def _match_key(row):
+        data = row["data"]
+        confirmed = data.get("_confirmed_film_id")
+        if confirmed:
+            return "confirmed:" + str(confirmed)
+        return data.get("slug") or data.get("source_uri") or row["source_key"]
+
+    async def _resolve(self, account, data, matched_cache, recent):
+        confirmed = data.get("_confirmed_film_id")
+        if confirmed:
+            film = await asyncio.to_thread(self.catalog.get, confirmed)
+            if film:
+                return film
+        film = await asyncio.to_thread(self.catalog.import_placeholder, data)
+        if film.get("tmdb_id") and not film.get("details_loaded"):
+            film = await self.catalog.details(film["id"])
+        elif (
+            not film.get("tmdb_id")
+            and self.settings.has_tmdb
+            and not data.get("identity_ambiguous")
+        ):
+            target = await self.catalog.match(film)
+            if target:
+                original = film
+                film = await self.catalog.details(target["id"])
+                # An earlier export may already have used the unresolved
+                # identity. Consolidate its notes and native edits before
+                # applying the new records.
+                await asyncio.to_thread(
+                    self._move_identity, account.id, original["id"], film
+                )
+                if data.get("slug"):
+                    await asyncio.to_thread(
+                        self.catalog.alias, "letterboxd", data["slug"], film["id"]
+                    )
+        if film.get("tmdb_id"):
+            recent.append(
+                {
+                    "title": film["title"],
+                    "year": film.get("year"),
+                    "poster_url": film.get("poster_url") or "",
+                    "director": film.get("director") or "",
+                }
+            )
+            del recent[:-RECENT_FILMS]
+        return film
+
+    async def _apply(self, account, rows, film):
+        results = []
+        for row in rows:
+            data = row["data"]
+            if row["kind"] in ("watched", "watchlist"):
+                await asyncio.to_thread(
+                    self.update,
+                    account.id,
+                    film,
+                    watched=row["kind"] == "watched",
+                    watchlist=row["kind"] == "watchlist",
+                    rating=data.get("user_rating"),
+                    native=False,
+                )
+            results.append(
+                (
+                    row,
+                    dict(
+                        film_id=film["id"],
+                        match_status=(
+                            "confirmed"
+                            if data.get("_confirmed_film_id")
+                            else ("matched" if film.get("tmdb_id") else "unresolved")
+                        ),
+                    ),
+                )
+            )
+        return results
+
     async def process_import(self, account, job):
         if self.memory:
             if job.get("state") == "running":
@@ -671,86 +784,73 @@ class Library:
             if not claimed:
                 return
         await asyncio.to_thread(self.patch_job, job["id"], state="running")
+        job["state"] = "running"
         counts = dict(job.get("counts") or {})
-        matched_cache = {}
+        recent = list(counts.get("recent") or [])
+        matched_cache: dict[str, dict] = {}
+        retry = False
+        cursor = ""
+        lease = lambda minutes=5: (  # noqa: E731
+            datetime.now(timezone.utc) + timedelta(minutes=minutes)
+        ).isoformat()
         try:
             while True:
-                rows = await asyncio.to_thread(self.pending, job["id"])
+                rows = await asyncio.to_thread(self.pending, job["id"], cursor)
                 if not rows:
                     break
+                cursor = rows[-1]["source_key"]
+                groups: dict[str, list[dict]] = {}
                 for row in rows:
-                    data = row["data"]
-                    key = (
-                        data.get("slug") or data.get("source_uri") or row["source_key"]
-                    )
-                    confirmed = data.get("_confirmed_film_id")
-                    film = (
-                        await asyncio.to_thread(self.catalog.get, confirmed)
-                        if confirmed
-                        else matched_cache.get(key)
-                    )
-                    if not film:
-                        film = await asyncio.to_thread(
-                            self.catalog.import_placeholder, data
-                        )
-                        if self.settings.has_tmdb and not data.get("identity_ambiguous"):
-                            target = await self.catalog.match(film)
-                            if target:
-                                original = film
-                                film = await self.catalog.details(target["id"])
-                                # An earlier export may already have used the
-                                # unresolved identity. Consolidate its notes and
-                                # native edits before applying the new records.
-                                await asyncio.to_thread(self._move_identity, account.id, original["id"], film)
-                                if data.get("slug"):
-                                    await asyncio.to_thread(
-                                        self.catalog.alias,
-                                        "letterboxd",
-                                        data["slug"],
-                                        film["id"],
-                                    )
-                            await asyncio.sleep(0.3)
-                        matched_cache[key] = film
-                    if row["kind"] in ("watched", "watchlist"):
-                        await asyncio.to_thread(
-                            self.update,
-                            account.id,
-                            film,
-                            watched=row["kind"] == "watched",
-                            watchlist=row["kind"] == "watchlist",
-                            rating=data.get("user_rating"),
-                            native=False,
-                        )
-                    await asyncio.to_thread(
-                        self.patch_entry,
-                        row,
-                        film_id=film["id"],
-                        match_status=(
-                            "confirmed"
-                            if confirmed
-                            else ("matched" if film.get("tmdb_id") else "unresolved")
-                        ),
-                    )
-                    # Renew the lease while a large archive is being matched.
-                    # Slow provider requests must not let another worker take over.
-                    await asyncio.to_thread(
-                        self.patch_job,
-                        job["id"],
-                        lease_until=(
-                            datetime.now(timezone.utc) + timedelta(minutes=5)
-                        ).isoformat(),
-                    )
+                    groups.setdefault(self._match_key(row), []).append(row)
+                gate = asyncio.Semaphore(IMPORT_CONCURRENCY)
+
+                async def handle(key, group):
+                    nonlocal retry
+                    async with gate:
+                        film = matched_cache.get(key)
+                        if film is None:
+                            try:
+                                film = await self._resolve(
+                                    account, group[0]["data"], matched_cache, recent
+                                )
+                            except (RuntimeError, httpx.HTTPError):
+                                # Leave only this film pending; the rest of the
+                                # archive keeps moving and the job retries it.
+                                retry = True
+                                return []
+                            matched_cache[key] = film
+                        return await self._apply(account, group, film)
+
+                chunks = await asyncio.gather(
+                    *(handle(key, group) for key, group in groups.items())
+                )
+                await asyncio.to_thread(
+                    self.patch_entries, [r for chunk in chunks for r in chunk]
+                )
                 counts.update(await asyncio.to_thread(self.progress, job["id"]))
+                counts["recent"] = list(recent)
+                await asyncio.to_thread(
+                    self.patch_job, job["id"], counts=counts, lease_until=lease()
+                )
+            if retry:
+                job["state"] = "failed"
                 await asyncio.to_thread(
                     self.patch_job,
                     job["id"],
+                    state="failed",
                     counts=counts,
-                    lease_until=(
-                        datetime.now(timezone.utc) + timedelta(minutes=5)
-                    ).isoformat(),
+                    last_error="ProviderUnavailable",
+                    lease_until=lease(1),
                 )
+                return
+            job["state"] = "done"
             await asyncio.to_thread(
-                self.patch_job, job["id"], state="done", counts=counts, lease_until=None
+                self.patch_job,
+                job["id"],
+                state="done",
+                counts=counts,
+                last_error="",
+                lease_until=None,
             )
             await self.rebuild(account)
         except asyncio.CancelledError:
@@ -763,15 +863,14 @@ class Library:
             )
             raise
         except Exception as exc:
+            job["state"] = "failed"
             await asyncio.to_thread(
                 self.patch_job,
                 job["id"],
                 state="failed",
                 counts=counts,
                 last_error=type(exc).__name__,
-                lease_until=(
-                    datetime.now(timezone.utc) + timedelta(minutes=5)
-                ).isoformat(),
+                lease_until=lease(),
             )
 
     def start_import(self, account, job):

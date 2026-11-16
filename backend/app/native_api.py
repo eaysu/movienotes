@@ -213,11 +213,14 @@ async def archive(request: Request, page: int = 1):
 
 
 @router.get("/api/library/imports")
-async def imports(request: Request):
+async def imports(request: Request, progress: bool = False):
     main, service, settings = context()
     account = await main._require_account(request)
     library = Library(service, settings)
     jobs = await asyncio.to_thread(library.imports, account.id)
+    if progress:
+        # The progress screen polls often and needs only the job rows.
+        return {"imports": jobs}
     unresolved = await asyncio.to_thread(library.unresolved, account.id)
     return {"imports": jobs, "unresolved": unresolved}
 
